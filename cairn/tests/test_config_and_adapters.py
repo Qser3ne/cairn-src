@@ -34,6 +34,16 @@ def test_dispatch_config_defaults_worker_healthcheck_and_rejects_unknown_mode() 
         DispatchConfig.model_validate(payload)
 
 
+def test_dispatch_config_defaults_container_init_and_allows_disable() -> None:
+    payload = make_config().model_dump()
+    payload["container"].pop("init", None)
+
+    assert DispatchConfig.model_validate(payload).container.init is True
+
+    payload["container"]["init"] = False
+    assert DispatchConfig.model_validate(payload).container.init is False
+
+
 def test_dispatch_config_rejects_duplicate_workers_and_excess_project_parallelism() -> None:
     payload = make_config().model_dump()
     payload["workers"].append(dict(payload["workers"][0]))

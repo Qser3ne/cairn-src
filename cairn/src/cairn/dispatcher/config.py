@@ -152,6 +152,7 @@ class ContainerConfig(BaseModel):
     image: str
     network_mode: str
     completed_action: CompletedAction
+    init: bool = True
     cap_add: list[str] = Field(default_factory=list)
 
 

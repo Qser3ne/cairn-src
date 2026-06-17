@@ -44,6 +44,9 @@ container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.
   image: "ghcr.io/oritera/cairn-worker-container:latest"
   network_mode: "host"
+  # Enable Docker's init reaper in dynamically-created worker containers.
+  # This prevents orphaned Playwright/Chrome children from accumulating as zombie processes.
+  init: true
   # "stop" keeps finished containers for inspection; "remove" is cleaner but loses post-run state.
   completed_action: "stop"
   # Add Linux capabilities only when a task truly needs them, such as packet crafting or network admin actions.

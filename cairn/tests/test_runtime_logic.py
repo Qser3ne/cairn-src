@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import threading
 
 from cairn.dispatcher.config import ContainerConfig
 from cairn.dispatcher.protocol.client import ApiResult
@@ -37,13 +38,30 @@ class FakeContainer:
         return self.archive_result
 
 
-def _manager(*, completed_action: str = "stop") -> ContainerManager:
+class FakeDockerContainers:
+    def __init__(self) -> None:
+        self.runs: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def run(self, *args, **kwargs) -> FakeContainer:
+        self.runs.append((args, kwargs))
+        return FakeContainer()
+
+
+class FakeDockerClient:
+    def __init__(self) -> None:
+        self.containers = FakeDockerContainers()
+
+
+def _manager(*, completed_action: str = "stop", init: bool = True) -> ContainerManager:
     manager = ContainerManager.__new__(ContainerManager)
     manager._config = ContainerConfig(
         image="image",
         network_mode="host",
         completed_action=completed_action,
+        init=init,
     )
+    manager._ensure_running_locks = {}
+    manager._ensure_running_locks_guard = threading.Lock()
     return manager
 
 
@@ -80,6 +98,45 @@ def test_container_manager_build_exec_process_wraps_command_with_timeout() -> No
 
     assert process.command == ["timeout", "-k", "5s", "300s", "agent", "-p", "prompt"]
     assert process.env == {"A": "B"}
+
+
+def test_project_container_creation_enables_docker_init() -> None:
+    manager = _manager()
+    client = FakeDockerClient()
+    manager._client = client
+    manager.inspect_state = lambda _name: None
+
+    assert manager.ensure_running("proj_001") == "cairn-dispatch-proj_001"
+
+    args, kwargs = client.containers.runs[0]
+    assert args == ("image", ["sleep", "infinity"])
+    assert kwargs["init"] is True
+    assert kwargs["name"] == "cairn-dispatch-proj_001"
+
+
+def test_project_container_creation_can_disable_docker_init() -> None:
+    manager = _manager(init=False)
+    client = FakeDockerClient()
+    manager._client = client
+    manager.inspect_state = lambda _name: None
+
+    manager.ensure_running("proj_001")
+
+    assert client.containers.runs[0][1]["init"] is False
+
+
+def test_startup_container_creation_enables_docker_init() -> None:
+    manager = _manager()
+    client = FakeDockerClient()
+    manager._client = client
+
+    name = manager.create_startup_container()
+
+    args, kwargs = client.containers.runs[0]
+    assert args == ("image", ["sleep", "infinity"])
+    assert kwargs["init"] is True
+    assert kwargs["name"] == name
+    assert name.startswith("cairn-startup-healthcheck-")
 
 
 def test_completed_container_stop_action_only_stops_running_container() -> None:

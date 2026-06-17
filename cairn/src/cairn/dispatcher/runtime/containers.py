@@ -56,6 +56,7 @@ class ContainerManager:
                 detach=True,
                 name=name,
                 network_mode=self._config.network_mode,
+                init=self._config.init,
                 cap_add=self._config.cap_add or None,
             )
             LOG.info("created container project=%s container=%s", project_id, name)
@@ -91,6 +92,7 @@ class ContainerManager:
                 detach=True,
                 name=name,
                 network_mode=self._config.network_mode,
+                init=self._config.init,
                 cap_add=self._config.cap_add or None,
             )
         except DockerException as exc:
