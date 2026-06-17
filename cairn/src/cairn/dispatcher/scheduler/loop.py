@@ -599,6 +599,8 @@ class DispatcherLoop:
         return all(self._is_bootstrap_intent(intent) for intent in project.intents)
 
     def _project_requires_bootstrap(self, project: ProjectDetail) -> bool:
+        if project.project.mode == "src":
+            return False
         if not project.project.bootstrap_enabled:
             return False
         if self._get_bootstrap_intent(project) is not None:

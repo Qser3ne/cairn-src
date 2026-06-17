@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from cairn.server.models import Intent, ProjectMeta, ProjectReason
+from cairn.server.models import Finding, Intent, ProjectMeta, ProjectReason
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -46,6 +46,10 @@ def next_intent_id(conn: sqlite3.Connection, project_id: str) -> str:
 
 def next_hint_id(conn: sqlite3.Connection, project_id: str) -> str:
     return _next_scoped_id(conn, "hint", "h", project_id)
+
+
+def next_finding_id(conn: sqlite3.Connection, project_id: str) -> str:
+    return _next_scoped_id(conn, "finding", "v", project_id)
 
 
 def get_project_or_404(conn: sqlite3.Connection, project_id: str) -> sqlite3.Row:
@@ -95,6 +99,33 @@ def validate_goal_not_in_sources(fact_ids: list[str]) -> None:
 def validate_intent_creator_worker(creator: str, worker: str | None) -> None:
     if worker is not None and worker != creator:
         raise HTTPException(400, "worker must be null or equal to creator")
+
+
+def normalize_intent_description(description: str) -> str:
+    return " ".join(description.strip().casefold().split())
+
+
+def check_duplicate_intent(
+    conn: sqlite3.Connection,
+    project_id: str,
+    fact_ids: list[str],
+    description: str,
+) -> None:
+    normalized_sources = sorted(fact_ids)
+    normalized_description = normalize_intent_description(description)
+    rows = conn.execute(
+        "SELECT id, description FROM intents WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
+    for row in rows:
+        if normalize_intent_description(row["description"]) != normalized_description:
+            continue
+        sources = conn.execute(
+            "SELECT fact_id FROM intent_sources WHERE intent_id = ? AND project_id = ?",
+            (row["id"], project_id),
+        ).fetchall()
+        if sorted(source["fact_id"] for source in sources) == normalized_sources:
+            raise HTTPException(409, "Duplicate intent")
 
 
 def get_intent_or_404(
@@ -173,6 +204,33 @@ def build_intents(conn: sqlite3.Connection, project_id: str) -> list[Intent]:
     return [intent_to_model(conn, r, project_id) for r in rows]
 
 
+def finding_to_model(row: sqlite3.Row) -> Finding:
+    return Finding(
+        id=row["id"],
+        title=row["title"],
+        vulnerability_type=row["vulnerability_type"],
+        severity=row["severity"],
+        target=row["target"],
+        location=row["location"],
+        impact=row["impact"],
+        evidence=row["evidence"],
+        reproduction=row["reproduction"],
+        remediation=row["remediation"],
+        status=row["status"],
+        fact_id=row["fact_id"],
+        intent_id=row["intent_id"],
+        created_at=row["created_at"],
+    )
+
+
+def build_findings(conn: sqlite3.Connection, project_id: str) -> list[Finding]:
+    rows = conn.execute(
+        "SELECT * FROM findings WHERE project_id = ? ORDER BY created_at, id",
+        (project_id,),
+    ).fetchall()
+    return [finding_to_model(row) for row in rows]
+
+
 def get_intent_timeout(conn: sqlite3.Connection) -> int:
     row = conn.execute("SELECT intent_timeout FROM settings WHERE rowid = 1").fetchone()
     return row["intent_timeout"]
@@ -199,6 +257,7 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
         id=row["id"],
         title=row["title"],
         status=row["status"],
+        mode=row["mode"],
         bootstrap_enabled=bool(row["bootstrap_enabled"]),
         created_at=row["created_at"],
         reason=project_reason_from_row(row),

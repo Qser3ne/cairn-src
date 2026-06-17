@@ -5,8 +5,12 @@ from importlib import resources
 from typing import Any
 
 
-def load_prompt(group: str, name: str) -> str:
-    return resources.files("cairn.dispatcher.prompts").joinpath(group).joinpath(name).read_text(encoding="utf-8")
+def load_prompt(group: str, name: str, mode: str = "standard") -> str:
+    group_dir = resources.files("cairn.dispatcher.prompts").joinpath(group)
+    mode_path = group_dir.joinpath(mode).joinpath(name)
+    if mode_path.is_file():
+        return mode_path.read_text(encoding="utf-8")
+    return group_dir.joinpath(name).read_text(encoding="utf-8")
 
 
 def render_prompt(template: str, replacements: dict[str, str]) -> str:

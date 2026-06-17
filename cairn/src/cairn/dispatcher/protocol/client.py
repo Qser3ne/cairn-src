@@ -107,11 +107,21 @@ class CairnClient:
             json={"worker": worker},
         )
 
-    def conclude(self, project_id: str, intent_id: str, worker: str, description: str) -> ApiResult:
+    def conclude(
+        self,
+        project_id: str,
+        intent_id: str,
+        worker: str,
+        description: str,
+        findings: list[dict[str, Any]] | None = None,
+    ) -> ApiResult:
+        body: dict[str, Any] = {"worker": worker, "description": description}
+        if findings:
+            body["findings"] = findings
         return self._request_json(
             "POST",
             f"/projects/{project_id}/intents/{intent_id}/conclude",
-            json={"worker": worker, "description": description},
+            json=body,
         )
 
     def complete(self, project_id: str, from_ids: list[str], description: str, worker: str) -> ApiResult:

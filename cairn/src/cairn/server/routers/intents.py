@@ -10,11 +10,14 @@ from cairn.server.models import (
     Intent,
 )
 from cairn.server.services import (
+    check_duplicate_intent,
     check_project_active,
+    finding_to_model,
     get_claimable_open_intent_or_404,
     get_releasable_open_intent_or_404,
     intent_to_model,
     next_fact_id,
+    next_finding_id,
     next_intent_id,
     utcnow,
     validate_facts_exist,
@@ -36,6 +39,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
         validate_facts_exist(conn, project_id, body.from_)
         validate_goal_not_in_sources(body.from_)
         validate_intent_creator_worker(body.creator, body.worker)
+        check_duplicate_intent(conn, project_id, body.from_, body.description)
 
         now = utcnow()
         iid = next_intent_id(conn, project_id)
@@ -135,6 +139,52 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
             "UPDATE intents SET to_fact_id = ?, worker = ?, last_heartbeat_at = ?, concluded_at = ? WHERE id = ? AND project_id = ?",
             (fid, body.worker, now, now, intent_id, project_id),
         )
+        findings = []
+        for finding in body.findings or []:
+            finding_id = next_finding_id(conn, project_id)
+            conn.execute(
+                """
+                INSERT INTO findings (
+                    id,
+                    project_id,
+                    fact_id,
+                    intent_id,
+                    title,
+                    vulnerability_type,
+                    severity,
+                    target,
+                    location,
+                    impact,
+                    evidence,
+                    reproduction,
+                    remediation,
+                    status,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    finding_id,
+                    project_id,
+                    fid,
+                    intent_id,
+                    finding.title,
+                    finding.vulnerability_type,
+                    finding.severity,
+                    finding.target,
+                    finding.location,
+                    finding.impact,
+                    finding.evidence,
+                    finding.reproduction,
+                    finding.remediation,
+                    finding.status,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM findings WHERE id = ? AND project_id = ?",
+                (finding_id, project_id),
+            ).fetchone()
+            findings.append(finding_to_model(row))
 
         updated = conn.execute(
             "SELECT * FROM intents WHERE id = ? AND project_id = ?",
@@ -144,4 +194,5 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
         return ConcludeResponse(
             fact=Fact(id=fid, description=body.description),
             intent=intent_to_model(conn, updated, project_id),
+            findings=findings,
         )

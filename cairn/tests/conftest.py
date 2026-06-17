@@ -49,6 +49,7 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
             id="proj_001",
             title="test",
             status="active",
+            mode="standard",
             bootstrap_enabled=True,
             created_at="2026-01-01T00:00:00Z",
         ),
@@ -66,6 +67,7 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
                 created_at="2026-01-01T00:00:01Z",
             )
         ],
+        findings=[],
     )
 
 
@@ -119,9 +121,19 @@ class FakeClient:
     def get_project(self, _project_id: str) -> ProjectDetail:
         return self.project
 
-    def conclude(self, project_id: str, intent_id: str, worker: str, description: str) -> ApiResult:
+    def conclude(
+        self,
+        project_id: str,
+        intent_id: str,
+        worker: str,
+        description: str,
+        findings: list[dict] | None = None,
+    ) -> ApiResult:
         self.concluded.append((project_id, intent_id, worker, description))
-        return ApiResult(200, {"fact": {"id": "f002"}})
+        data = {"fact": {"id": "f002"}}
+        if findings:
+            data["findings"] = findings
+        return ApiResult(200, data)
 
     def complete(self, project_id: str, from_ids: list[str], description: str, worker: str) -> ApiResult:
         self.completed.append((project_id, from_ids, description, worker))

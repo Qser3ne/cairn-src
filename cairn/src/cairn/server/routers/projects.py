@@ -18,6 +18,7 @@ from cairn.server.models import (
     UpdateProjectStatusRequest,
 )
 from cairn.server.services import (
+    build_findings,
     build_intents,
     check_project_completed,
     check_project_active,
@@ -52,7 +53,8 @@ def list_projects():
                 (SELECT COUNT(*) FROM intents WHERE project_id = p.id) AS intent_count,
                 (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NOT NULL) AS working_intent_count,
                 (SELECT COUNT(*) FROM intents WHERE project_id = p.id AND concluded_at IS NULL AND worker IS NULL) AS unclaimed_intent_count,
-                (SELECT COUNT(*) FROM hints WHERE project_id = p.id) AS hint_count
+                (SELECT COUNT(*) FROM hints WHERE project_id = p.id) AS hint_count,
+                (SELECT COUNT(*) FROM findings WHERE project_id = p.id) AS finding_count
             FROM projects p
             ORDER BY p.created_at
         """).fetchall()
@@ -61,6 +63,7 @@ def list_projects():
                 id=row["id"],
                 title=row["title"],
                 status=row["status"],
+                mode=row["mode"],
                 bootstrap_enabled=bool(row["bootstrap_enabled"]),
                 created_at=row["created_at"],
                 reason=project_reason_from_row(row),
@@ -69,6 +72,7 @@ def list_projects():
                 working_intent_count=row["working_intent_count"],
                 unclaimed_intent_count=row["unclaimed_intent_count"],
                 hint_count=row["hint_count"],
+                finding_count=row["finding_count"],
             )
             for row in rows
         ]
@@ -79,10 +83,15 @@ def create_project(body: CreateProjectRequest):
     with get_conn() as conn:
         pid = next_project_id(conn)
         now = utcnow()
+        bootstrap_enabled = (
+            body.mode == "standard"
+            if body.bootstrap_enabled is None
+            else body.bootstrap_enabled
+        )
 
         conn.execute(
-            "INSERT INTO projects (id, title, status, bootstrap_enabled, created_at) VALUES (?, ?, 'active', ?, ?)",
-            (pid, body.title, body.bootstrap_enabled, now),
+            "INSERT INTO projects (id, title, status, mode, bootstrap_enabled, created_at) VALUES (?, ?, 'active', ?, ?, ?)",
+            (pid, body.title, body.mode, bootstrap_enabled, now),
         )
         conn.execute(
             "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
@@ -108,7 +117,8 @@ def create_project(body: CreateProjectRequest):
                 id=pid,
                 title=body.title,
                 status="active",
-                bootstrap_enabled=body.bootstrap_enabled,
+                mode=body.mode,
+                bootstrap_enabled=bootstrap_enabled,
                 created_at=now,
                 reason=None,
             ),
@@ -118,6 +128,7 @@ def create_project(body: CreateProjectRequest):
             ],
             intents=[],
             hints=hints,
+            findings=[],
         )
 
 
@@ -141,6 +152,7 @@ def get_project(project_id: str):
             facts=[Fact(**dict(f)) for f in facts],
             intents=build_intents(conn, project_id),
             hints=[Hint(**dict(h)) for h in hints],
+            findings=build_findings(conn, project_id),
         )
 
 

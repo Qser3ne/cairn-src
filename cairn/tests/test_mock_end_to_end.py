@@ -64,10 +64,20 @@ class InProcessClient:
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
         return self._post(f"/projects/{project_id}/intents/{intent_id}/release", {"worker": worker})
 
-    def conclude(self, project_id: str, intent_id: str, worker: str, description: str) -> ApiResult:
+    def conclude(
+        self,
+        project_id: str,
+        intent_id: str,
+        worker: str,
+        description: str,
+        findings: list[dict] | None = None,
+    ) -> ApiResult:
+        body = {"worker": worker, "description": description}
+        if findings:
+            body["findings"] = findings
         return self._post(
             f"/projects/{project_id}/intents/{intent_id}/conclude",
-            {"worker": worker, "description": description},
+            body,
         )
 
     def complete(self, project_id: str, from_ids: list[str], description: str, worker: str) -> ApiResult:

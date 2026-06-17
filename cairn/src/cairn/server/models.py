@@ -5,6 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+ProjectMode = Literal["standard", "src"]
+
+
 class Settings(BaseModel):
     intent_timeout: int = Field(ge=5)
     reason_timeout: int = Field(ge=5)
@@ -13,6 +16,53 @@ class Settings(BaseModel):
 class Fact(BaseModel):
     id: str
     description: str
+
+
+class Finding(BaseModel):
+    id: str
+    title: str
+    vulnerability_type: str
+    severity: str
+    target: str
+    location: str
+    impact: str
+    evidence: str
+    reproduction: str
+    remediation: str
+    status: str
+    fact_id: str
+    intent_id: str
+    created_at: str
+
+
+class FindingCreate(BaseModel):
+    title: str
+    vulnerability_type: str = "unknown"
+    severity: str = "unknown"
+    target: str = ""
+    location: str = ""
+    impact: str = ""
+    evidence: str = ""
+    reproduction: str = ""
+    remediation: str = ""
+    status: str = "open"
+
+    @field_validator(
+        "title",
+        "vulnerability_type",
+        "severity",
+        "target",
+        "location",
+        "impact",
+        "evidence",
+        "reproduction",
+        "remediation",
+        "status",
+    )
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        text = value.strip()
+        return text
 
 
 class Intent(BaseModel):
@@ -47,6 +97,7 @@ class ProjectMeta(BaseModel):
     id: str
     title: str
     status: Literal["active", "stopped", "completed"]
+    mode: ProjectMode = "standard"
     bootstrap_enabled: bool
     created_at: str
     reason: ProjectReason | None = None
@@ -58,6 +109,7 @@ class ProjectSummary(ProjectMeta):
     working_intent_count: int
     unclaimed_intent_count: int
     hint_count: int
+    finding_count: int
 
 
 class ProjectDetail(BaseModel):
@@ -65,6 +117,7 @@ class ProjectDetail(BaseModel):
     facts: list[Fact]
     intents: list[Intent]
     hints: list[Hint]
+    findings: list[Finding] = Field(default_factory=list)
 
 
 class CreateHintInline(BaseModel):
@@ -84,7 +137,8 @@ class CreateProjectRequest(BaseModel):
     title: str
     origin: str
     goal: str
-    bootstrap_enabled: bool = True
+    mode: ProjectMode = "standard"
+    bootstrap_enabled: bool | None = None
     hints: list[CreateHintInline] | None = None
 
     @field_validator("title", "origin", "goal")
@@ -167,6 +221,7 @@ class ReasonClaimRequest(BaseModel):
 class ConcludeRequest(BaseModel):
     worker: str
     description: str
+    findings: list[FindingCreate] | None = None
 
     @field_validator("worker", "description")
     @classmethod
@@ -207,6 +262,7 @@ class CompleteRequest(BaseModel):
 class ConcludeResponse(BaseModel):
     fact: Fact
     intent: Intent
+    findings: list[Finding] = Field(default_factory=list)
 
 
 class UpdateProjectStatusRequest(BaseModel):

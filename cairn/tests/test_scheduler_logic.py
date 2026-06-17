@@ -30,6 +30,7 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         id=project_id,
         title=project_id,
         status=status,
+        mode="standard",
         bootstrap_enabled=True,
         created_at="2026-01-01T00:00:00Z",
         fact_count=2,
@@ -37,6 +38,7 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         working_intent_count=0,
         unclaimed_intent_count=0,
         hint_count=0,
+        finding_count=0,
     )
 
 
@@ -187,6 +189,31 @@ def test_initial_disabled_project_skips_configured_bootstrap_worker() -> None:
     loop.futures = {}
     project = make_project()
     project.project.bootstrap_enabled = False
+    project.facts = project.facts[:2]
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_initial_project = lambda _project: dispatched.append(("bootstrap", "")) or True
+    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+    assert dispatched == [("reason", "initial")]
+
+
+def test_src_initial_project_skips_bootstrap_and_dispatches_reason() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    loop.futures = {}
+    project = make_project()
+    project.project.mode = "src"
+    project.project.bootstrap_enabled = True
     project.facts = project.facts[:2]
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
     loop.client = type(

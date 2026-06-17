@@ -274,9 +274,18 @@ def validate_prompt_resources(prompt_group: str) -> None:
     if not group_dir.is_dir():
         raise ValueError(f"missing prompt group: {prompt_group}")
     required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get(prompt_group, DEFAULT_PROMPT_REQUIRED_TOKENS)
+    prompt_dirs = [group_dir.joinpath("standard"), group_dir.joinpath("src")]
+    if not all(path.is_dir() for path in prompt_dirs):
+        prompt_dirs = [group_dir]
+    for prompt_dir in prompt_dirs:
+        label = f"{prompt_group}/{prompt_dir.name}" if prompt_dir != group_dir else prompt_group
+        _validate_prompt_dir(prompt_dir, label, required_tokens)
+
+
+def _validate_prompt_dir(prompt_dir, prompt_group: str, required_tokens: dict[str, tuple[str, ...]]) -> None:
     for name, tokens in required_tokens.items():
         try:
-            content = group_dir.joinpath(name).read_text(encoding="utf-8")
+            content = prompt_dir.joinpath(name).read_text(encoding="utf-8")
         except FileNotFoundError as exc:
             raise ValueError(f"prompt group {prompt_group} missing resource: {name}") from exc
         missing = [token for token in tokens if token not in content]

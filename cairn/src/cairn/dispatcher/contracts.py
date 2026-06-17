@@ -56,7 +56,7 @@ def _looks_like_bootstrap_conclude_data(payload: dict[str, Any]) -> bool:
 
 
 def _looks_like_explore_data(payload: dict[str, Any]) -> bool:
-    return isinstance(payload, dict) and set(payload) == {"description"}
+    return isinstance(payload, dict) and "description" in payload and set(payload) <= {"description", "findings"}
 
 
 def validate_reason_payload(
@@ -167,4 +167,14 @@ def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
     description = data.get("description")
     if not isinstance(description, str) or not description.strip():
         raise ValueError("description is required")
+    findings = data.get("findings")
+    if findings is not None:
+        if not isinstance(findings, list):
+            raise ValueError("findings must be an array")
+        for index, finding in enumerate(findings):
+            if not isinstance(finding, dict):
+                raise ValueError(f"invalid finding at index {index}")
+            title = finding.get("title")
+            if not isinstance(title, str) or not title.strip():
+                raise ValueError(f"finding title is required at index {index}")
     return "fact", description.strip()

@@ -243,7 +243,7 @@ Body：
 
 #### POST /projects
 
-创建新项目。`origin` 和 `goal` 写入 `facts` 作为特殊 Fact。`hints` 可选。`bootstrap_enabled` 可选，默认为 `true`；为 `false` 时消费者跳过 bootstrap。即使为 `true`，消费者没有 bootstrap 能力时也可直接进入 reason。
+创建新项目。`origin` 和 `goal` 写入 `facts` 作为特殊 Fact。`hints` 可选。`mode` 可选，默认为 `standard`；`src` 表示 SRC 漏洞挖掘模式。`bootstrap_enabled` 可选；未传时 `standard` 默认为 `true`，`src` 默认为 `false`。即使为 `true`，消费者没有 bootstrap 能力时也可直接进入 reason。
 
 Body：
 
@@ -252,6 +252,7 @@ Body：
   "title": "xx渗透测试",
   "origin": "目标 http://192.168.1.10",
   "goal": "拿到 flag",
+  "mode": "standard",
   "bootstrap_enabled": true,
   "hints": [
     { "content": "优先看 web 服务", "creator": "human" },
@@ -264,7 +265,7 @@ Body：
 
 #### GET /projects/{project_id}
 
-返回项目完整数据，包含 facts、intents、hints。
+返回项目完整数据，包含 facts、intents、hints、findings。
 
 响应：
 
@@ -274,6 +275,7 @@ Body：
     "id": "proj_001",
     "title": "xx渗透测试",
     "status": "active",
+    "mode": "standard",
     "bootstrap_enabled": true,
     "created_at": "2026-03-21T10:00:00Z",
     "reason": {
@@ -315,6 +317,24 @@ Body：
   "hints": [
     { "id": "h001", "content": "优先看 web 服务", "creator": "human", "created_at": "2026-03-21T10:00:00Z" },
     { "id": "h002", "content": "注意 80 端口", "creator": "human", "created_at": "2026-03-21T10:00:00Z" }
+  ],
+  "findings": [
+    {
+      "id": "v001",
+      "title": "订单详情 IDOR",
+      "vulnerability_type": "idor",
+      "severity": "high",
+      "target": "https://example.com",
+      "location": "/api/orders/{id}",
+      "impact": "低权限用户可读取其他用户订单",
+      "evidence": "请求 /api/orders/2 返回他人订单，证据见 /tmp/evidence/order-idor.txt",
+      "reproduction": "登录普通用户后请求其他用户订单 ID",
+      "remediation": "按订单所有者做服务端鉴权",
+      "status": "open",
+      "fact_id": "f002",
+      "intent_id": "i002",
+      "created_at": "2026-03-21T10:05:00Z"
+    }
   ]
 }
 ```
@@ -487,6 +507,8 @@ Body：
 
 服务端不校验 `description` 的业务语义，因此像 `description = "bootstrap"` 这样的保留 intent 也只是普通 Intent。是否把它解释为“项目最初阶段的直接推进尝试”，由消费者自己约定。
 
+服务端会做一层轻量重复兜底：同一项目内，如果新 Intent 的 `from` 集合与已有 Intent 完全相同，且 `description` 经过空白压缩和大小写归一后完全相同，则返回 `409 Duplicate intent`。该检查只防明显重复，不承担语义去重。
+
 ```json
 {
   "from": ["f002", "f004"],
@@ -543,7 +565,21 @@ Body：
 ```json
 {
   "worker": "agent-B",
-  "description": "80端口运行 nginx 1.18，存在目录遍历"
+  "description": "80端口运行 nginx 1.18，存在目录遍历",
+  "findings": [
+    {
+      "title": "目录遍历导致配置泄露",
+      "vulnerability_type": "path_traversal",
+      "severity": "high",
+      "target": "http://192.168.1.10",
+      "location": "/download?file=",
+      "impact": "可读取服务器敏感文件",
+      "evidence": "证据见 /tmp/evidence/traversal.txt",
+      "reproduction": "请求 /download?file=../../etc/passwd",
+      "remediation": "限制文件读取目录并规范化路径",
+      "status": "open"
+    }
+  ]
 }
 ```
 
@@ -565,7 +601,8 @@ Body：
     "last_heartbeat_at": "2026-03-21T10:05:00Z",
     "created_at": "2026-03-21T10:03:00Z",
     "concluded_at": "2026-03-21T10:05:00Z"
-  }
+  },
+  "findings": []
 }
 ```
 
@@ -574,6 +611,8 @@ Body：
 #### POST /projects/{project_id}/complete
 
 消费者判断某些 Facts 共同满足 goal 后调用，声明项目完成。原子操作。Complete 属于探索写操作，仅 `active` 项目允许；`stopped` 或 `completed` 返回 403。
+
+`mode=src` 的项目约定由人工决定何时完成；默认 dispatcher 的 SRC reason 不会自动调用该接口，即使模型返回 complete payload 也会忽略。
 
 创建一条 `from` 指向所列 Facts、`to` 指向 `goal` 的已结论 Intent。完成声明无探索过程，服务端将 `creator` 和 `worker` 均设为请求中的 `worker` 值。Project 状态变为 `completed`，并立即清空当前 `project.reason`。
 

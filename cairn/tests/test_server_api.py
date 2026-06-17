@@ -27,6 +27,7 @@ def _create_project(client: TestClient) -> str:
     )
     assert response.status_code == 201
     assert response.json()["project"]["bootstrap_enabled"] is True
+    assert response.json()["project"]["mode"] == "standard"
     return response.json()["project"]["id"]
 
 
@@ -193,6 +194,79 @@ def test_project_creation_persists_disabled_bootstrap_and_exports_it(client: Tes
     project_id = response.json()["project"]["id"]
     assert client.get(f"/projects/{project_id}").json()["project"]["bootstrap_enabled"] is False
     assert "bootstrap_enabled: false" in client.get(f"/projects/{project_id}/export?format=yaml").text
+
+
+def test_src_project_creation_defaults_bootstrap_off_and_exports_mode(client: TestClient) -> None:
+    response = client.post(
+        "/projects",
+        json={
+            "title": "src project",
+            "origin": "target https://example.test",
+            "goal": "find multiple vulnerabilities",
+            "mode": "src",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    project_id = payload["project"]["id"]
+    assert payload["project"]["mode"] == "src"
+    assert payload["project"]["bootstrap_enabled"] is False
+    detail = client.get(f"/projects/{project_id}").json()
+    assert detail["project"]["mode"] == "src"
+    exported = client.get(f"/projects/{project_id}/export?format=yaml")
+    assert "mode: src" in exported.text
+    assert "bootstrap_enabled: false" in exported.text
+
+
+def test_duplicate_intent_same_sources_and_description_returns_409(client: TestClient) -> None:
+    project_id = _create_project(client)
+    body = {"from": ["origin"], "description": "Check upload bypass", "creator": "reasoner", "worker": None}
+
+    assert client.post(f"/projects/{project_id}/intents", json=body).status_code == 201
+    response = client.post(
+        f"/projects/{project_id}/intents",
+        json={**body, "description": "  check   upload BYPASS  "},
+    )
+
+    assert response.status_code == 409
+
+
+def test_conclude_can_write_findings(client: TestClient) -> None:
+    project_id = _create_project(client)
+    client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin"], "description": "verify idor", "creator": "reasoner", "worker": None},
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/intents/i001/conclude",
+        json={
+            "worker": "explorer",
+            "description": "confirmed idor in order detail",
+            "findings": [
+                {
+                    "title": "Order detail IDOR",
+                    "vulnerability_type": "idor",
+                    "severity": "high",
+                    "target": "https://example.test",
+                    "location": "/api/orders/{id}",
+                    "impact": "user can read another user's order",
+                    "evidence": "request /api/orders/2 returned foreign data",
+                    "reproduction": "login as user A and request order 2",
+                    "remediation": "enforce ownership checks",
+                    "status": "open",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["findings"][0]["id"] == "v001"
+    assert response.json()["findings"][0]["fact_id"] == "f001"
+    detail = client.get(f"/projects/{project_id}").json()
+    assert detail["findings"][0]["title"] == "Order detail IDOR"
+    assert client.get("/projects").json()[0]["finding_count"] == 1
 
 
 def test_project_creation_rejects_invalid_bootstrap_enabled(client: TestClient) -> None:

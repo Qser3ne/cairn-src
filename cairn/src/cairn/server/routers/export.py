@@ -31,6 +31,10 @@ def _load_project_data(conn, project_id: str):
         "SELECT content, creator, created_at FROM hints WHERE project_id = ? ORDER BY created_at",
         (project_id,),
     ).fetchall()
+    findings = conn.execute(
+        "SELECT * FROM findings WHERE project_id = ? ORDER BY created_at, id",
+        (project_id,),
+    ).fetchall()
     intents = conn.execute(
         "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at",
         (project_id,),
@@ -44,11 +48,11 @@ def _load_project_data(conn, project_id: str):
         ).fetchall()
         sources_by_intent[i["id"]] = [r["fact_id"] for r in rows]
 
-    return proj, facts, hints, intents, sources_by_intent
+    return proj, facts, hints, findings, intents, sources_by_intent
 
 
 def _export_yaml(conn, project_id: str) -> str:
-    proj, facts, hints, intents, sources_by_intent = _load_project_data(conn, project_id)
+    proj, facts, hints, findings, intents, sources_by_intent = _load_project_data(conn, project_id)
 
     origin_desc = ""
     goal_desc = ""
@@ -63,6 +67,7 @@ def _export_yaml(conn, project_id: str) -> str:
             "title": proj["title"],
             "origin": origin_desc,
             "goal": goal_desc,
+            "mode": proj["mode"],
             "bootstrap_enabled": bool(proj["bootstrap_enabled"]),
         }
     }
@@ -78,6 +83,27 @@ def _export_yaml(conn, project_id: str) -> str:
         ]
 
     data["facts"] = [{"id": f["id"], "description": f["description"]} for f in facts]
+
+    if findings:
+        data["findings"] = [
+            {
+                "id": f["id"],
+                "title": f["title"],
+                "vulnerability_type": f["vulnerability_type"],
+                "severity": f["severity"],
+                "target": f["target"],
+                "location": f["location"],
+                "impact": f["impact"],
+                "evidence": f["evidence"],
+                "reproduction": f["reproduction"],
+                "remediation": f["remediation"],
+                "status": f["status"],
+                "fact_id": f["fact_id"],
+                "intent_id": f["intent_id"],
+                "created_at": format_export_timestamp(f["created_at"]),
+            }
+            for f in findings
+        ]
 
     intent_list = []
     for i in intents:
@@ -99,7 +125,7 @@ def _export_yaml(conn, project_id: str) -> str:
 
 
 def _export_timeline(conn, project_id: str) -> str:
-    proj, facts, hints, intents, sources_by_intent = _load_project_data(conn, project_id)
+    proj, facts, hints, findings, intents, sources_by_intent = _load_project_data(conn, project_id)
 
     facts_by_id = {f["id"]: f["description"] for f in facts}
 
@@ -109,7 +135,7 @@ def _export_timeline(conn, project_id: str) -> str:
     origin_desc = facts_by_id.get("origin", "")
     goal_desc = facts_by_id.get("goal", "")
     ts = format_export_timestamp(proj["created_at"]) or ""
-    block = f"[{ts}] PROJECT CREATED\n  origin: {origin_desc}\n  goal: {goal_desc}"
+    block = f"[{ts}] PROJECT CREATED\n  mode: {proj['mode']}\n  origin: {origin_desc}\n  goal: {goal_desc}"
     events.append((proj["created_at"] or "", order, block))
     order += 1
 
@@ -144,6 +170,22 @@ def _export_timeline(conn, project_id: str) -> str:
             block = f"[{ts}] INTENT CONCLUDED {i['id']} by {actor}\n  from: {from_str}\n  produced: {i['to_fact_id']}\n  {fact_desc}"
 
         events.append((i["concluded_at"] or "", order, block))
+        order += 1
+
+    for f in findings:
+        ts = format_export_timestamp(f["created_at"]) or ""
+        block = (
+            f"[{ts}] FINDING {f['id']} [{f['severity']}] {f['title']}\n"
+            f"  type: {f['vulnerability_type']}\n"
+            f"  target: {f['target']}\n"
+            f"  location: {f['location']}\n"
+            f"  fact: {f['fact_id']}\n"
+            f"  intent: {f['intent_id']}\n"
+            f"  status: {f['status']}\n"
+            f"  impact: {f['impact']}\n"
+            f"  evidence: {f['evidence']}"
+        )
+        events.append((f["created_at"] or "", order, block))
         order += 1
 
     events.sort(key=lambda e: (e[0], e[1]))

@@ -111,7 +111,7 @@ def run_reason_task(
             len(open_intents),
         )
         prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "reason.md"),
+            load_prompt(config.runtime.prompt_group, "reason.md", project.project.mode),
             {
                 "graph_yaml": write_graph_snapshot_reference(
                     container_manager,
@@ -212,6 +212,16 @@ def run_reason_task(
             )
             return "rejected"
         if kind == "complete":
+            if project.project.mode == "src":
+                LOG.info(
+                    "src reason ignored complete payload project=%s worker=%s from=%s execute_ms=%s total_ms=%s",
+                    project.project.id,
+                    worker.name,
+                    data["from"],
+                    execute_ms,
+                    total_ms,
+                )
+                return "success"
             response = client.complete(project.project.id, data["from"], data["description"], worker.name)
             if response.status_code == 403:
                 LOG.info("project became inactive during reason complete project=%s worker=%s", project.project.id, worker.name)
@@ -242,7 +252,13 @@ def run_reason_task(
                     LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)
                     return "success"
                 if response.status_code == 409:
-                    LOG.info("reason intent lost race project=%s worker=%s from=%s", project.project.id, worker.name, intent_data["from"])
+                    LOG.info(
+                        "duplicate intent skipped project=%s worker=%s from=%s description=%s",
+                        project.project.id,
+                        worker.name,
+                        intent_data["from"],
+                        intent_data["description"],
+                    )
                     continue
                 if not response.ok:
                     LOG.warning(
@@ -270,7 +286,7 @@ def run_reason_task(
                 execute_ms,
                 total_ms,
             )
-            if created == 0:
+            if created == 0 and project.project.mode != "src":
                 LOG.warning(
                     "reason created no intents project=%s worker=%s attempted=%s execute_ms=%s total_ms=%s",
                     project.project.id,

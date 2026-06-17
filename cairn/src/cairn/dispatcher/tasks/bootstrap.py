@@ -100,7 +100,7 @@ def run_bootstrap_task(
                 return "unhealthy"
 
         prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "bootstrap.md"),
+            load_prompt(config.runtime.prompt_group, "bootstrap.md", project.project.mode),
             _bootstrap_prompt_replacements(project),
         )
 
@@ -297,7 +297,7 @@ def _try_conclude_fallback(
     container_name = container_manager.ensure_running(project.project.id)
 
     prompt = render_prompt(
-        load_prompt(config.runtime.prompt_group, "bootstrap_conclude.md"),
+        load_prompt(config.runtime.prompt_group, "bootstrap_conclude.md", project.project.mode),
         _bootstrap_prompt_replacements(project),
     )
     conclude_argv = driver.build_conclude(worker, prompt, session)

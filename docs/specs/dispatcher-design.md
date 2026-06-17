@@ -163,7 +163,7 @@ Dispatcher 使用一个运行期配置文件：
 也就是说：
 
 - 使用者只需要提供 `dispatch.yaml`
-- 任务 prompt 以 markdown 文件形式随代码分发，并通过 `runtime.prompt_group` 选择目录
+- 任务 prompt 以 markdown 文件形式随代码分发，并通过 `runtime.prompt_group` 选择目录；自然语言 prompt 组可以按项目模式拆成子目录
 - Worker 的健康检查、命令模板、session 处理、二阶段收尾能力由对应 driver 实现
 
 代码目录可以采用类似组织：
@@ -176,11 +176,18 @@ dispatcher/
   contracts.py
   prompts/
     default/
-      bootstrap.md
-      bootstrap_conclude.md
-      reason.md
-      explore.md
-      explore_conclude.md
+      standard/
+        bootstrap.md
+        bootstrap_conclude.md
+        reason.md
+        explore.md
+        explore_conclude.md
+      src/
+        bootstrap.md
+        bootstrap_conclude.md
+        reason.md
+        explore.md
+        explore_conclude.md
     mock/
       bootstrap.md
       bootstrap_conclude.md
@@ -195,6 +202,8 @@ dispatcher/
       codex.py
       mock.py
 ```
+
+`project.mode=standard` 使用 `standard` 提示词。`project.mode=src` 使用 `src` 提示词；SRC reason 只规划非重复漏洞探索 intent，不会自动 complete 项目。`mock` prompt 组保持平铺目录，用于测试和本地模拟。
 
 本文档附录给出：
 

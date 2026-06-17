@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
+    mode TEXT NOT NULL DEFAULT 'standard',
     bootstrap_enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     reason_worker TEXT,
@@ -66,6 +67,27 @@ CREATE TABLE IF NOT EXISTS hints (
     PRIMARY KEY (id, project_id)
 );
 
+CREATE TABLE IF NOT EXISTS findings (
+    id TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    fact_id TEXT NOT NULL,
+    intent_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    vulnerability_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    target TEXT NOT NULL,
+    location TEXT NOT NULL,
+    impact TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    reproduction TEXT NOT NULL,
+    remediation TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (id, project_id),
+    FOREIGN KEY (fact_id, project_id) REFERENCES facts(id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (intent_id, project_id) REFERENCES intents(id, project_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -91,16 +113,46 @@ def configure(path: Path) -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         _ensure_project_columns(conn)
+        _ensure_findings_table(conn)
 
 
 def _ensure_project_columns(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+    if "mode" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN mode TEXT NOT NULL DEFAULT 'standard'")
     if "bootstrap_enabled" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN bootstrap_enabled INTEGER NOT NULL DEFAULT 1")
         if "bootstrap_mode" in columns:
             conn.execute(
                 "UPDATE projects SET bootstrap_enabled = CASE WHEN bootstrap_mode = 'disabled' THEN 0 ELSE 1 END"
             )
+
+
+def _ensure_findings_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS findings (
+            id TEXT NOT NULL,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            fact_id TEXT NOT NULL,
+            intent_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            vulnerability_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            target TEXT NOT NULL,
+            location TEXT NOT NULL,
+            impact TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            reproduction TEXT NOT NULL,
+            remediation TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (id, project_id),
+            FOREIGN KEY (fact_id, project_id) REFERENCES facts(id, project_id) ON DELETE CASCADE,
+            FOREIGN KEY (intent_id, project_id) REFERENCES intents(id, project_id) ON DELETE CASCADE
+        )
+        """
+    )
 
 
 @contextmanager
