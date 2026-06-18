@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from concurrent.futures import Future
 
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
@@ -14,7 +15,9 @@ from conftest import make_config, make_intent, make_project
 def _loop() -> DispatcherLoop:
     loop = DispatcherLoop.__new__(DispatcherLoop)
     loop.reason_checkpoints = {}
+    loop.session_lock_wait_queues = {}
     loop.runtime_project_ids = set()
+    loop.futures = {}
     loop.cleanup_futures = {}
     loop._cleanup_pending = set()
     loop._inactive_cleanup_done = {}
@@ -32,6 +35,7 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         status=status,
         mode="standard",
         bootstrap_enabled=True,
+        session_lock_enabled=True,
         created_at="2026-01-01T00:00:00Z",
         fact_count=2,
         intent_count=0,
@@ -151,6 +155,158 @@ def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
 
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
     assert dispatched == [("reason", "facts:3->4")]
+
+
+def test_locked_intent_waits_behind_running_session_lock_and_unlocked_intent_can_dispatch() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    locked = make_intent("i001")
+    locked.worker = None
+    locked.session_lock = True
+    unlocked = make_intent("i002")
+    unlocked.worker = None
+    unlocked.session_lock = False
+    project = make_project(intents=[locked, unlocked])
+    loop.futures = {
+        Future(): RunningTask(
+            project_id="proj_001",
+            task_type="explore",
+            worker_name="worker-a",
+            cancellation=TaskCancellation(),
+            intent_id="i000",
+            session_lock=True,
+        )
+    }
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
+        fact_count=3,
+        hint_count=1,
+        open_intent_count=2,
+    )
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[str] = []
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append(intent.id) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == ["i002"]
+    assert list(loop.session_lock_wait_queues["proj_001"]) == ["i001"]
+
+
+def test_waiting_locked_intent_dispatches_before_reason_trigger_after_lock_releases() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    locked = make_intent("i001")
+    locked.worker = None
+    locked.session_lock = True
+    normal = make_intent("i002")
+    normal.worker = None
+    normal.session_lock = False
+    project = make_project(intents=[locked, normal])
+    project.facts.append(Fact(id="f002", description="new"))
+    loop.futures = {}
+    loop.session_lock_wait_queues = {"proj_001": deque(["i001"])}
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
+        fact_count=3,
+        hint_count=1,
+        open_intent_count=2,
+    )
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append(("explore", intent.id)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("explore", "i001")]
+
+
+def test_disabled_project_session_lock_ignores_wait_queue_and_dispatches_locked_intent() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    locked = make_intent("i001")
+    locked.worker = None
+    locked.session_lock = True
+    project = make_project(intents=[locked])
+    project.project.session_lock_enabled = False
+    loop.futures = {
+        Future(): RunningTask(
+            project_id="proj_001",
+            task_type="explore",
+            worker_name="worker-a",
+            cancellation=TaskCancellation(),
+            intent_id="i000",
+            session_lock=True,
+        )
+    }
+    loop.session_lock_wait_queues = {"proj_001": deque(["i001"])}
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
+        fact_count=3,
+        hint_count=1,
+        open_intent_count=1,
+    )
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[str] = []
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append(intent.id) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == ["i001"]
+    assert loop.session_lock_wait_queues == {}
+
+
+def test_session_lock_wait_queue_discards_invalid_or_inactive_projects() -> None:
+    loop = _loop()
+    valid = make_intent("i001")
+    valid.worker = None
+    valid.session_lock = True
+    claimed = make_intent("i002")
+    claimed.worker = "worker"
+    claimed.session_lock = True
+    project = make_project(intents=[claimed, valid])
+    loop.session_lock_wait_queues = {
+        "proj_001": deque(["missing", "i002", "i001"]),
+        "stopped": deque(["i001"]),
+        "disabled": deque(["i001"]),
+    }
+
+    assert loop._next_session_lock_waiting_intent(project) == valid
+    assert list(loop.session_lock_wait_queues["proj_001"]) == ["i001"]
+
+    disabled_summary = _summary("disabled", "active")
+    disabled_summary.session_lock_enabled = False
+    loop._cleanup_session_lock_wait_queues(
+        [
+            _summary("proj_001", "active"),
+            _summary("stopped", "stopped"),
+            disabled_summary,
+        ]
+    )
+
+    assert set(loop.session_lock_wait_queues) == {"proj_001"}
 
 
 def test_initial_enabled_project_without_bootstrap_worker_dispatches_reason() -> None:

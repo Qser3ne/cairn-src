@@ -51,6 +51,7 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
             status="active",
             mode="standard",
             bootstrap_enabled=True,
+            session_lock_enabled=True,
             created_at="2026-01-01T00:00:00Z",
         ),
         facts=[
@@ -114,7 +115,7 @@ class FakeClient:
     project: ProjectDetail
     concluded: list[tuple[str, str, str, str]] = field(default_factory=list)
     completed: list[tuple[str, list[str], str, str]] = field(default_factory=list)
-    created_intents: list[tuple[str, list[str], str, str]] = field(default_factory=list)
+    created_intents: list[tuple[str, list[str], str, str, bool]] = field(default_factory=list)
     released: list[tuple[str, str, str]] = field(default_factory=list)
     released_reasons: list[tuple[str, str]] = field(default_factory=list)
 
@@ -139,8 +140,15 @@ class FakeClient:
         self.completed.append((project_id, from_ids, description, worker))
         return ApiResult(200, {})
 
-    def create_intent(self, project_id: str, from_ids: list[str], description: str, creator: str) -> ApiResult:
-        self.created_intents.append((project_id, from_ids, description, creator))
+    def create_intent(
+        self,
+        project_id: str,
+        from_ids: list[str],
+        description: str,
+        creator: str,
+        session_lock: bool = False,
+    ) -> ApiResult:
+        self.created_intents.append((project_id, from_ids, description, creator, session_lock))
         return ApiResult(201, {})
 
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:

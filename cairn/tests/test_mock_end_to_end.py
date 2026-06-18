@@ -86,10 +86,23 @@ class InProcessClient:
             {"from": from_ids, "description": description, "worker": worker},
         )
 
-    def create_intent(self, project_id: str, from_ids: list[str], description: str, creator: str) -> ApiResult:
+    def create_intent(
+        self,
+        project_id: str,
+        from_ids: list[str],
+        description: str,
+        creator: str,
+        session_lock: bool = False,
+    ) -> ApiResult:
         return self._post(
             f"/projects/{project_id}/intents",
-            {"from": from_ids, "description": description, "creator": creator, "worker": None},
+            {
+                "from": from_ids,
+                "description": description,
+                "creator": creator,
+                "worker": None,
+                "session_lock": session_lock,
+            },
         )
 
     def _post(self, path: str, payload: dict[str, Any]) -> ApiResult:
@@ -263,6 +276,7 @@ def _loop(config: DispatchConfig, client: InProcessClient, containers: LocalCont
     loop.futures = {}
     loop.cleanup_futures = {}
     loop.reason_checkpoints = {}
+    loop.session_lock_wait_queues = {}
     loop.runtime_project_ids = set()
     loop.worker_unhealthy_until = {}
     loop.worker_rejected_until = {}
@@ -278,6 +292,7 @@ def _dispatch_and_wait(loop: DispatcherLoop) -> None:
     summaries = loop.client.list_projects()
     loop._initialize_reason_checkpoints(summaries)
     loop._refresh_runtime_projects(summaries)
+    loop._cleanup_session_lock_wait_queues(summaries)
     loop._cancel_inactive_tasks(summaries)
     loop._queue_container_cleanups(summaries)
     loop._dispatch_available(summaries)

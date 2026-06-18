@@ -69,6 +69,7 @@ def _export_yaml(conn, project_id: str) -> str:
             "goal": goal_desc,
             "mode": proj["mode"],
             "bootstrap_enabled": bool(proj["bootstrap_enabled"]),
+            "session_lock_enabled": bool(proj["session_lock_enabled"]),
         }
     }
 
@@ -113,6 +114,7 @@ def _export_yaml(conn, project_id: str) -> str:
             "description": i["description"],
             "creator": i["creator"],
             "worker": i["worker"],
+            "session_lock": bool(i["session_lock"]),
             "created_at": format_export_timestamp(i["created_at"]),
             "concluded_at": format_export_timestamp(i["concluded_at"]),
         }

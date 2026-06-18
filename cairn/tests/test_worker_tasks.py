@@ -44,7 +44,7 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
         "run_worker_process",
         lambda *_args, **_kwargs: ProcessResult(
             0,
-            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next step"}]}}',
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next step","session_lock":true}]}}',
             "",
         ),
     )
@@ -60,7 +60,7 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker")]
+    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker", True)]
     assert client.released_reasons == [("proj_001", "test-worker")]
     assert lease.started and lease.stopped
     assert len(containers.writes) == 1
@@ -280,7 +280,7 @@ def test_reason_startup_only_mode_skips_task_healthcheck(monkeypatch) -> None:
         "run_worker_process",
         lambda *_args, **_kwargs: ProcessResult(
             0,
-            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next"}]}}',
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next","session_lock":false}]}}',
             "",
         ),
     )
@@ -296,4 +296,4 @@ def test_reason_startup_only_mode_skips_task_healthcheck(monkeypatch) -> None:
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker")]
+    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker", False)]

@@ -190,6 +190,7 @@ def intent_to_model(conn: sqlite3.Connection, row: sqlite3.Row, project_id: str)
         description=row["description"],
         creator=row["creator"],
         worker=row["worker"],
+        session_lock=bool(row["session_lock"]),
         last_heartbeat_at=row["last_heartbeat_at"],
         created_at=row["created_at"],
         concluded_at=row["concluded_at"],
@@ -259,6 +260,7 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
         status=row["status"],
         mode=row["mode"],
         bootstrap_enabled=bool(row["bootstrap_enabled"]),
+        session_lock_enabled=bool(row["session_lock_enabled"]),
         created_at=row["created_at"],
         reason=project_reason_from_row(row),
     )

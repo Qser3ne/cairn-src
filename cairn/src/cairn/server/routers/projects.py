@@ -13,6 +13,7 @@ from cairn.server.models import (
     ProjectSummary,
     ReopenRequest,
     ReopenResponse,
+    UpdateProjectSettingsRequest,
     ReasonClaimRequest,
     UpdateProjectTitleRequest,
     UpdateProjectStatusRequest,
@@ -65,6 +66,7 @@ def list_projects():
                 status=row["status"],
                 mode=row["mode"],
                 bootstrap_enabled=bool(row["bootstrap_enabled"]),
+                session_lock_enabled=bool(row["session_lock_enabled"]),
                 created_at=row["created_at"],
                 reason=project_reason_from_row(row),
                 fact_count=row["fact_count"],
@@ -90,8 +92,8 @@ def create_project(body: CreateProjectRequest):
         )
 
         conn.execute(
-            "INSERT INTO projects (id, title, status, mode, bootstrap_enabled, created_at) VALUES (?, ?, 'active', ?, ?, ?)",
-            (pid, body.title, body.mode, bootstrap_enabled, now),
+            "INSERT INTO projects (id, title, status, mode, bootstrap_enabled, session_lock_enabled, created_at) VALUES (?, ?, 'active', ?, ?, ?, ?)",
+            (pid, body.title, body.mode, bootstrap_enabled, body.session_lock_enabled, now),
         )
         conn.execute(
             "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
@@ -119,6 +121,7 @@ def create_project(body: CreateProjectRequest):
                 status="active",
                 mode=body.mode,
                 bootstrap_enabled=bootstrap_enabled,
+                session_lock_enabled=body.session_lock_enabled,
                 created_at=now,
                 reason=None,
             ),
@@ -170,6 +173,18 @@ def update_project_title(project_id: str, body: UpdateProjectTitleRequest):
         conn.execute(
             "UPDATE projects SET title = ? WHERE id = ?",
             (body.title, project_id),
+        )
+        updated = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return project_meta_from_row(updated)
+
+
+@router.put("/projects/{project_id}/settings", response_model=ProjectMeta)
+def update_project_settings(project_id: str, body: UpdateProjectSettingsRequest):
+    with get_conn() as conn:
+        get_project_or_404(conn, project_id)
+        conn.execute(
+            "UPDATE projects SET session_lock_enabled = ? WHERE id = ?",
+            (body.session_lock_enabled, project_id),
         )
         updated = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
         return project_meta_from_row(updated)
@@ -278,7 +293,7 @@ def complete_project(project_id: str, body: CompleteRequest):
         iid = next_intent_id(conn, project_id)
 
         conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, 'goal', ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, session_lock, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, 'goal', ?, ?, ?, 0, ?, ?, ?)",
             (iid, project_id, body.description, body.worker, body.worker, now, now, now),
         )
         for fid in body.from_:
@@ -306,6 +321,7 @@ def complete_project(project_id: str, body: CompleteRequest):
             description=body.description,
             creator=body.worker,
             worker=body.worker,
+            session_lock=False,
             last_heartbeat_at=now,
             created_at=now,
             concluded_at=now,
@@ -342,7 +358,7 @@ def reopen_project(project_id: str, body: ReopenRequest):
             (fact_id, project_id, description),
         )
         conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, session_lock, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
             (intent_id, project_id, fact_id, "external_feedback", creator, creator, now, now, now),
         )
         for source_id in source_ids:

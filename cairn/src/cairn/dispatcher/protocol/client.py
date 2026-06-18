@@ -131,11 +131,24 @@ class CairnClient:
             json={"from": from_ids, "description": description, "worker": worker},
         )
 
-    def create_intent(self, project_id: str, from_ids: list[str], description: str, creator: str) -> ApiResult:
+    def create_intent(
+        self,
+        project_id: str,
+        from_ids: list[str],
+        description: str,
+        creator: str,
+        session_lock: bool = False,
+    ) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/intents",
-            json={"from": from_ids, "description": description, "creator": creator, "worker": None},
+            json={
+                "from": from_ids,
+                "description": description,
+                "creator": creator,
+                "worker": None,
+                "session_lock": session_lock,
+            },
         )
 
     def _request_json(self, method: str, path: str, json: dict[str, Any]) -> ApiResult:

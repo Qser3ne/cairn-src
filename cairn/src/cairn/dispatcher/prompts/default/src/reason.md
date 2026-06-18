@@ -17,7 +17,7 @@
 如果需要提出新的 intents，则返回：
 
 ```json
-{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "..."}, {"from": ["f002", "f003"], "description": "..."}]}}
+{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "...", "session_lock": true}, {"from": ["f002", "f003"], "description": "...", "session_lock": false}]}}
 ```
 
 如果没有新的高价值、非重复探索方向，则返回：
@@ -40,6 +40,9 @@
 - 如果没有明显的新方向，返回空 data；不要为了推进而硬造宽泛 intent。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。
 - 每个 intent 的 description 必须包含清晰的去重语义：目标或入口、漏洞假设、验证重点。避免“继续测试”“深入挖掘”等泛泛描述。
+- 每个 Intent 必须显式输出布尔字段 `session_lock`。
+- 涉及登录态、Cookie、Token、账号状态、认证链路、共享会话或会改动全局认证上下文的 intent 必须设置 `"session_lock": true`。
+- 纯只读、独立目标、不会改动共享认证或会话状态的 intent 可以设置 `"session_lock": false`。
 - `data.intents[*].from` 必须来自 `Valid facts`，不能包含 `goal`。
 
 ## 上下文

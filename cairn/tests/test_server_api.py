@@ -28,6 +28,7 @@ def _create_project(client: TestClient) -> str:
     assert response.status_code == 201
     assert response.json()["project"]["bootstrap_enabled"] is True
     assert response.json()["project"]["mode"] == "standard"
+    assert response.json()["project"]["session_lock_enabled"] is True
     return response.json()["project"]["id"]
 
 
@@ -40,6 +41,7 @@ def test_project_workflow_create_conclude_complete_and_reopen(client: TestClient
     )
     assert response.status_code == 201
     assert response.json()["id"] == "i001"
+    assert response.json()["session_lock"] is False
 
     response = client.post(
         f"/projects/{project_id}/intents/i001/heartbeat",
@@ -125,7 +127,61 @@ def test_settings_and_export_are_backed_by_the_same_database(client: TestClient)
     assert exported.status_code == 200
     assert "origin: starting point" in exported.text
     assert "goal: finish" in exported.text
+    assert "session_lock_enabled: true" in exported.text
     assert client.get(f"/projects/{project_id}/export?format=invalid").status_code == 400
+
+
+def test_project_settings_toggle_session_lock(client: TestClient) -> None:
+    project_id = _create_project(client)
+
+    response = client.put(
+        f"/projects/{project_id}/settings",
+        json={"session_lock_enabled": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["session_lock_enabled"] is False
+    assert client.get(f"/projects/{project_id}").json()["project"]["session_lock_enabled"] is False
+    assert client.get("/projects").json()[0]["session_lock_enabled"] is False
+    exported = client.get(f"/projects/{project_id}/export?format=yaml")
+    assert "session_lock_enabled: false" in exported.text
+
+
+def test_project_creation_can_disable_session_lock(client: TestClient) -> None:
+    response = client.post(
+        "/projects",
+        json={
+            "title": "no lock",
+            "origin": "start",
+            "goal": "finish",
+            "session_lock_enabled": False,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["project"]["session_lock_enabled"] is False
+
+
+def test_intent_creation_persists_session_lock(client: TestClient) -> None:
+    project_id = _create_project(client)
+
+    response = client.post(
+        f"/projects/{project_id}/intents",
+        json={
+            "from": ["origin"],
+            "description": "login flow",
+            "creator": "reasoner",
+            "worker": None,
+            "session_lock": True,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["session_lock"] is True
+    detail = client.get(f"/projects/{project_id}").json()
+    assert detail["intents"][0]["session_lock"] is True
+    exported = client.get(f"/projects/{project_id}/export?format=yaml")
+    assert "session_lock: true" in exported.text
 
 
 def test_expired_intent_and_reason_leases_can_be_reclaimed(client: TestClient) -> None:

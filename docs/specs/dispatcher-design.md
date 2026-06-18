@@ -349,7 +349,8 @@ dispatcher/
   "data": {
     "intent": {
       "from": ["f003"],
-      "description": "尝试 SQL 注入"
+      "description": "尝试 SQL 注入",
+      "session_lock": false
     }
   }
 }
@@ -368,7 +369,8 @@ dispatcher/
 
 - `data.complete` 存在时，它必须是对象，且 `complete.from` 和 `complete.description` 都必须存在
 - `data.complete` 存在时，不应再带 `intent`
-- 如果 `intent` 存在，则 `intent.from` 和 `intent.description` 都必须存在
+- 如果 `intent` 存在，则 `intent.from`、`intent.description` 和布尔 `intent.session_lock` 都必须存在
+- 涉及登录态、Cookie、Token、账号状态、认证链路、共享会话或全局认证上下文变更的 intent 必须设置 `session_lock=true`
 - 如果 `{open_intents}` 为空，说明当前图里没有任何进行中的探索；此时若没有 `data.complete`，则必须返回 `intent`
 - 如果 `{open_intents}` 非空，且没有 `data.complete`，则允许不返回 `intent`
 
@@ -379,7 +381,7 @@ dispatcher/
 | `reason` 输出 | Dispatcher 动作 | 备注 |
 | --- | --- | --- |
 | `data.complete` 存在 | 调用 `POST /projects/{project_id}/complete` | `worker` 使用当前执行该任务的 `workers[].name` |
-| `data.complete` 不存在，且带 `intent` | 调用 `POST /projects/{project_id}/intents` | `creator` 使用当前 Worker 名；`worker` 固定写 `null` |
+| `data.complete` 不存在，且带 `intent` | 调用 `POST /projects/{project_id}/intents` | `creator` 使用当前 Worker 名；`worker` 固定写 `null`；透传 `session_lock` |
 | `data` 为空对象 | 不写图 | 不写 Fact / Intent / Complete |
 
 写回失败的日志语义：
@@ -568,8 +570,9 @@ if running_project_count < runtime.max_running_projects:
 对于单个项目，Dispatcher 读完整项目状态后，按下面顺序调度：
 
 1. 如果项目仍处于初始态，先按 `project.bootstrap_enabled` 和 Worker 能力决定路径：未开启或没有支持 `bootstrap` 的 Worker 时直接 `reason`，否则执行 `bootstrap`；若已经存在保留 bootstrap intent，则继续该阶段
-2. 如果满足“新态势”重触发条件，优先派发 `reason`
-3. 否则如果存在未认领 intent，派发 `explore`
+2. 如果存在本地 session-lock 等待队列，且项目已开启 `session_lock_enabled`、同项目当前没有 locked RunningTask，则优先派发队列中仍 open/unclaimed/locked 的 intent
+3. 如果满足“新态势”重触发条件，优先派发 `reason`
+4. 否则如果存在未认领 intent，派发 `explore`
 4. `reason` 的去重按“态势”做，而不是按总图变化做：首次只有在当前没有任何 open intent 时才触发；之后只有当前 Fact / Hint 数量增加，或项目从“存在 open intents”进入“没有 open intents”时，才重新触发
 5. 如果 `reason` 返回 `data.complete`，Dispatcher 调用 `POST /projects/{project_id}/complete`
 6. 如果 `reason` 没有返回 `data.complete` 且带 `intent`，Dispatcher 调用 `POST /projects/{project_id}/intents`
@@ -578,7 +581,7 @@ if running_project_count < runtime.max_running_projects:
 另外：
 
 - 初始态项目里，如果选择了 `bootstrap` 路径且 bootstrap intent 已被 claim，则这一轮不再派发 `reason` 或普通 `explore`
-- 即使同一项目里已经有进行中的 `explore`，也允许继续派发一个 `reason` 任务
+- 即使同一项目里已经有进行中的 `explore`，也允许继续派发一个 `reason` 任务；但若已有 `session_lock=true` 的 explore RunningTask，则新的 locked intent 会先进入等待队列
 - 但前提不是“刚新增了 intent”，而是“确实出现了新的 Fact / Hint 等新态势”；仅仅因为上一个 `reason` 刚创建了新的 intent，不应该立刻再次 `reason`
 - 仍然要求当前没有未认领 intent、当前项目内没有其他 `reason` 任务在运行、且没有超过 `runtime.max_project_workers`
 
@@ -600,6 +603,8 @@ if running_project_count < runtime.max_running_projects:
 - 单个项目内，同一时刻最多只能有一个 `reason` 任务在运行
 - 跨项目允许并行运行多个 `reason`
 - `reason` 也计入对应项目的 `runtime.max_project_workers`
+- 当项目 `session_lock_enabled=true` 时，单个项目内同一时刻最多只能有一个 `session_lock=true` 的 explore RunningTask；因锁冲突跳过的 locked intent 进入本地 FIFO 队列，锁释放后优先于普通 reason/explore 调度
+- 当项目 `session_lock_enabled=false` 时，dispatcher 清理并忽略该项目的 session-lock 等待队列，恢复旧并发逻辑
 - `runtime.max_workers`：Dispatcher 同时运行中的任务总数上限
 - `runtime.max_running_projects`：当前 dispatcher 运行期内已接手且仍为 `active` 的项目 admission 上限；项目即使暂时没有可派发任务，只要仍为 `active`，也继续占用该名额，直到其退出 active
 - `runtime.max_project_workers`：单个项目内同时运行的任务上限，统一计入 `bootstrap`、`reason` 和 `explore`
@@ -1075,7 +1080,7 @@ workers:
 ```
 未满足 goal，但需要提出新 intent 时返回：
 ```json
-{"accepted": true, "data": {"intent": {"from": ["f001"], "description": "..."}}}
+{"accepted": true, "data": {"intent": {"from": ["f001"], "description": "...", "session_lock": true}}}
 ```
 未满足 goal，且当前不需要提出新 intent 时返回：
 ```json
@@ -1084,6 +1089,7 @@ workers:
 ## 规则
 - 如果下面的 `open_intents` 为空，说明当前图里没有任何进行中的探索；此时若不返回 `data.complete`，则必须返回 `intent`。
 - `intent.from` 只能从下面的合法 fact id 中选择。
+- `intent.session_lock` 必须显式输出；涉及登录态、Cookie、Token、账号状态、认证链路或共享会话时设为 `true`，纯只读且互不影响时设为 `false`。
 ## 上下文
 ### 图快照
 {graph_yaml}

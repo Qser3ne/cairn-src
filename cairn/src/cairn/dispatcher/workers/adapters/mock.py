@@ -80,7 +80,11 @@ if phase=="reason":
         intents=[]
         for idx in range(count):
             fi=[random.choice(fact_ids)] if fact_ids else []
-            intents.append({"from":fi,"description":f"mock intent {idx+1} from {fi[0] if fi else 'none'}"})
+            intents.append({
+                "from":fi,
+                "description":f"mock intent {idx+1} from {fi[0] if fi else 'none'}",
+                "session_lock": False,
+            })
         print(json.dumps({"accepted":True,"data":{"intents":intents}}, ensure_ascii=False))
     elif outcome=="noop":
         print(json.dumps({"accepted":True,"data":{}}, ensure_ascii=False))

@@ -30,8 +30,11 @@ def test_configure_adds_bootstrap_enabled_to_legacy_projects_table(tmp_path, mon
     db.configure(path)
 
     with db.get_conn() as conn:
-        row = conn.execute("SELECT bootstrap_enabled FROM projects WHERE id = 'proj_001'").fetchone()
+        row = conn.execute(
+            "SELECT bootstrap_enabled, session_lock_enabled FROM projects WHERE id = 'proj_001'"
+        ).fetchone()
     assert row["bootstrap_enabled"] == 1
+    assert row["session_lock_enabled"] == 1
 
 
 def test_configure_maps_disabled_bootstrap_mode_to_false(tmp_path, monkeypatch) -> None:
@@ -68,3 +71,55 @@ def test_configure_maps_disabled_bootstrap_mode_to_false(tmp_path, monkeypatch) 
         ("proj_001", 0),
         ("proj_002", 1),
     ]
+
+
+def test_configure_adds_session_lock_to_legacy_intents_table(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "legacy-intents.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                reason_worker TEXT,
+                reason_trigger TEXT,
+                reason_started_at TEXT,
+                reason_last_heartbeat_at TEXT
+            );
+            CREATE TABLE intents (
+                id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                to_fact_id TEXT,
+                description TEXT NOT NULL,
+                creator TEXT NOT NULL,
+                worker TEXT,
+                last_heartbeat_at TEXT,
+                created_at TEXT NOT NULL,
+                concluded_at TEXT,
+                PRIMARY KEY (id, project_id)
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO projects (id, title, created_at) VALUES ('proj_001', 'legacy', '2026-01-01T00:00:00Z')"
+        )
+        conn.execute(
+            """
+            INSERT INTO intents (
+                id,
+                project_id,
+                description,
+                creator,
+                created_at
+            ) VALUES ('i001', 'proj_001', 'old work', 'reasoner', '2026-01-01T00:00:01Z')
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT session_lock FROM intents WHERE id = 'i001'").fetchone()
+    assert row["session_lock"] == 0

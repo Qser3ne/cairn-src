@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,7 @@ class DispatcherLoop:
         self.futures: dict[Future[str], RunningTask] = {}
         self.cleanup_futures: dict[Future[bool], tuple[str, str | None, str | None]] = {}
         self.reason_checkpoints: dict[str, ReasonCheckpoint] = {}
+        self.session_lock_wait_queues: dict[str, deque[str]] = {}
         self.runtime_project_ids: set[str] = set()
         self.worker_unhealthy_until: dict[str, float] = {}
         self.worker_rejected_until: dict[tuple[str, str, str], float] = {}
@@ -82,6 +84,7 @@ class DispatcherLoop:
                     summaries = self.client.list_projects()
                     self._initialize_reason_checkpoints(summaries)
                     self._refresh_runtime_projects(summaries)
+                    self._cleanup_session_lock_wait_queues(summaries)
                     self._cancel_inactive_tasks(summaries)
                     self._queue_container_cleanups(summaries)
                     self._dispatch_available(summaries)
@@ -219,6 +222,11 @@ class DispatcherLoop:
                 return self._dispatch_initial_project(project)
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_reason(project, export_yaml, "initial")
+        self._enqueue_current_session_lock_waiters(project)
+        queued_intent = self._next_session_lock_waiting_intent(project)
+        if queued_intent is not None:
+            export_yaml = self.client.export_project(summary.id)
+            return self._dispatch_explore(project, export_yaml, queued_intent)
         if project.project.reason is None:
             reason_trigger = self._reason_trigger(project)
             if reason_trigger is not None:
@@ -233,6 +241,7 @@ class DispatcherLoop:
             and intent.id not in running_intent_ids
             and not self._is_bootstrap_intent(intent)
         ]
+        dispatchable_intents = self._filter_session_lock_dispatchable_intents(project, unclaimed_intents)
         if running_intent_ids and not unclaimed_intents:
             self._log_changed(
                 f"{skip_scope}:explore_running",
@@ -241,8 +250,8 @@ class DispatcherLoop:
                 summary.id,
                 sorted(running_intent_ids),
             )
-        if unclaimed_intents:
-            newest = max(unclaimed_intents, key=lambda i: i.created_at)
+        if dispatchable_intents:
+            newest = max(dispatchable_intents, key=lambda i: i.created_at)
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_explore(project, export_yaml, newest)
         if project.project.reason is not None:
@@ -342,10 +351,10 @@ class DispatcherLoop:
             self._best_effort_release_reason(project.project.id, worker.name)
             return False
         self.futures[future] = RunningTask(
-            project.project.id,
-            "reason",
-            worker.name,
-            cancellation,
+            project_id=project.project.id,
+            task_type="reason",
+            worker_name=worker.name,
+            cancellation=cancellation,
             intent_id=None,
             fact_count=len(project.facts),
             hint_count=len(project.hints),
@@ -408,7 +417,13 @@ class DispatcherLoop:
             LOG.exception("failed to submit bootstrap task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
             self._best_effort_release(project.project.id, intent.id, worker.name)
             return False
-        self.futures[future] = RunningTask(project.project.id, "bootstrap", worker.name, cancellation, intent_id=intent.id)
+        self.futures[future] = RunningTask(
+            project_id=project.project.id,
+            task_type="bootstrap",
+            worker_name=worker.name,
+            cancellation=cancellation,
+            intent_id=intent.id,
+        )
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
         LOG.info("dispatched bootstrap project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
@@ -467,7 +482,15 @@ class DispatcherLoop:
             LOG.exception("failed to submit explore task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
             self._best_effort_release(project.project.id, intent.id, worker.name)
             return False
-        self.futures[future] = RunningTask(project.project.id, "explore", worker.name, cancellation, intent_id=intent.id)
+        self.futures[future] = RunningTask(
+            project_id=project.project.id,
+            task_type="explore",
+            worker_name=worker.name,
+            cancellation=cancellation,
+            intent_id=intent.id,
+            session_lock=project.project.session_lock_enabled and intent.session_lock,
+        )
+        self._discard_session_lock_waiting_intent(project.project.id, intent.id)
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
         LOG.info("dispatched explore project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
@@ -565,6 +588,97 @@ class DispatcherLoop:
             for task in self.futures.values()
             if task.project_id == project_id and task.task_type == "explore" and task.intent_id is not None
         }
+
+    def _project_has_running_session_lock(self, project_id: str) -> bool:
+        return any(
+            task.project_id == project_id and task.session_lock
+            for task in self.futures.values()
+        )
+
+    def _filter_session_lock_dispatchable_intents(
+        self, project: ProjectDetail, intents: list[Intent]
+    ) -> list[Intent]:
+        if not project.project.session_lock_enabled:
+            self.session_lock_wait_queues.pop(project.project.id, None)
+            return intents
+        if not self._project_has_running_session_lock(project.project.id):
+            return intents
+
+        blocked = [intent for intent in intents if intent.session_lock]
+        self._enqueue_session_lock_waiting_intents(project.project.id, blocked)
+        return [intent for intent in intents if not intent.session_lock]
+
+    def _enqueue_current_session_lock_waiters(self, project: ProjectDetail) -> None:
+        if not project.project.session_lock_enabled:
+            self.session_lock_wait_queues.pop(project.project.id, None)
+            return
+        if not self._project_has_running_session_lock(project.project.id):
+            return
+        running_intent_ids = self._project_running_explore_intents(project.project.id)
+        blocked = [
+            intent
+            for intent in project.intents
+            if intent.to is None
+            and intent.worker is None
+            and intent.id not in running_intent_ids
+            and intent.session_lock
+            and not self._is_bootstrap_intent(intent)
+        ]
+        self._enqueue_session_lock_waiting_intents(project.project.id, blocked)
+
+    def _enqueue_session_lock_waiting_intents(self, project_id: str, intents: list[Intent]) -> None:
+        if not intents:
+            return
+        queue = self.session_lock_wait_queues.setdefault(project_id, deque())
+        queued = set(queue)
+        for intent in sorted(intents, key=lambda item: (item.created_at, item.id)):
+            if intent.id in queued:
+                continue
+            queue.append(intent.id)
+            queued.add(intent.id)
+
+    def _next_session_lock_waiting_intent(self, project: ProjectDetail) -> Intent | None:
+        if not project.project.session_lock_enabled:
+            self.session_lock_wait_queues.pop(project.project.id, None)
+            return None
+        if self._project_has_running_session_lock(project.project.id):
+            return None
+
+        queue = self.session_lock_wait_queues.get(project.project.id)
+        if not queue:
+            return None
+        intents_by_id = {intent.id: intent for intent in project.intents}
+        while queue:
+            intent = intents_by_id.get(queue[0])
+            if (
+                intent is not None
+                and intent.to is None
+                and intent.worker is None
+                and intent.session_lock
+                and not self._is_bootstrap_intent(intent)
+            ):
+                return intent
+            queue.popleft()
+        self.session_lock_wait_queues.pop(project.project.id, None)
+        return None
+
+    def _discard_session_lock_waiting_intent(self, project_id: str, intent_id: str) -> None:
+        queue = self.session_lock_wait_queues.get(project_id)
+        if not queue:
+            return
+        self.session_lock_wait_queues[project_id] = deque(item for item in queue if item != intent_id)
+        if not self.session_lock_wait_queues[project_id]:
+            self.session_lock_wait_queues.pop(project_id, None)
+
+    def _cleanup_session_lock_wait_queues(self, summaries: list[ProjectSummary]) -> None:
+        active_enabled_ids = {
+            summary.id
+            for summary in summaries
+            if summary.status == "active" and summary.session_lock_enabled
+        }
+        for project_id in list(self.session_lock_wait_queues):
+            if project_id not in active_enabled_ids:
+                self.session_lock_wait_queues.pop(project_id, None)
 
     def _running_project_count(self, summaries: list[ProjectSummary]) -> int:
         active_ids = {summary.id for summary in summaries if summary.status == "active"}

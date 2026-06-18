@@ -45,13 +45,14 @@ def create_intent(project_id: str, body: CreateIntentRequest):
         iid = next_intent_id(conn, project_id)
         claimed = body.worker is not None
         conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL)",
+            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, session_lock, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL)",
             (
                 iid,
                 project_id,
                 body.description,
                 body.creator,
                 body.worker,
+                body.session_lock,
                 now if claimed else None,
                 now,
             ),
@@ -69,6 +70,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
             description=body.description,
             creator=body.creator,
             worker=body.worker,
+            session_lock=body.session_lock,
             last_heartbeat_at=now if claimed else None,
             created_at=now,
             concluded_at=None,

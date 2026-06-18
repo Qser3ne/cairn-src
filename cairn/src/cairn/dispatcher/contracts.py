@@ -40,6 +40,15 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
     return False
 
 
+def _validate_reason_intent(intent: Any, index: int) -> None:
+    if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
+        raise ValueError(f"invalid intent at index {index}")
+    if "session_lock" not in intent:
+        raise ValueError(f"intent session_lock is required at index {index}")
+    if not isinstance(intent["session_lock"], bool):
+        raise ValueError(f"intent session_lock must be boolean at index {index}")
+
+
 def _looks_like_bootstrap_execute_data(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict) or set(payload) != {"fact", "complete"}:
         return False
@@ -88,8 +97,7 @@ def validate_reason_payload(
         if not isinstance(intents, list):
             raise ValueError("intents must be an array")
         for i, intent in enumerate(intents):
-            if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
-                raise ValueError(f"invalid intent at index {i}")
+            _validate_reason_intent(intent, i)
         if not intents and open_intents_empty:
             raise ValueError("intents must not be empty when open_intents is empty")
         intents = intents[:max_intents]

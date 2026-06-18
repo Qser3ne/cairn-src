@@ -105,6 +105,7 @@ id
 title           # 项目名称
 status          # "active" | "stopped" | "completed"
 bootstrap_enabled  # 是否允许消费者在初始态运行 bootstrap，默认 true
+session_lock_enabled  # 是否启用同项目 session_lock intent 互斥，默认 true
 created_at
 reason          # 当前项目级 reason lease，null 表示当前无人执行 reason
 ```
@@ -134,12 +135,15 @@ to              # 结论 Fact 的 id，null 表示尚无结论
 description     # 意图描述
 creator         # 声明意图的消费者，创建时写入，不可变
 worker          # 执行者标识，语义随状态变化（见下方说明）
+session_lock    # 是否需要同项目认证/会话互斥，默认 false
 last_heartbeat_at  # 最后一次心跳时间，仅尚无结论时有意义，永久保留，不清空
 created_at
 concluded_at    # 结论时间，null 表示尚无结论
 ```
 
 `creator` 在创建时写入，标识谁洞察局势提出了这个探索方向，不可变。`worker` 可为空；若创建时同时认领，则 `worker` 必须等于 `creator`，并写入首个 `last_heartbeat_at`。
+
+`session_lock=true` 表示该 intent 涉及登录态、Cookie、Token、账号状态、认证链路、共享会话或会改动全局认证上下文。默认 dispatcher 在项目 `session_lock_enabled=true` 时，会保证同一项目内同一时刻最多只有一个 `session_lock=true` 的 explore 任务运行；被锁挡住的 intent 会进入 dispatcher 本地等待队列并在锁释放后优先派发。服务端只持久化该字段，不提供跨 dispatcher 的分布式锁。
 
 请求体里的文本字段（如 `title`、`content`、`description`、`creator`、`worker`、`trigger`）以及 `from` 中的 Fact id，服务端都会先做首尾空白裁剪；裁剪后若为空，则返回 `422`。
 
@@ -223,6 +227,7 @@ Body：
     "title": "xx渗透测试",
     "status": "active",
     "bootstrap_enabled": true,
+    "session_lock_enabled": true,
     "created_at": "2026-03-21T10:00:00Z",
     "reason": {
       "worker": "dispatcher-worker-A",
@@ -243,7 +248,7 @@ Body：
 
 #### POST /projects
 
-创建新项目。`origin` 和 `goal` 写入 `facts` 作为特殊 Fact。`hints` 可选。`mode` 可选，默认为 `standard`；`src` 表示 SRC 漏洞挖掘模式。`bootstrap_enabled` 可选；未传时 `standard` 默认为 `true`，`src` 默认为 `false`。即使为 `true`，消费者没有 bootstrap 能力时也可直接进入 reason。
+创建新项目。`origin` 和 `goal` 写入 `facts` 作为特殊 Fact。`hints` 可选。`mode` 可选，默认为 `standard`；`src` 表示 SRC 漏洞挖掘模式。`bootstrap_enabled` 可选；未传时 `standard` 默认为 `true`，`src` 默认为 `false`。`session_lock_enabled` 可选，默认 `true`。即使 bootstrap 为 `true`，消费者没有 bootstrap 能力时也可直接进入 reason。
 
 Body：
 
@@ -254,6 +259,7 @@ Body：
   "goal": "拿到 flag",
   "mode": "standard",
   "bootstrap_enabled": true,
+  "session_lock_enabled": true,
   "hints": [
     { "content": "优先看 web 服务", "creator": "human" },
     { "content": "注意 80 端口", "creator": "human" }
@@ -372,6 +378,22 @@ Body：
   "reason": null
 }
 ```
+
+---
+
+#### PUT /projects/{project_id}/settings
+
+修改项目设置。当前支持 `session_lock_enabled`，用于开启或关闭同项目 locked intent 的本地互斥调度。该操作不改变项目图，也不释放当前 intent claim 或 reason lease；`active`、`stopped`、`completed` 项目均允许修改。
+
+Body：
+
+```json
+{
+  "session_lock_enabled": true
+}
+```
+
+响应：更新后的 Project 元信息。
 
 ---
 
@@ -497,11 +519,12 @@ Body：
   "from": ["f001"],
   "description": "http 服务探测与目录扫描",
   "creator": "agent-A",
-  "worker": null
+  "worker": null,
+  "session_lock": false
 }
 ```
 
-`from` 为数组，至少包含一个 Fact id。`worker` 可为 `null` 或等于 `creator`；`null` 表示只声明不认领，等于 `creator` 表示声明并立即认领。多个 Fact 共同驱动同一次探索时，全部列入 `from`，完整保留因果关系。例如：
+`from` 为数组，至少包含一个 Fact id。`worker` 可为 `null` 或等于 `creator`；`null` 表示只声明不认领，等于 `creator` 表示声明并立即认领。`session_lock` 可选，默认 `false`；涉及登录态、Cookie、Token、账号状态、认证链路或共享会话的 intent 应设为 `true`。多个 Fact 共同驱动同一次探索时，全部列入 `from`，完整保留因果关系。例如：
 
 `from` 不能包含 `goal`。
 
@@ -514,7 +537,8 @@ Body：
   "from": ["f002", "f004"],
   "description": "用 f004 获取的凭据登录 f002 发现的后台",
   "creator": "agent-A",
-  "worker": "agent-A"
+  "worker": "agent-A",
+  "session_lock": true
 }
 ```
 
@@ -701,6 +725,7 @@ project:
   origin: "目标 http://192.168.1.10"
   goal: "拿到 flag"
   bootstrap_enabled: true
+  session_lock_enabled: true
 
 hints:
   - content: "优先看 web 服务"
@@ -738,6 +763,7 @@ intents:
     description: "nmap 全端口扫描"
     creator: "agent-A"
     worker: "agent-A"
+    session_lock: false
     created_at: "2026-03-21 18:01:00"
     concluded_at: "2026-03-21 18:02:00"
 
@@ -778,6 +804,7 @@ intents:
     description: "用 f004 获取的凭据登录 f002 发现的后台"
     creator: "agent-A"
     worker: "agent-B"
+    session_lock: true
     created_at: "2026-03-21 18:05:30"
     concluded_at: "2026-03-21 18:06:00"
 

@@ -72,6 +72,7 @@ class Intent(BaseModel):
     description: str
     creator: str
     worker: str | None = None
+    session_lock: bool = False
     last_heartbeat_at: str | None = None
     created_at: str
     concluded_at: str | None = None
@@ -99,6 +100,7 @@ class ProjectMeta(BaseModel):
     status: Literal["active", "stopped", "completed"]
     mode: ProjectMode = "standard"
     bootstrap_enabled: bool
+    session_lock_enabled: bool = True
     created_at: str
     reason: ProjectReason | None = None
 
@@ -139,6 +141,7 @@ class CreateProjectRequest(BaseModel):
     goal: str
     mode: ProjectMode = "standard"
     bootstrap_enabled: bool | None = None
+    session_lock_enabled: bool = True
     hints: list[CreateHintInline] | None = None
 
     @field_validator("title", "origin", "goal")
@@ -168,6 +171,7 @@ class CreateIntentRequest(BaseModel):
     description: str
     creator: str
     worker: str | None = None
+    session_lock: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -279,6 +283,10 @@ class UpdateProjectTitleRequest(BaseModel):
         if not text:
             raise ValueError("must not be empty")
         return text
+
+
+class UpdateProjectSettingsRequest(BaseModel):
+    session_lock_enabled: bool
 
 
 class ReopenRequest(BaseModel):
