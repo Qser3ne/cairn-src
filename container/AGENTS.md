@@ -29,7 +29,6 @@
 - 容器内已预装常见安全工具，可直接尝试，例如 `nuclei`、`ffuf`、`dirsearch`、`katana`、`dalfox`、`naabu`、`nikto`、`netexec`、`impacket-*`、`proxychains`、`chisel-common-binaries`。
 - 常用本地资源：
   - `/home/kali/.local/nuclei-templates`
-  - `/home/kali/pocs`
   - `/home/kali/tools`
   - `/home/kali/knowledges`
   - `/usr/share/chisel-common-binaries`
