@@ -1,17 +1,15 @@
 cd /home/qser3ne/Application/carin
 
-BUILD_HTTP_PROXY=${BUILD_HTTP_PROXY:-http://http.docker.internal:3128}
-BUILD_HTTPS_PROXY=${BUILD_HTTPS_PROXY:-$BUILD_HTTP_PROXY}
-BUILD_NO_PROXY=${BUILD_NO_PROXY:-127.0.0.1,localhost,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
+KALI_MIRROR=${KALI_MIRROR:-http://kali.download/kali}
 
 # 1. 重建主服务镜像并重启 compose 服务
 docker compose up --build -d
 
 # 2. 重建 worker 镜像
 docker build \
-  --build-arg http_proxy="${BUILD_HTTP_PROXY}" \
-  --build-arg https_proxy="${BUILD_HTTPS_PROXY}" \
-  --build-arg no_proxy="${BUILD_NO_PROXY}" \
+  --pull \
+  --progress=plain \
+  --build-arg KALI_MIRROR="${KALI_MIRROR}" \
   -t cairn-worker-container:latest \
   ./container
 

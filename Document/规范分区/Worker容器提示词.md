@@ -13,11 +13,11 @@
 - 已加入安全红线：不得爆破、不得修改目标文件或数据、不得影响目标业务可用性。
 - 已加入涂鸦 SRC 漏洞评级与忽略范围，供 worker 判断 finding 严重性和是否应提交。
 - 已要求长输出保存到 workspace 文件，并在结论中引用路径。
-- 当前 `container/Dockerfile` 继续采用从 `kalilinux/kali-rolling:latest` 开始的全量本地构筑。
-- 为减轻弱网重试成本，构筑已拆成多层，并对 `apt/git/npm/pip/wget/curl/playwright` 统一引入构筑期代理与重试策略。
-- Docker build 不会自动继承 WSL 里的本地代理，例如 `127.0.0.1:7897`；必须通过 `--build-arg http_proxy/https_proxy/no_proxy` 显式传入。
-- 默认构筑代理入口由 `start.sh` 提供：`BUILD_HTTP_PROXY`、`BUILD_HTTPS_PROXY`、`BUILD_NO_PROXY`。
-- 当前环境下默认值改为 `http://http.docker.internal:3128`，因为实测它对 `apt/git/pip/wget` 的稳定性高于 `host.docker.internal:7897`。
+- 当前 `container/Dockerfile` 采用 `kalilinux/kali-last-release:latest` 作为基镜像，并通过 `KALI_MIRROR` 指向 `kali-last-snapshot` 源。
+- 已移除 `kali-linux-headless`，改为显式安装 SRC worker 常用包，避免 Kali headless 元包拉取上千个不常用依赖。
+- 显式 apt 包覆盖基础 CLI、Python/Node、网络诊断、Web/SRC 扫描、目录枚举、AD/内网辅助、Playwright Chromium 运行库、云 CLI 前置依赖。
+- `ripgrep` 和 `fd-find` 改从 Kali apt 源安装，并创建 `/usr/local/bin/fd -> /usr/bin/fdfind` 兼容链接，减少 GitHub release 下载点。
+- 构筑仍保留 apt 缓存 mount 和 apt 网络重试配置；如默认镜像源不可用，可通过 `--build-arg KALI_MIRROR=<mirror>` 覆盖。
 
 ## 验收方式
 
@@ -27,5 +27,5 @@
   - `COPY ./AGENTS.md /home/kali/workspace/AGENTS.md`
   - `COPY ./AGENTS.md /home/kali/workspace/CLAUDE.md`
 - `container/Dockerfile` 不应再拉取 `PayloadsAllTheThings`，也不应再创建 `/home/kali/pocs`。
-- 全量构筑命令应支持 `BUILD_HTTP_PROXY`、`BUILD_HTTPS_PROXY`、`BUILD_NO_PROXY` 三个可覆盖的构筑期环境变量。
+- 全量构筑命令应支持 `KALI_MIRROR` 构筑参数，用于切换 Kali apt 镜像源。
 - 这是提示词和文档变更，不需要运行 Python 单元测试。
