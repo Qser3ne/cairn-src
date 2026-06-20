@@ -15,9 +15,12 @@
 - 如遇到不支持 Docker init 的特殊环境，可以在调度配置中设置 `container.init: false` 临时关闭。
 - Worker 镜像通过 `container/Dockerfile` 从 `kalilinux/kali-rolling:latest` 本地构筑，而不是复用预构筑 worker 基镜像。
 - Worker 镜像不再安装 `kali-linux-headless`；基础系统、黑盒 SRC 常用工具、少量白盒/依赖审计工具和 Playwright Chromium 运行库由 Dockerfile 显式包列表控制。
+- Worker 镜像新增 Web SRC 轻量工具链：`subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`。
+- `gf` 和 `kxss` 通过 Docker 多阶段 builder 使用 Kali `golang-go` 编译，最终镜像只复制二进制，不保留 Go 工具链。
+- `gf` 预置常用 Web SRC patterns 到 `/home/kali/.gf`，用于线索过滤，不作为漏洞判断依据。
 - Worker 镜像不再内置大型知识库和重型 POC 仓库；如任务需要，应通过运行时只读挂载提供源码、样本或外部资料。
 - Worker 镜像固定创建 `/home/kali/workspace`、`/home/kali/reports`、`/home/kali/evidence`、`/home/kali/targets`、`/home/kali/cache`，并统一归属 `kali:kali`。
-- Worker 镜像构筑支持 `OSV_SCANNER_VERSION` build arg，用于固定 `osv-scanner` 版本；默认入口在项目根 `start.sh` 中。
+- Worker 镜像构筑支持 `OSV_SCANNER_VERSION` 等 build arg，用于固定 `osv-scanner`、Web SRC release 工具和源码 commit；默认入口在项目根 `start.sh` 中。
 - `start.sh` 当前对 worker 镜像使用 `--pull --progress=plain` 重建，优先获取最新基镜像并输出完整构筑日志。
 - Worker 构筑默认保留 Docker 层缓存；如需完全重建，可在手动构筑时额外追加 `--no-cache`。
 - Dockerfile 中的 apt 层保留 BuildKit cache mount 和 apt 网络重试配置，用于降低中途失败后的重复下载成本。

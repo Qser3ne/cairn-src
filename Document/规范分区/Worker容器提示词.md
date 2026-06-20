@@ -15,6 +15,9 @@
 - 已要求长输出、扫描日志、截图、PoC 输出和请求响应摘要保存到 `/home/kali/evidence`，最终报告草稿保存到 `/home/kali/reports`，并在结论中引用路径。
 - 已约定 `/home/kali/workspace` 用于任务过程文件，`/home/kali/targets` 用于只读挂载源码、样本或安装包，`/home/kali/cache` 用于工具缓存。
 - `container/AGENTS.md` 明确 worker 黑盒 SRC 工具优先，`semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner` 只作为白盒和依赖审计辅助；白盒结果必须落到真实外部入口和可复现攻击链，不能单独作为 SRC finding。
+- `container/AGENTS.md` 已加入 Web SRC 推荐流程：资产发现 -> 存活探测 -> URL 收集 -> 参数归一化 -> 低频验证 -> 证据保存 -> finding 判断。
+- Web SRC 轻量工具链包括 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`；这些工具多数用于产生线索，不能把扫描结果直接作为漏洞。
+- `interactsh-client` 仅用于当前授权目标的 OOB 验证，结论中必须记录 interaction ID、触发时间、目标入口和请求摘要。
 - 当前 `container/Dockerfile` 采用 `kalilinux/kali-rolling:latest` 作为基镜像。
 - 已移除 `kali-linux-headless`，改为显式安装 SRC worker 常用包，避免 Kali headless 元包拉取上千个不常用依赖。
 - 显式 apt 包覆盖基础 CLI、Python/Node、网络诊断、Web/SRC 扫描、目录枚举、AD/内网辅助、移动端基础分析、Playwright Chromium 运行库、云 CLI 前置依赖。
@@ -31,5 +34,6 @@
   - `COPY ./AGENTS.md /home/kali/workspace/CLAUDE.md`
 - `container/Dockerfile` 不应再拉取 `PayloadsAllTheThings`，也不应再创建 `/home/kali/pocs`。
 - `container/Dockerfile` 应创建 `/home/kali/workspace`、`/home/kali/reports`、`/home/kali/evidence`、`/home/kali/targets`、`/home/kali/cache`，并归属 `kali:kali`。
+- `container/Dockerfile` 应提供 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`，并预置 `/home/kali/.gf` 常用 patterns。
 - 全量构筑命令应支持 `OSV_SCANNER_VERSION` 构筑参数，用于固定 `osv-scanner` 版本。
 - 这是提示词和文档变更，不需要运行 Python 单元测试。

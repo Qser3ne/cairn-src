@@ -22,8 +22,10 @@ docker build \
 - 基础镜像：`kalilinux/kali-rolling:latest`，固定 `linux/amd64`。
 - 不安装 Kali headless 元包，改用显式 apt 包列表控制工具范围和镜像体积。
 - 黑盒 SRC 工具包括 `nuclei`、`katana`、`dalfox`、`ffuf`、`feroxbuster`、`gobuster`、`dirsearch`、`nikto`、`sqlmap`、`naabu`、`whatweb`、`wafw00f`、`netexec`、`impacket-*` 等。
+- Web SRC 轻量工具链包括 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`，覆盖资产发现、URL 收集、参数整理和 XSS/OOB 辅助。
 - 白盒和依赖审计工具包括 `semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner`。
 - 保留轻量手工工具和辅助材料：`jwt_tool`、`ysoserial.jar`、`jdwp-shellifier`、`cloudfox`、`kerbrute`、Playwright Chromium。
+- `gf` 预置少量常用 Web SRC patterns，位于 `/home/kali/.gf`。
 - 不再内置大型知识库和 POC 仓库；如任务需要，建议运行时以只读卷挂载。
 
 ## 目录约定
@@ -55,6 +57,10 @@ docker run --rm cairn-worker-container:latest bash -lc '
   pip-audit --version &&
   retire --version &&
   osv-scanner --version &&
+  for c in subfinder dnsx tlsx interactsh-client gau waybackurls uro qsreplace anew kxss gf; do
+    command -v "$c" >/dev/null || exit 1
+  done &&
+  gf -list | grep -E "xss|sqli|ssrf" &&
   test -d /home/kali/reports &&
   test -d /home/kali/evidence &&
   test -d /home/kali/targets &&
