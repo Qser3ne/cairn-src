@@ -17,3 +17,10 @@
 - 查看状态：`git status --short --branch`
 - 查看远程：`git remote -v`
 - 查看最近提交：`git log --oneline --decorate -5`
+
+## 项目级 Skill 约束
+
+- 项目级 Codex skill 放在 `.agent/skills/` 下。
+- `.agent/skills/project-maintenance` 是项目修改后的收尾维护规则，采用被动触发。
+- 每次完成项目修改后，需要阅读 `Document/` 下相关文档，检查本次修改是否影响项目内提示词，并按需同步修正文档和提示词。
+- 任务完成后的最终回复需要包含 `√ <任务>`。

@@ -1,0 +1,7 @@
+interface:
+  display_name: "项目维护同步"
+  short_description: "项目修改后的文档和提示词同步检查"
+  default_prompt: "使用 $project-maintenance 执行项目修改后的文档与提示词同步检查。"
+
+policy:
+  allow_implicit_invocation: true
