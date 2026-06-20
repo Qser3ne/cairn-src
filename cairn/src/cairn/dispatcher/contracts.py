@@ -29,10 +29,7 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict):
         return False
     keys = set(payload)
-    if keys == {"complete"}:
-        complete = payload["complete"]
-        return isinstance(complete, dict) and "from" in complete and "description" in complete
-    if keys == {"intents"}:
+    if keys == {"intents"} or keys == {"decision", "intents"} or keys == {"decision", "coverage", "intents"}:
         return isinstance(payload["intents"], list)
     if keys == {"intent"}:
         intent = payload["intent"]
@@ -43,21 +40,6 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
 def _validate_reason_intent(intent: Any, index: int) -> None:
     if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
         raise ValueError(f"invalid intent at index {index}")
-
-
-def _looks_like_bootstrap_execute_data(payload: dict[str, Any]) -> bool:
-    if not isinstance(payload, dict) or set(payload) != {"fact", "complete"}:
-        return False
-    return _is_dict(payload.get("fact")) and _is_dict(payload.get("complete"))
-
-
-def _looks_like_bootstrap_conclude_data(payload: dict[str, Any]) -> bool:
-    if not isinstance(payload, dict):
-        return False
-    keys = set(payload)
-    if keys not in ({"fact"}, {"fact", "complete"}):
-        return False
-    return _is_dict(payload.get("fact"))
 
 
 def _looks_like_explore_data(payload: dict[str, Any]) -> bool:
@@ -76,28 +58,26 @@ def validate_reason_payload(
         data = payload
     if not isinstance(data, dict):
         raise ValueError("accepted must be true or false")
-    complete = data.get("complete")
+    if data.get("complete") is not None:
+        raise ValueError("complete payload is not supported in SRC-only mode")
+    decision = data.get("decision")
     intents = data.get("intents")
     # backward compat: accept singular "intent" key from LLMs
     if intents is None:
         singular = data.get("intent")
         if isinstance(singular, dict):
             intents = [singular]
-    if complete is not None:
-        if intents is not None:
-            raise ValueError("complete and intents cannot coexist")
-        if not isinstance(complete, dict) or "from" not in complete or "description" not in complete:
-            raise ValueError("invalid complete payload")
-        return "complete", complete
     if intents is not None:
         if not isinstance(intents, list):
             raise ValueError("intents must be an array")
         for i, intent in enumerate(intents):
             _validate_reason_intent(intent, i)
-        if not intents and open_intents_empty:
+        if not intents and open_intents_empty and decision not in ("noop", "no_new_high_value"):
             raise ValueError("intents must not be empty when open_intents is empty")
         intents = intents[:max_intents]
         if not intents:
+            if decision == "no_new_high_value":
+                return "stable", None
             return "noop", None
         return "intents", intents
     if open_intents_empty:
@@ -105,57 +85,35 @@ def validate_reason_payload(
     return "noop", None
 
 
-def validate_bootstrap_execute_payload(payload: dict[str, Any]) -> tuple[str, dict[str, str] | None]:
+def validate_judge_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     accepted, data = _unwrap_wrapped_payload(payload)
     if accepted is False:
         return "rejected", None
     if accepted is None:
-        if not _looks_like_bootstrap_execute_data(payload):
-            raise ValueError("accepted must be true or false")
-        data = payload
-    if not isinstance(data, dict):
         raise ValueError("accepted must be true or false")
-
-    fact = data.get("fact")
-    if not isinstance(fact, dict):
-        raise ValueError("fact is required")
-    fact_description = fact.get("description")
-    if not isinstance(fact_description, str) or not fact_description.strip():
-        raise ValueError("fact.description is required")
-
-    result = {"fact_description": fact_description.strip()}
-    complete = data.get("complete")
-    if complete is None:
-        raise ValueError("complete is required")
-    if not isinstance(complete, dict):
-        raise ValueError("complete must be an object")
-    complete_description = complete.get("description")
-    if not isinstance(complete_description, str) or not complete_description.strip():
-        raise ValueError("complete.description is required")
-    result["complete_description"] = complete_description.strip()
-    return "complete", result
+    if not isinstance(data, dict):
+        raise ValueError("data must be an object")
+    verdict = data.get("verdict")
+    if verdict not in ("ready", "not_ready", "blocked"):
+        raise ValueError("verdict must be ready, not_ready, or blocked")
+    return "judge", data
 
 
-def validate_bootstrap_conclude_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
+def validate_report_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     accepted, data = _unwrap_wrapped_payload(payload)
     if accepted is False:
         return "rejected", None
     if accepted is None:
-        if not _looks_like_bootstrap_conclude_data(payload):
-            raise ValueError("accepted must be true or false")
-        data = payload
-    if not isinstance(data, dict):
         raise ValueError("accepted must be true or false")
-    extra_keys = set(data) - {"fact", "complete"}
-    if extra_keys:
-        raise ValueError("unexpected keys in conclude payload")
-    fact = data.get("fact")
-    if not isinstance(fact, dict):
-        raise ValueError("fact is required")
-    fact_description = fact.get("description")
-    if not isinstance(fact_description, str) or not fact_description.strip():
-        raise ValueError("fact.description is required")
-    return "fact", fact_description.strip()
+    if not isinstance(data, dict):
+        raise ValueError("data must be an object")
+    report_markdown = data.get("report_markdown")
+    if not isinstance(report_markdown, str) or not report_markdown.strip():
+        raise ValueError("report_markdown is required")
+    report_json = data.get("report_json", {})
+    if not isinstance(report_json, dict):
+        raise ValueError("report_json must be an object")
+    return "report", {"report_markdown": report_markdown.strip(), "report_json": report_json}
 
 
 def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:

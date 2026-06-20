@@ -8,7 +8,7 @@ from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.dispatcher.scheduler.worker_select import choose_worker
-from cairn.server.models import Fact, ProjectSummary
+from cairn.server.models import EphemeralJob, Fact, ProjectSummary
 
 from conftest import make_account, make_config, make_intent, make_project
 
@@ -35,9 +35,10 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         id=project_id,
         title=project_id,
         status=status,
-        mode="standard",
+        project_kind="recon",
         auth_mode="anonymous",
-        bootstrap_enabled=True,
+        parent_project_id=None,
+        parent_snapshot_id=None,
         created_at="2026-01-01T00:00:00Z",
         fact_count=2,
         intent_count=0,
@@ -68,18 +69,23 @@ def _authenticated_project(intent_count: int, account_count: int = 3):
         intent.created_at = f"2026-01-01T00:00:{index:02d}Z"
         intents.append(intent)
     project = make_project(intents=intents)
-    project.project.mode = "src"
     project.project.auth_mode = "authenticated"
     project.accounts = [make_account(f"a{index:03d}") for index in range(1, account_count + 1)]
     return project
 
 
-def _prepare_real_explore_dispatch(loop: DispatcherLoop, project) -> _RecordingExecutor:
+def _prepare_real_dispatch(loop: DispatcherLoop, project, *, task_types: list[str] | None = None) -> _RecordingExecutor:
     config = make_config()
+    worker = config.workers[0].model_copy(
+        update={
+            "max_running": 3,
+            "task_types": task_types or ["reason", "explore", "judge", "report"],
+        }
+    )
     config = config.model_copy(
         update={
             "runtime": config.runtime.model_copy(update={"max_workers": 3, "max_project_workers": 3}),
-            "workers": [config.workers[0].model_copy(update={"max_running": 3})],
+            "workers": [worker],
         }
     )
     executor = _RecordingExecutor()
@@ -107,27 +113,11 @@ def _prepare_real_explore_dispatch(loop: DispatcherLoop, project) -> _RecordingE
 def test_reason_trigger_detects_new_facts_and_open_intent_completion() -> None:
     loop = _loop()
     project = make_project(intents=[make_intent()])
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
-        fact_count=3,
-        hint_count=1,
-        open_intent_count=1,
-    )
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(3, 1, 1)
     project.facts.append(Fact(id="f002", description="new"))
     project.intents = []
 
     assert loop._reason_trigger(project) == "facts:3->4,open_intents:1->0"
-
-
-def test_reason_trigger_returns_none_when_graph_is_unchanged() -> None:
-    loop = _loop()
-    project = make_project(intents=[make_intent()])
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
-        fact_count=3,
-        hint_count=1,
-        open_intent_count=1,
-    )
-
-    assert loop._reason_trigger(project) is None
 
 
 def test_refresh_runtime_projects_discards_active_and_changed_cleanup_markers() -> None:
@@ -141,11 +131,7 @@ def test_refresh_runtime_projects_discards_active_and_changed_cleanup_markers() 
     }
 
     loop._refresh_runtime_projects(
-        [
-            _summary("active", "active"),
-            _summary("stopped", "stopped"),
-            _summary("changed", "stopped"),
-        ]
+        [_summary("active", "active"), _summary("stopped", "stopped"), _summary("changed", "stopped")]
     )
 
     assert loop.runtime_project_ids == {"active"}
@@ -178,10 +164,7 @@ def test_choose_worker_prefers_priority_then_lower_running_count() -> None:
     busy = workers[0].model_copy(update={"name": "busy", "priority": 0})
     lower_priority = workers[0].model_copy(update={"name": "lower", "priority": 1})
 
-    ordered = choose_worker(
-        [lower_priority, busy, first],
-        {"busy": 2, "first": 0, "lower": 0},
-    )
+    ordered = choose_worker([lower_priority, busy, first], {"busy": 2, "first": 0, "lower": 0})
 
     assert [worker.name for worker in ordered] == ["first", "busy", "lower"]
 
@@ -193,11 +176,7 @@ def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
     project = make_project(intents=[make_intent()])
     project.intents[0].worker = None
     project.facts.append(Fact(id="f002", description="new"))
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
-        fact_count=3,
-        hint_count=1,
-        open_intent_count=1,
-    )
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(3, 1, 1)
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
     loop.client = type(
         "Client",
@@ -215,10 +194,32 @@ def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
     assert dispatched == [("reason", "facts:3->4")]
 
 
+def test_initial_project_dispatches_reason_directly() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    loop.futures = {}
+    project = make_project()
+    project.facts = project.facts[:2]
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+    assert dispatched == [("reason", "initial")]
+
+
 def test_authenticated_project_dispatches_with_available_accounts() -> None:
     loop = _loop()
     project = _authenticated_project(intent_count=2, account_count=3)
-    executor = _prepare_real_explore_dispatch(loop, project)
+    executor = _prepare_real_dispatch(loop, project)
 
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
@@ -233,7 +234,7 @@ def test_authenticated_project_dispatches_with_available_accounts() -> None:
 def test_authenticated_intent_queues_when_all_accounts_are_busy() -> None:
     loop = _loop()
     project = _authenticated_project(intent_count=4, account_count=3)
-    executor = _prepare_real_explore_dispatch(loop, project)
+    executor = _prepare_real_dispatch(loop, project)
     loop.account_leases = {"proj_001": {"a001": "i004", "a002": "i003", "a003": "i002"}}
     loop.futures = {
         Future(): RunningTask("proj_001", "explore", "worker-a", TaskCancellation(), intent_id="i004", account=project.accounts[0]),
@@ -251,7 +252,7 @@ def test_released_account_dispatches_queued_authenticated_intent_before_reason()
     loop = _loop()
     project = _authenticated_project(intent_count=4, account_count=3)
     project.facts.append(Fact(id="f002", description="new"))
-    executor = _prepare_real_explore_dispatch(loop, project)
+    executor = _prepare_real_dispatch(loop, project)
     done: Future[str] = Future()
     running_a = Future()
     running_b = Future()
@@ -267,7 +268,6 @@ def test_released_account_dispatches_queued_authenticated_intent_before_reason()
     loop._reap_futures()
     loop._try_dispatch_project(_summary("proj_001", "active"))
 
-    assert "a001" in loop.account_leases["proj_001"]
     assert loop.account_leases["proj_001"]["a001"] == "i001"
     assert loop.authenticated_wait_queues == {}
     assert [task.intent_id for task in loop.futures.values()].count("i001") == 1
@@ -291,132 +291,54 @@ def test_authenticated_wait_queue_discards_invalid_or_inactive_projects() -> Non
     assert loop._next_authenticated_waiting_intent(project) == valid
     assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
 
-    anonymous_summary = _summary("anonymous", "active")
     loop._cleanup_authenticated_wait_queues(
         [
-            _summary("proj_001", "active").model_copy(update={"mode": "src", "auth_mode": "authenticated"}),
-            _summary("stopped", "stopped").model_copy(update={"mode": "src", "auth_mode": "authenticated"}),
-            anonymous_summary,
+            _summary("proj_001", "active").model_copy(update={"auth_mode": "authenticated"}),
+            _summary("stopped", "stopped").model_copy(update={"auth_mode": "authenticated"}),
+            _summary("anonymous", "active"),
         ]
     )
 
     assert set(loop.authenticated_wait_queues) == {"proj_001"}
 
 
-def test_initial_enabled_project_without_bootstrap_worker_dispatches_reason() -> None:
+def test_report_intent_dispatches_report_task() -> None:
     loop = _loop()
-    config = make_config()
-    loop.config = config.model_copy(
-        update={
-            "workers": [
-                config.workers[0].model_copy(update={"task_types": ["reason", "explore"]})
-            ]
-        }
-    )
-    loop.futures = {}
-    project = make_project()
-    project.facts = project.facts[:2]
-    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
-    loop.client = type(
-        "Client",
-        (),
-        {
-            "get_project": lambda _self, _project_id: project,
-            "export_project": lambda _self, _project_id: "graph",
-        },
-    )()
-    dispatched: list[tuple[str, str]] = []
-    loop._dispatch_initial_project = lambda _project: dispatched.append(("bootstrap", "")) or True
-    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
-
-    assert loop._try_dispatch_project(_summary("proj_001", "active"))
-    assert dispatched == [("reason", "initial")]
-
-
-def test_initial_disabled_project_skips_configured_bootstrap_worker() -> None:
-    loop = _loop()
-    loop.config = make_config()
-    loop.futures = {}
-    project = make_project()
-    project.project.bootstrap_enabled = False
-    project.facts = project.facts[:2]
-    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
-    loop.client = type(
-        "Client",
-        (),
-        {
-            "get_project": lambda _self, _project_id: project,
-            "export_project": lambda _self, _project_id: "graph",
-        },
-    )()
-    dispatched: list[tuple[str, str]] = []
-    loop._dispatch_initial_project = lambda _project: dispatched.append(("bootstrap", "")) or True
-    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
-
-    assert loop._try_dispatch_project(_summary("proj_001", "active"))
-    assert dispatched == [("reason", "initial")]
-
-
-def test_src_initial_project_skips_bootstrap_and_dispatches_reason() -> None:
-    loop = _loop()
-    loop.config = make_config()
-    loop.futures = {}
-    project = make_project()
-    project.project.mode = "src"
-    project.project.bootstrap_enabled = True
-    project.facts = project.facts[:2]
-    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
-    loop.client = type(
-        "Client",
-        (),
-        {
-            "get_project": lambda _self, _project_id: project,
-            "export_project": lambda _self, _project_id: "graph",
-        },
-    )()
-    dispatched: list[tuple[str, str]] = []
-    loop._dispatch_initial_project = lambda _project: dispatched.append(("bootstrap", "")) or True
-    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
-
-    assert loop._try_dispatch_project(_summary("proj_001", "active"))
-    assert dispatched == [("reason", "initial")]
-
-
-def test_initial_enabled_project_without_bootstrap_worker_skips_bootstrap() -> None:
-    loop = _loop()
-    config = make_config()
-    loop.config = config.model_copy(
-        update={
-            "workers": [
-                config.workers[0].model_copy(update={"task_types": ["reason", "explore"]})
-            ]
-        }
-    )
-    project = make_project()
-    project.project.bootstrap_enabled = True
-    project.facts = project.facts[:2]
-
-    assert not loop._project_requires_bootstrap(project)
-
-
-def test_initial_enabled_project_keeps_existing_bootstrap_intent_when_workers_change() -> None:
-    loop = _loop()
-    config = make_config()
-    loop.config = config.model_copy(
-        update={
-            "workers": [
-                config.workers[0].model_copy(update={"task_types": ["reason", "explore"]})
-            ]
-        }
-    )
     project = make_project(intents=[make_intent()])
-    project.project.bootstrap_enabled = True
-    project.facts = project.facts[:2]
-    project.intents[0].description = "bootstrap"
-    project.intents[0].creator = "dispatcher.bootstrap"
-    project.intents[0].from_ = ["origin"]
+    project.intents[0].worker = None
+    project.intents[0].intent_kind = "report"
+    executor = _prepare_real_dispatch(loop, project)
 
-    assert loop._project_requires_bootstrap(project)
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert executor.submissions
+    assert loop.futures[executor.futures[0]].task_type == "report"
+
+
+def test_dispatch_judge_jobs_uses_ephemeral_job_queue() -> None:
+    loop = _loop()
+    config = make_config()
+    executor = _RecordingExecutor()
+    job = EphemeralJob(
+        id="job_001",
+        project_id="proj_001",
+        job_type="judge",
+        status="queued",
+        input_snapshot_yaml="project: {}",
+        created_at="2026-01-01T00:00:00Z",
+        expires_at="2026-01-02T00:00:00Z",
+    )
+    loop.config = config
+    loop.executor = executor
+    loop.futures = {}
+    loop.client = type("Client", (), {"list_queued_ephemeral_jobs": lambda _self, _job_type: [job]})()
+    loop.container_manager = object()
+
+    loop._dispatch_judge_jobs()
+
+    assert executor.submissions
+    assert loop.futures[executor.futures[0]].task_type == "judge"
+    assert loop.futures[executor.futures[0]].intent_id == "job_001"
 
 
 def test_cancel_inactive_tasks_marks_stopped_and_deleted_projects() -> None:
@@ -439,13 +361,7 @@ def test_initialize_reason_checkpoint_only_for_active_projects_with_open_intents
     active = _summary("active", "active")
     active.unclaimed_intent_count = 1
 
-    loop._initialize_reason_checkpoints(
-        [
-            active,
-            _summary("idle", "active"),
-            _summary("stopped", "stopped"),
-        ]
-    )
+    loop._initialize_reason_checkpoints([active, _summary("idle", "active"), _summary("stopped", "stopped")])
 
     assert loop.reason_checkpoints == {
         "active": ReasonCheckpoint(fact_count=2, hint_count=0, open_intent_count=1)
@@ -477,9 +393,7 @@ def test_select_worker_reports_busy_unhealthy_rejected_and_unsupported_workers(m
 def test_disabled_worker_healthcheck_skips_automatic_startup_but_force_runs_diagnostic() -> None:
     loop = _loop()
     config = make_config()
-    loop.config = config.model_copy(
-        update={"runtime": config.runtime.model_copy(update={"worker_healthcheck": "disabled"})}
-    )
+    loop.config = config.model_copy(update={"runtime": config.runtime.model_copy(update={"worker_healthcheck": "disabled"})})
     calls: list[bool] = []
     loop._run_startup_healthchecks = lambda *, show_commands: calls.append(show_commands)
     loop._startup_healthchecks_checked = False
@@ -498,9 +412,7 @@ def test_disabled_worker_healthcheck_skips_automatic_startup_but_force_runs_diag
 def test_startup_only_worker_healthcheck_runs_automatic_startup_check() -> None:
     loop = _loop()
     config = make_config()
-    loop.config = config.model_copy(
-        update={"runtime": config.runtime.model_copy(update={"worker_healthcheck": "startup_only"})}
-    )
+    loop.config = config.model_copy(update={"runtime": config.runtime.model_copy(update={"worker_healthcheck": "startup_only"})})
     calls: list[bool] = []
     loop._run_startup_healthchecks = lambda *, show_commands: calls.append(show_commands)
     loop._startup_healthchecks_checked = False

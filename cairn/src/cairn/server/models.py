@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-ProjectMode = Literal["standard", "src"]
-ProjectAuthMode = Literal["anonymous", "authenticated"]
+ProjectKind = Literal["recon", "vuln"]
+AuthMode = Literal["anonymous", "authenticated"]
+ProjectStatus = Literal["active", "stopped", "completed"]
+JudgeStatus = Literal["not_judged", "ready", "not_ready", "blocked"]
+ResearchValue = Literal["unknown", "high", "medium", "low", "none"]
+FindingNextAction = Literal["triage", "follow_up", "report", "close"]
+ReportStatus = Literal["not_started", "queued", "drafted", "submitted", "closed"]
+IntentKind = Literal["explore", "report"]
+EphemeralJobStatus = Literal["queued", "running", "succeeded", "failed", "expired"]
 
 
 class Settings(BaseModel):
@@ -31,6 +38,14 @@ class Finding(BaseModel):
     reproduction: str
     remediation: str
     status: str
+    research_value: ResearchValue = "unknown"
+    next_action: FindingNextAction = "triage"
+    followup_reason: str = ""
+    followup_intent_description: str = ""
+    followup_intent_id: str | None = None
+    report_status: ReportStatus = "not_started"
+    report_intent_id: str | None = None
+    triaged_at: str | None = None
     fact_id: str
     intent_id: str
     created_at: str
@@ -47,6 +62,10 @@ class FindingCreate(BaseModel):
     reproduction: str = ""
     remediation: str = ""
     status: str = "open"
+    research_value: ResearchValue = "unknown"
+    next_action: FindingNextAction = "triage"
+    followup_reason: str = ""
+    followup_intent_description: str = ""
 
     @field_validator(
         "title",
@@ -59,11 +78,19 @@ class FindingCreate(BaseModel):
         "reproduction",
         "remediation",
         "status",
+        "followup_reason",
+        "followup_intent_description",
     )
     @classmethod
     def validate_text(cls, value: str) -> str:
         text = value.strip()
         return text
+
+    @model_validator(mode="after")
+    def validate_next_action(self) -> "FindingCreate":
+        if self.next_action == "follow_up" and not self.followup_intent_description.strip():
+            raise ValueError("followup_intent_description is required when next_action=follow_up")
+        return self
 
 
 class Intent(BaseModel):
@@ -76,6 +103,8 @@ class Intent(BaseModel):
     last_heartbeat_at: str | None = None
     created_at: str
     concluded_at: str | None = None
+    intent_kind: IntentKind = "explore"
+    finding_id: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -128,12 +157,19 @@ class ProjectReason(BaseModel):
 class ProjectMeta(BaseModel):
     id: str
     title: str
-    status: Literal["active", "stopped", "completed"]
-    mode: ProjectMode = "standard"
-    auth_mode: ProjectAuthMode = "anonymous"
-    bootstrap_enabled: bool
+    status: ProjectStatus
+    project_kind: ProjectKind
+    auth_mode: AuthMode = "anonymous"
+    parent_project_id: str | None = None
+    parent_snapshot_id: str | None = None
     created_at: str
     reason: ProjectReason | None = None
+    recon_max_reason_rounds: int | None = None
+    recon_reason_rounds: int = 0
+    recon_explore_rounds: int = 0
+    recon_stable_rounds: int = 0
+    judge_status: JudgeStatus = "not_judged"
+    judged_at: str | None = None
 
 
 class ProjectSummary(ProjectMeta):
@@ -168,12 +204,16 @@ class CreateHintInline(BaseModel):
 
 
 class CreateProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     origin: str
     goal: str
-    mode: ProjectMode = "standard"
-    auth_mode: ProjectAuthMode = "anonymous"
-    bootstrap_enabled: bool | None = None
+    project_kind: ProjectKind = "recon"
+    auth_mode: AuthMode = "anonymous"
+    parent_project_id: str | None = None
+    parent_snapshot_id: str | None = None
+    recon_max_reason_rounds: int | None = 8
     hints: list[CreateHintInline] | None = None
     accounts: list[ProjectAccountCreate] | None = None
 
@@ -186,14 +226,20 @@ class CreateProjectRequest(BaseModel):
         return text
 
     @model_validator(mode="after")
-    def validate_auth_mode_accounts(self) -> "CreateProjectRequest":
-        if self.mode != "src" and self.auth_mode != "anonymous":
-            raise ValueError("auth_mode=authenticated is only supported for src projects")
+    def validate_project_kind_and_accounts(self) -> "CreateProjectRequest":
+        if self.project_kind == "recon":
+            if self.parent_project_id is not None or self.parent_snapshot_id is not None:
+                raise ValueError("recon project cannot have parent_project_id or parent_snapshot_id")
+        if self.project_kind == "vuln":
+            if not self.parent_project_id:
+                raise ValueError("vuln project requires parent_project_id")
+            if not self.parent_snapshot_id:
+                raise ValueError("vuln project requires parent_snapshot_id")
         accounts = self.accounts or []
         if self.auth_mode != "authenticated" and accounts:
-            raise ValueError("accounts are only supported for authenticated src projects")
+            raise ValueError("accounts are only supported for authenticated projects")
         if self.auth_mode == "authenticated" and not accounts:
-            raise ValueError("authenticated src projects require at least one account")
+            raise ValueError("authenticated projects require at least one account")
         return self
 
 
@@ -215,6 +261,8 @@ class CreateIntentRequest(BaseModel):
     description: str
     creator: str
     worker: str | None = None
+    intent_kind: IntentKind = "explore"
+    finding_id: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -279,33 +327,6 @@ class ConcludeRequest(BaseModel):
         return text
 
 
-class CompleteRequest(BaseModel):
-    from_: list[str] = Field(alias="from", min_length=1)
-    description: str
-    worker: str
-
-    model_config = {"populate_by_name": True}
-
-    @field_validator("description", "worker")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
-    @field_validator("from_")
-    @classmethod
-    def validate_fact_ids(cls, value: list[str]) -> list[str]:
-        cleaned = []
-        for item in value:
-            text = item.strip()
-            if not text:
-                raise ValueError("fact ids must not be empty")
-            cleaned.append(text)
-        return cleaned
-
-
 class ConcludeResponse(BaseModel):
     fact: Fact
     intent: Intent
@@ -313,7 +334,7 @@ class ConcludeResponse(BaseModel):
 
 
 class UpdateProjectStatusRequest(BaseModel):
-    status: Literal["active", "stopped"]
+    status: ProjectStatus
 
 
 class UpdateProjectTitleRequest(BaseModel):
@@ -328,11 +349,82 @@ class UpdateProjectTitleRequest(BaseModel):
         return text
 
 
-class ReopenRequest(BaseModel):
-    description: str
-    creator: str
+class ReconReasonRoundRequest(BaseModel):
+    stable: bool = False
 
-    @field_validator("description", "creator")
+
+class ProjectSnapshotCreate(BaseModel):
+    snapshot_type: str = "recon_fork"
+    selected_fact_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("snapshot_type")
+    @classmethod
+    def validate_snapshot_type(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class ProjectSnapshot(BaseModel):
+    id: str
+    project_id: str
+    snapshot_type: str
+    summary_yaml: str
+    selected_fact_ids: list[str] = Field(default_factory=list)
+    stats: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class ForkVulnRequest(BaseModel):
+    title: str
+    auth_mode: AuthMode = "anonymous"
+    snapshot_id: str
+    candidate_limit: int | None = Field(default=None, ge=1)
+    accounts: list[ProjectAccountCreate] | None = None
+
+    @field_validator("title", "snapshot_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @model_validator(mode="after")
+    def validate_accounts(self) -> "ForkVulnRequest":
+        accounts = self.accounts or []
+        if self.auth_mode != "authenticated" and accounts:
+            raise ValueError("accounts are only supported for authenticated projects")
+        if self.auth_mode == "authenticated" and not accounts:
+            raise ValueError("authenticated vuln project requires at least one account")
+        return self
+
+
+class JudgementCreateResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class EphemeralJob(BaseModel):
+    id: str
+    project_id: str
+    job_type: str
+    status: EphemeralJobStatus
+    input_snapshot_yaml: str
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    worker: str | None = None
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    expires_at: str
+
+
+class EphemeralJobClaimRequest(BaseModel):
+    worker: str
+
+    @field_validator("worker")
     @classmethod
     def validate_non_empty_text(cls, value: str) -> str:
         text = value.strip()
@@ -341,7 +433,51 @@ class ReopenRequest(BaseModel):
         return text
 
 
-class ReopenResponse(BaseModel):
-    project: ProjectMeta
-    fact: Fact
-    intent: Intent
+class EphemeralJobFinishRequest(BaseModel):
+    worker: str
+    result: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("worker")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class EphemeralJobFailRequest(BaseModel):
+    worker: str
+    error: str
+
+    @field_validator("worker", "error")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class FindingReport(BaseModel):
+    id: str
+    project_id: str
+    finding_id: str
+    intent_id: str
+    report_markdown: str
+    report_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class ReportConcludeRequest(BaseModel):
+    worker: str
+    report_markdown: str
+    report_json: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("worker", "report_markdown")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text

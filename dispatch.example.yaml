@@ -24,11 +24,6 @@ runtime:
   prompt_group: "default"
 
 tasks:
-  bootstrap:
-    # Main execution timeout for the initial direct solve attempt.
-    timeout: 300
-    # Time budget for conclude fallback after the main phase times out or returns unusable output.
-    conclude_timeout: 90
   reason:
     # Reason decides whether the goal is met and whether new intents should be proposed.
     timeout: 300
@@ -39,6 +34,12 @@ tasks:
     timeout: 300
     # Time budget for conclude fallback used to summarize confirmed findings from the same session.
     conclude_timeout: 90
+  judge:
+    # Timeout for ephemeral recon readiness evaluation.
+    timeout: 120
+  report:
+    # Timeout for drafting SRC submission reports.
+    timeout: 180
 
 container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.
@@ -60,7 +61,7 @@ workers:
   # max_running is per-worker concurrency. Slower backends such as Pi usually benefit from lower values.
   - name: "claudecode_deepseek-v4-pro"
     type: "claudecode"
-    task_types: [bootstrap, reason, explore]
+    task_types: [reason, explore, judge, report]
     max_running: 2
     priority: 0
     env:
@@ -70,7 +71,7 @@ workers:
 
   - name: "codex_qwen3.6-plus"
     type: "codex"
-    task_types: [bootstrap,reason,explore]
+    task_types: [reason, explore, judge, report]
     max_running: 2
     priority: 0
     env:
@@ -80,7 +81,7 @@ workers:
 
   - name: "pi_qwen3.6-plus"
     type: "pi"
-    task_types: [bootstrap,reason,explore]
+    task_types: [reason, explore, judge, report]
     max_running: 2
     priority: 0
     env:

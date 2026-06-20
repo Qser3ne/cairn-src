@@ -24,7 +24,6 @@ if phase=="reason":
     if not prompt.get("open_intents"):
         weights.pop("noop",None)
     if not prompt.get("fact_ids"):
-        weights.pop("complete",None)
         weights.pop("intent",None)
 choices=[(name,weight) for name,weight in weights.items() if weight>0]
 if not choices:
@@ -73,9 +72,7 @@ if phase=="reason":
     fact_ids=prompt.get("fact_ids") or []
     max_i=prompt.get("max_intents",3)
     from_ids=[random.choice(fact_ids)] if fact_ids else []
-    if outcome=="complete":
-        print(json.dumps({"accepted":True,"data":{"complete":{"from":from_ids,"description":f"mock complete from {from_ids[0]}"}}}, ensure_ascii=False))
-    elif outcome=="intent":
+    if outcome=="intent":
         count=random.randint(1,max(1,max_i))
         intents=[]
         for idx in range(count):
@@ -86,31 +83,31 @@ if phase=="reason":
             })
         print(json.dumps({"accepted":True,"data":{"intents":intents}}, ensure_ascii=False))
     elif outcome=="noop":
+        print(json.dumps({"accepted":True,"data":{"decision":"noop","intents":[]}}, ensure_ascii=False))
+    elif outcome=="stable":
+        print(json.dumps({"accepted":True,"data":{"decision":"no_new_high_value","intents":[]}}, ensure_ascii=False))
+    elif outcome=="rejected":
+        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
+    else:
+        print(json.dumps({"accepted":True,"data":{"complete":{"description":"mock invalid payload"}}}, ensure_ascii=False))
+    raise SystemExit(0)
+
+if phase=="judge":
+    if outcome in ("ready","not_ready","blocked"):
+        print(json.dumps({"accepted":True,"data":{"verdict":outcome,"score":86,"recommended_action":"create_vuln_project","checklist":{},"blocking_gaps":[],"non_blocking_gaps":[]}}, ensure_ascii=False))
+    elif outcome=="rejected":
+        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
+    else:
+        print(json.dumps({"accepted":True,"data":{"verdict":"unknown"}}), ensure_ascii=False)
+    raise SystemExit(0)
+
+if phase=="report":
+    if outcome=="draft":
+        print(json.dumps({"accepted":True,"data":{"report_markdown":"# Mock report\\n\\nGenerated report.","report_json":{}}}, ensure_ascii=False))
+    elif outcome=="rejected":
+        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
+    else:
         print(json.dumps({"accepted":True,"data":{}}, ensure_ascii=False))
-    elif outcome=="rejected":
-        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
-    else:
-        print(json.dumps({"accepted":True,"data":{"complete":{"description":"mock invalid payload"}}}, ensure_ascii=False))
-    raise SystemExit(0)
-
-if phase=="bootstrap":
-    if outcome=="complete":
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock fact for bootstrap"},"complete":{"description":"mock bootstrap complete from fact"}}}, ensure_ascii=False))
-    elif outcome=="fact":
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock fact-only bootstrap result"}}}, ensure_ascii=False))
-    elif outcome=="rejected":
-        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
-    else:
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock invalid payload"}}}, ensure_ascii=False))
-    raise SystemExit(0)
-
-if phase=="bootstrap_conclude":
-    if outcome=="fact":
-        print(json.dumps({"accepted":True,"data":{"fact":{"description":"mock fact for bootstrap_conclude"}}}, ensure_ascii=False))
-    elif outcome=="rejected":
-        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
-    else:
-        print(json.dumps({"accepted":True,"data":{"complete":{"description":"mock invalid payload"}}}, ensure_ascii=False))
     raise SystemExit(0)
 
 if outcome=="fact":

@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+import json
+
+from fastapi import APIRouter, HTTPException
 
 from cairn.server.db import get_conn
 from cairn.server.models import (
@@ -8,17 +10,23 @@ from cairn.server.models import (
     Fact,
     HeartbeatRequest,
     Intent,
+    ReportConcludeRequest,
+    FindingReport,
 )
 from cairn.server.services import (
     check_duplicate_intent,
     check_project_active,
     finding_to_model,
+    finding_report_to_model,
+    get_finding_or_404,
     get_claimable_open_intent_or_404,
     get_releasable_open_intent_or_404,
+    increment_recon_explore_round,
     intent_to_model,
     next_fact_id,
     next_finding_id,
     next_intent_id,
+    next_report_id,
     utcnow,
     validate_facts_exist,
     validate_intent_creator_worker,
@@ -44,8 +52,26 @@ def create_intent(project_id: str, body: CreateIntentRequest):
         now = utcnow()
         iid = next_intent_id(conn, project_id)
         claimed = body.worker is not None
+        if body.intent_kind == "report":
+            if not body.finding_id:
+                raise HTTPException(400, "finding_id is required for report intents")
+            get_finding_or_404(conn, project_id, body.finding_id)
         conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL)",
+            """
+            INSERT INTO intents (
+                id,
+                project_id,
+                to_fact_id,
+                description,
+                creator,
+                worker,
+                last_heartbeat_at,
+                created_at,
+                concluded_at,
+                intent_kind,
+                finding_id
+            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?)
+            """,
             (
                 iid,
                 project_id,
@@ -54,6 +80,8 @@ def create_intent(project_id: str, body: CreateIntentRequest):
                 body.worker,
                 now if claimed else None,
                 now,
+                body.intent_kind,
+                body.finding_id,
             ),
         )
         for fid in body.from_:
@@ -72,6 +100,8 @@ def create_intent(project_id: str, body: CreateIntentRequest):
             last_heartbeat_at=now if claimed else None,
             created_at=now,
             concluded_at=None,
+            intent_kind=body.intent_kind,
+            finding_id=body.finding_id,
         )
 
 
@@ -159,8 +189,12 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
                     reproduction,
                     remediation,
                     status,
+                    research_value,
+                    next_action,
+                    followup_reason,
+                    followup_intent_description,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     finding_id,
@@ -177,14 +211,84 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
                     finding.reproduction,
                     finding.remediation,
                     finding.status,
+                    finding.research_value,
+                    finding.next_action,
+                    finding.followup_reason,
+                    finding.followup_intent_description,
                     now,
                 ),
             )
+            if finding.next_action == "follow_up":
+                followup_intent_id = next_intent_id(conn, project_id)
+                conn.execute(
+                    """
+                    INSERT INTO intents (
+                        id,
+                        project_id,
+                        to_fact_id,
+                        description,
+                        creator,
+                        worker,
+                        last_heartbeat_at,
+                        created_at,
+                        concluded_at,
+                        intent_kind,
+                        finding_id
+                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_followup', NULL, NULL, ?, NULL, 'explore', ?)
+                    """,
+                    (followup_intent_id, project_id, finding.followup_intent_description, now, finding_id),
+                )
+                conn.execute(
+                    "INSERT INTO intent_sources (intent_id, project_id, fact_id) VALUES (?, ?, ?)",
+                    (followup_intent_id, project_id, fid),
+                )
+                conn.execute(
+                    "UPDATE findings SET followup_intent_id = ? WHERE id = ? AND project_id = ?",
+                    (followup_intent_id, finding_id, project_id),
+                )
+            if finding.next_action == "report":
+                report_intent_id = next_intent_id(conn, project_id)
+                conn.execute(
+                    """
+                    INSERT INTO intents (
+                        id,
+                        project_id,
+                        to_fact_id,
+                        description,
+                        creator,
+                        worker,
+                        last_heartbeat_at,
+                        created_at,
+                        concluded_at,
+                        intent_kind,
+                        finding_id
+                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_report', NULL, NULL, ?, NULL, 'report', ?)
+                    """,
+                    (
+                        report_intent_id,
+                        project_id,
+                        f"Produce SRC submission report for finding {finding_id}: {finding.title}",
+                        now,
+                        finding_id,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO intent_sources (intent_id, project_id, fact_id) VALUES (?, ?, ?)",
+                    (report_intent_id, project_id, fid),
+                )
+                conn.execute(
+                    "UPDATE findings SET report_intent_id = ?, report_status = 'queued' WHERE id = ? AND project_id = ?",
+                    (report_intent_id, finding_id, project_id),
+                )
             row = conn.execute(
                 "SELECT * FROM findings WHERE id = ? AND project_id = ?",
                 (finding_id, project_id),
             ).fetchone()
             findings.append(finding_to_model(row))
+
+        project = conn.execute("SELECT project_kind FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if project and project["project_kind"] == "recon":
+            increment_recon_explore_round(conn, project_id)
 
         updated = conn.execute(
             "SELECT * FROM intents WHERE id = ? AND project_id = ?",
@@ -196,3 +300,62 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
             intent=intent_to_model(conn, updated, project_id),
             findings=findings,
         )
+
+
+@router.post(
+    "/projects/{project_id}/intents/{intent_id}/report",
+    response_model=FindingReport,
+)
+def conclude_report(project_id: str, intent_id: str, body: ReportConcludeRequest):
+    with get_conn() as conn:
+        check_project_active(conn, project_id)
+        intent = get_claimable_open_intent_or_404(conn, project_id, intent_id, body.worker)
+        if intent["intent_kind"] != "report":
+            raise HTTPException(400, "Intent is not a report intent")
+        if not intent["finding_id"]:
+            raise HTTPException(409, "Report intent is missing finding_id")
+        get_finding_or_404(conn, project_id, intent["finding_id"])
+        now = utcnow()
+        report_id = next_report_id(conn, project_id)
+        conn.execute(
+            """
+            INSERT INTO finding_reports (
+                id,
+                project_id,
+                finding_id,
+                intent_id,
+                report_markdown,
+                report_json,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                report_id,
+                project_id,
+                intent["finding_id"],
+                intent_id,
+                body.report_markdown,
+                json.dumps(body.report_json, ensure_ascii=False),
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE intents
+            SET to_fact_id = ?,
+                worker = ?,
+                last_heartbeat_at = ?,
+                concluded_at = ?
+            WHERE id = ? AND project_id = ?
+            """,
+            (intent["finding_id"], body.worker, now, now, intent_id, project_id),
+        )
+        conn.execute(
+            "UPDATE findings SET report_status = 'drafted' WHERE id = ? AND project_id = ?",
+            (intent["finding_id"], project_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM finding_reports WHERE id = ? AND project_id = ?",
+            (report_id, project_id),
+        ).fetchone()
+        return finding_report_to_model(row)

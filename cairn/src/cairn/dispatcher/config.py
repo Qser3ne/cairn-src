@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-TaskType = Literal["reason", "explore", "bootstrap"]
+TaskType = Literal["reason", "explore", "judge", "report"]
 WorkerType = Literal["claudecode", "codex", "pi", "mock"]
 CompletedAction = Literal["remove", "stop"]
 WorkerHealthcheckMode = Literal["startup_and_task", "startup_only", "disabled"]
@@ -39,8 +39,6 @@ DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
     "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
     "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
     "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
-    "bootstrap.md": ("{origin}", "{goal}", "{hints}"),
-    "bootstrap_conclude.md": ("{origin}", "{goal}", "{hints}"),
 }
 
 PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
@@ -48,27 +46,31 @@ PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
         "reason.md": ("{fact_ids}", "{open_intents}", "{max_intents}"),
         "explore.md": ("{intent_id}",),
         "explore_conclude.md": ("{intent_id}",),
-        "bootstrap.md": ("{origin}", "{goal}", "{hints}"),
-        "bootstrap_conclude.md": ("{origin}", "{goal}", "{hints}"),
+        "judge.md": (),
+        "report.md": ("{intent_id}", "{intent_description}"),
     }
 }
 
-PROMPT_REQUIRED_TOKENS_BY_MODE: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
+PROMPT_REQUIRED_TOKENS_BY_KIND: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
     "default": {
-        "src": {
+        "vuln": {
             "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
             "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
+            "report.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
+        },
+        "recon": {
+            "judge.md": ("{graph_yaml}",),
         }
     }
 }
 
 MOCK_ALLOWED_OUTCOMES: dict[str, frozenset[str]] = {
     "healthcheck": frozenset({"ok", "fail"}),
-    "reason": frozenset({"complete", "intent", "noop", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "reason": frozenset({"intent", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "bootstrap": frozenset({"complete", "fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "bootstrap_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "judge": frozenset({"ready", "not_ready", "blocked", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "report": frozenset({"draft", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
 }
 
 MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
@@ -79,9 +81,9 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
     "reason": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "complete": "0.0",
             "intent": "1.0",
             "noop": "0.0",
+            "stable": "0.0",
             "rejected": "0.0",
             "invalid_json": "0.0",
             "invalid_payload": "0.0",
@@ -108,21 +110,22 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
             "command_fail": "0.0",
         },
     },
-    "bootstrap": {
+    "judge": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "complete": "1.0",
-            "fact": "0.0",
+            "ready": "1.0",
+            "not_ready": "0.0",
+            "blocked": "0.0",
             "rejected": "0.0",
             "invalid_json": "0.0",
             "invalid_payload": "0.0",
             "command_fail": "0.0",
         },
     },
-    "bootstrap_conclude": {
+    "report": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "fact": "1.0",
+            "draft": "1.0",
             "rejected": "0.0",
             "invalid_json": "0.0",
             "invalid_payload": "0.0",
@@ -146,15 +149,19 @@ class ExploreTaskConfig(BaseModel):
     conclude_timeout: int = Field(gt=0)
 
 
-class BootstrapTaskConfig(BaseModel):
-    timeout: int = Field(gt=0)
-    conclude_timeout: int = Field(gt=0)
+class JudgeTaskConfig(BaseModel):
+    timeout: int = Field(gt=0, default=10)
+
+
+class ReportTaskConfig(BaseModel):
+    timeout: int = Field(gt=0, default=10)
 
 
 class TasksConfig(BaseModel):
-    bootstrap: BootstrapTaskConfig
     reason: ReasonTaskConfig
     explore: ExploreTaskConfig
+    judge: JudgeTaskConfig = Field(default_factory=lambda: JudgeTaskConfig(timeout=10))
+    report: ReportTaskConfig = Field(default_factory=lambda: ReportTaskConfig(timeout=10))
 
 
 class ContainerConfig(BaseModel):
@@ -284,13 +291,19 @@ def validate_prompt_resources(prompt_group: str) -> None:
     if not group_dir.is_dir():
         raise ValueError(f"missing prompt group: {prompt_group}")
     required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get(prompt_group, DEFAULT_PROMPT_REQUIRED_TOKENS)
-    prompt_dirs = [group_dir.joinpath("standard"), group_dir.joinpath("src")]
+    prompt_dirs = [group_dir.joinpath("recon"), group_dir.joinpath("vuln")]
     if not all(path.is_dir() for path in prompt_dirs):
         prompt_dirs = [group_dir]
     for prompt_dir in prompt_dirs:
         label = f"{prompt_group}/{prompt_dir.name}" if prompt_dir != group_dir else prompt_group
-        mode_tokens = PROMPT_REQUIRED_TOKENS_BY_MODE.get(prompt_group, {}).get(prompt_dir.name, {})
-        merged_tokens = {**required_tokens, **mode_tokens}
+        kind_tokens = PROMPT_REQUIRED_TOKENS_BY_KIND.get(prompt_group, {}).get(prompt_dir.name, {})
+        merged_tokens = {**required_tokens, **kind_tokens}
+        if prompt_dir == group_dir:
+            merged_tokens = {
+                name: tokens
+                for name, tokens in merged_tokens.items()
+                if prompt_dir.joinpath(name).is_file()
+            }
         _validate_prompt_dir(prompt_dir, label, merged_tokens)
 
 

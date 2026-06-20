@@ -21,9 +21,10 @@ def make_config() -> DispatchConfig:
                 "prompt_group": "default",
             },
             "tasks": {
-                "bootstrap": {"timeout": 10, "conclude_timeout": 5},
                 "reason": {"timeout": 10, "max_intents": 3},
                 "explore": {"timeout": 10, "conclude_timeout": 5},
+                "judge": {"timeout": 10},
+                "report": {"timeout": 10},
             },
             "container": {
                 "image": "test-image",
@@ -34,7 +35,7 @@ def make_config() -> DispatchConfig:
                 {
                     "name": "test-worker",
                     "type": "mock",
-                    "task_types": ["bootstrap", "reason", "explore"],
+                    "task_types": ["reason", "explore", "judge", "report"],
                     "max_running": 1,
                     "priority": 0,
                 }
@@ -49,9 +50,8 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
             id="proj_001",
             title="test",
             status="active",
-            mode="standard",
+            project_kind="vuln",
             auth_mode="anonymous",
-            bootstrap_enabled=True,
             created_at="2026-01-01T00:00:00Z",
         ),
         facts=[
@@ -124,10 +124,11 @@ class FakeContainerManager:
 class FakeClient:
     project: ProjectDetail
     concluded: list[tuple[str, str, str, str]] = field(default_factory=list)
-    completed: list[tuple[str, list[str], str, str]] = field(default_factory=list)
     created_intents: list[tuple[str, list[str], str, str]] = field(default_factory=list)
     released: list[tuple[str, str, str]] = field(default_factory=list)
     released_reasons: list[tuple[str, str]] = field(default_factory=list)
+    recon_reason_rounds: list[tuple[str, bool]] = field(default_factory=list)
+    recon_explore_rounds: list[str] = field(default_factory=list)
 
     def get_project(self, _project_id: str) -> ProjectDetail:
         return self.project
@@ -146,19 +147,36 @@ class FakeClient:
             data["findings"] = findings
         return ApiResult(200, data)
 
-    def complete(self, project_id: str, from_ids: list[str], description: str, worker: str) -> ApiResult:
-        self.completed.append((project_id, from_ids, description, worker))
-        return ApiResult(200, {})
-
     def create_intent(
         self,
         project_id: str,
         from_ids: list[str],
         description: str,
         creator: str,
+        *,
+        intent_kind: str = "explore",
+        finding_id: str | None = None,
     ) -> ApiResult:
         self.created_intents.append((project_id, from_ids, description, creator))
         return ApiResult(201, {})
+
+    def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:
+        self.recon_reason_rounds.append((project_id, stable))
+        return ApiResult(200, {})
+
+    def record_recon_explore_round(self, project_id: str) -> ApiResult:
+        self.recon_explore_rounds.append(project_id)
+        return ApiResult(200, {})
+
+    def conclude_report(
+        self,
+        project_id: str,
+        intent_id: str,
+        worker: str,
+        report_markdown: str,
+        report_json: dict,
+    ) -> ApiResult:
+        return ApiResult(200, {"report_markdown": report_markdown, "report_json": report_json})
 
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
         self.released.append((project_id, intent_id, worker))

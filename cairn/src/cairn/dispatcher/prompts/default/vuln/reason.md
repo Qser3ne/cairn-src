@@ -23,7 +23,7 @@
 如果没有新的高价值、非重复探索方向，则返回：
 
 ```json
-{"accepted": true, "data": {}}
+{"accepted": true, "data": {"decision": "noop", "intents": []}}
 ```
 
 ## 规则
@@ -40,7 +40,7 @@
 - 如果一个方向已经有 open intent 正在处理，不要再次创建。
 - 如果一个方向已经由 concluded intent 验证过，除非新 fact 明确说明需要更深阶段，否则不要重复创建。
 - 如果已有 finding 已经覆盖某类漏洞，不要再创建同一目标、同一入口、同一漏洞类型的重复验证 intent。
-- 如果没有明显的新方向，返回空 data；不要为了推进而硬造宽泛 intent。
+- 如果没有明显的新方向，返回 decision=noop 且 intents=[]；不要为了推进而硬造宽泛 intent。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。
 - 每个 intent 的 description 必须包含清晰的去重语义：目标或入口、漏洞假设、验证重点。避免“继续测试”“深入挖掘”等泛泛描述。
 - `data.intents[*].from` 必须来自 `Valid facts`，不能包含 `goal`。

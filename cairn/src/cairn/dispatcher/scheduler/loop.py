@@ -16,16 +16,15 @@ from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.startup_healthcheck import format_failure_summary, run_startup_healthchecks
 from cairn.dispatcher.scheduler.worker_select import choose_worker
-from cairn.dispatcher.tasks.bootstrap import run_bootstrap_task
 from cairn.dispatcher.tasks.explore import run_explore_task
+from cairn.dispatcher.tasks.judge import run_judge_task
 from cairn.dispatcher.tasks.reason import run_reason_task
+from cairn.dispatcher.tasks.report import run_report_task
 from cairn.server.models import Intent, ProjectDetail, ProjectSummary
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
 REJECTED_RETRY_AFTER_SECONDS = 5
-BOOTSTRAP_INTENT_DESCRIPTION = "bootstrap"
-BOOTSTRAP_INTENT_CREATOR = "dispatcher.bootstrap"
 
 
 @dataclass(slots=True)
@@ -89,6 +88,7 @@ class DispatcherLoop:
                     self._cancel_inactive_tasks(summaries)
                     self._queue_container_cleanups(summaries)
                     self._dispatch_available(summaries)
+                    self._dispatch_judge_jobs()
                 except requests.RequestException as exc:
                     if once:
                         raise
@@ -174,9 +174,59 @@ class DispatcherLoop:
                     dispatched = True
                     break
 
+    def _dispatch_judge_jobs(self) -> None:
+        if len(self.futures) >= self.config.runtime.max_workers:
+            return
+        try:
+            jobs = self.client.list_queued_ephemeral_jobs("judge")
+        except requests.RequestException:
+            raise
+        for job in jobs:
+            if len(self.futures) >= self.config.runtime.max_workers:
+                return
+            if any(task.task_type == "judge" and task.intent_id == job.id for task in self.futures.values()):
+                continue
+            selection = self._select_worker(job.project_id, "judge")
+            worker = selection.worker
+            if worker is None:
+                self._log_changed(
+                    f"job:{job.id}:worker:judge",
+                    logging.INFO,
+                    "no worker available for judge job=%s project=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                    job.id,
+                    job.project_id,
+                    selection.blocked_busy,
+                    selection.blocked_unhealthy,
+                    selection.blocked_rejected,
+                )
+                continue
+            try:
+                future = self.executor.submit(
+                    run_judge_task,
+                    self.config,
+                    self.client,
+                    self.container_manager,
+                    job,
+                    worker,
+                    cancellation := TaskCancellation(),
+                )
+            except Exception:
+                LOG.exception("failed to submit judge job=%s worker=%s", job.id, worker.name)
+                continue
+            self.futures[future] = RunningTask(
+                project_id=job.project_id,
+                task_type="judge",
+                worker_name=worker.name,
+                cancellation=cancellation,
+                intent_id=job.id,
+            )
+            self.runtime_project_ids.add(job.project_id)
+            self._clear_log_state(f"job:{job.id}:worker:judge")
+            LOG.info("dispatched judge job=%s project=%s worker=%s", job.id, job.project_id, worker.name)
+
     def _sync_authenticated_wait_queues(self, summaries: list[ProjectSummary]) -> None:
         for summary in summaries:
-            if summary.status != "active" or summary.mode != "src" or summary.auth_mode != "authenticated":
+            if summary.status != "active" or summary.auth_mode != "authenticated":
                 continue
             if summary.unclaimed_intent_count <= 0:
                 continue
@@ -224,8 +274,6 @@ class DispatcherLoop:
         if self._is_initial_project(project):
             if project.project.reason is not None:
                 return False
-            if self._project_requires_bootstrap(project):
-                return self._dispatch_initial_project(project)
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_reason(project, export_yaml, "initial")
         self._enqueue_current_authenticated_waiters(project)
@@ -262,7 +310,6 @@ class DispatcherLoop:
             if intent.to is None
             and intent.worker is None
             and intent.id not in running_intent_ids
-            and not self._is_bootstrap_intent(intent)
         ]
         if running_intent_ids and not unclaimed_intents:
             self._log_changed(
@@ -275,6 +322,8 @@ class DispatcherLoop:
         if unclaimed_intents:
             newest = max(unclaimed_intents, key=lambda i: i.created_at)
             export_yaml = self.client.export_project(summary.id)
+            if newest.intent_kind == "report":
+                return self._dispatch_report(project, export_yaml, newest)
             return self._dispatch_explore(project, export_yaml, newest)
         if project.project.reason is not None:
             self._log_changed(
@@ -296,32 +345,6 @@ class DispatcherLoop:
             len(project.intents),
         )
         return False
-
-    def _dispatch_initial_project(self, project: ProjectDetail) -> bool:
-        intent = self._get_bootstrap_intent(project)
-        if intent is None:
-            intent = self._create_bootstrap_intent(project.project.id)
-            if intent is None:
-                return False
-        if self._project_has_running_bootstrap(project.project.id):
-            self._log_changed(
-                f"project:{project.project.id}:skip:bootstrap_running",
-                logging.DEBUG,
-                "skip bootstrap project=%s because bootstrap task is already running locally",
-                project.project.id,
-            )
-            return False
-        if intent.worker is not None:
-            self._log_changed(
-                f"project:{project.project.id}:skip:bootstrap_claimed",
-                logging.DEBUG,
-                "skip bootstrap project=%s because bootstrap intent=%s is already claimed by %s",
-                project.project.id,
-                intent.id,
-                intent.worker,
-            )
-            return False
-        return self._dispatch_bootstrap(project, intent)
 
     def _dispatch_reason(self, project: ProjectDetail, export_yaml: str, trigger: str) -> bool:
         selection = self._select_worker(project.project.id, "reason")
@@ -387,14 +410,14 @@ class DispatcherLoop:
         LOG.info("dispatched reason project=%s worker=%s trigger=%s", project.project.id, worker.name, trigger)
         return True
 
-    def _dispatch_bootstrap(self, project: ProjectDetail, intent: Intent) -> bool:
-        selection = self._select_worker(project.project.id, "bootstrap")
+    def _dispatch_report(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
+        selection = self._select_worker(project.project.id, "report")
         worker = selection.worker
         if worker is None:
             self._log_changed(
-                f"project:{project.project.id}:worker:bootstrap",
+                f"project:{project.project.id}:worker:report",
                 logging.INFO,
-                "no worker available for bootstrap project=%s intent=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                "no worker available for report project=%s intent=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
                 project.project.id,
                 intent.id,
                 selection.blocked_busy,
@@ -402,13 +425,11 @@ class DispatcherLoop:
                 selection.blocked_rejected,
             )
             return False
-        self._clear_log_state(f"project:{project.project.id}:worker:bootstrap")
+        self._clear_log_state(f"project:{project.project.id}:worker:report")
         claim = self.client.heartbeat(project.project.id, intent.id, worker.name)
         if claim.status_code in (403, 409):
-            level = logging.INFO if claim.status_code == 403 else logging.WARNING
-            LOG.log(
-                level,
-                "bootstrap claim failed project=%s intent=%s worker=%s status=%s",
+            LOG.info(
+                "report claim failed project=%s intent=%s worker=%s status=%s",
                 project.project.id,
                 intent.id,
                 worker.name,
@@ -417,7 +438,7 @@ class DispatcherLoop:
             return False
         if not claim.ok:
             LOG.warning(
-                "bootstrap claim failed project=%s intent=%s worker=%s status=%s",
+                "report claim failed project=%s intent=%s worker=%s status=%s",
                 project.project.id,
                 intent.id,
                 worker.name,
@@ -426,34 +447,35 @@ class DispatcherLoop:
             return False
         try:
             future = self.executor.submit(
-                run_bootstrap_task,
+                run_report_task,
                 self.config,
                 self.client,
                 self.container_manager,
                 project,
+                export_yaml,
                 intent,
                 worker,
                 cancellation := TaskCancellation(),
             )
         except Exception:
-            LOG.exception("failed to submit bootstrap task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
+            LOG.exception("failed to submit report task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
             self._best_effort_release(project.project.id, intent.id, worker.name)
             return False
         self.futures[future] = RunningTask(
             project_id=project.project.id,
-            task_type="bootstrap",
+            task_type="report",
             worker_name=worker.name,
             cancellation=cancellation,
             intent_id=intent.id,
         )
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
-        LOG.info("dispatched bootstrap project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
+        LOG.info("dispatched report project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
         return True
 
     def _dispatch_explore(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
         account = None
-        if project.project.mode == "src" and project.project.auth_mode == "authenticated":
+        if project.project.auth_mode == "authenticated":
             if not project.accounts:
                 self._log_changed(
                     f"project:{project.project.id}:accounts:missing",
@@ -643,18 +665,15 @@ class DispatcherLoop:
         summary.sort()
         return summary
 
-    def _project_has_running_bootstrap(self, project_id: str) -> bool:
-        return any(task.project_id == project_id and task.task_type == "bootstrap" for task in self.futures.values())
-
     def _project_running_explore_intents(self, project_id: str) -> set[str]:
         return {
             task.intent_id
             for task in self.futures.values()
-            if task.project_id == project_id and task.task_type == "explore" and task.intent_id is not None
+            if task.project_id == project_id and task.task_type in ("explore", "report") and task.intent_id is not None
         }
 
     def _project_uses_account_pool(self, project: ProjectDetail) -> bool:
-        return project.project.mode == "src" and project.project.auth_mode == "authenticated"
+        return project.project.auth_mode == "authenticated"
 
     def _enqueue_current_authenticated_waiters(self, project: ProjectDetail) -> None:
         if not self._project_uses_account_pool(project):
@@ -670,7 +689,7 @@ class DispatcherLoop:
             if intent.to is None
             and intent.worker is None
             and intent.id not in running_intent_ids
-            and not self._is_bootstrap_intent(intent)
+            and intent.intent_kind == "explore"
         ]
         self._enqueue_authenticated_waiting_intents(project.project.id, blocked)
 
@@ -702,7 +721,7 @@ class DispatcherLoop:
                 intent is not None
                 and intent.to is None
                 and intent.worker is None
-                and not self._is_bootstrap_intent(intent)
+                and intent.intent_kind == "explore"
             ):
                 return intent
             queue.popleft()
@@ -721,7 +740,7 @@ class DispatcherLoop:
         active_authenticated_ids = {
             summary.id
             for summary in summaries
-            if summary.status == "active" and summary.mode == "src" and summary.auth_mode == "authenticated"
+            if summary.status == "active" and summary.auth_mode == "authenticated"
         }
         for project_id in list(self.authenticated_wait_queues):
             if project_id not in active_authenticated_ids:
@@ -754,64 +773,9 @@ class DispatcherLoop:
     def _project_open_intent_count(self, project: ProjectDetail) -> int:
         return sum(1 for intent in project.intents if intent.to is None)
 
-    def _is_bootstrap_intent(self, intent: Intent) -> bool:
-        return (
-            intent.description == BOOTSTRAP_INTENT_DESCRIPTION
-            and intent.creator == BOOTSTRAP_INTENT_CREATOR
-            and intent.from_ == ["origin"]
-            and intent.to is None
-        )
-
-    def _get_bootstrap_intent(self, project: ProjectDetail) -> Intent | None:
-        intents = [intent for intent in project.intents if self._is_bootstrap_intent(intent)]
-        if not intents:
-            return None
-        if len(intents) > 1:
-            LOG.warning("project has multiple bootstrap intents project=%s intents=%s", project.project.id, [intent.id for intent in intents])
-        intents.sort(key=lambda intent: (intent.worker is not None, intent.created_at, intent.id))
-        return intents[0]
-
     def _is_initial_project(self, project: ProjectDetail) -> bool:
         fact_ids = {fact.id for fact in project.facts}
-        if fact_ids != {"origin", "goal"} or len(project.facts) != 2:
-            return False
-        if not project.intents:
-            return True
-        return all(self._is_bootstrap_intent(intent) for intent in project.intents)
-
-    def _project_requires_bootstrap(self, project: ProjectDetail) -> bool:
-        if project.project.mode == "src":
-            return False
-        if not project.project.bootstrap_enabled:
-            return False
-        if self._get_bootstrap_intent(project) is not None:
-            return True
-        return any("bootstrap" in worker.task_types for worker in self.config.workers)
-
-    def _create_bootstrap_intent(self, project_id: str) -> Intent | None:
-        response = self.client.create_intent(
-            project_id,
-            ["origin"],
-            BOOTSTRAP_INTENT_DESCRIPTION,
-            BOOTSTRAP_INTENT_CREATOR,
-        )
-        if response.status_code == 403:
-            LOG.info("project became inactive before bootstrap intent create project=%s", project_id)
-            return None
-        if not response.ok:
-            LOG.warning(
-                "bootstrap intent write failed project=%s status=%s body=%s",
-                project_id,
-                response.status_code,
-                response.text,
-            )
-            return None
-        if not isinstance(response.data, dict):
-            LOG.warning("bootstrap intent create returned empty body project=%s", project_id)
-            return None
-        intent = Intent.model_validate(response.data)
-        LOG.info("created bootstrap intent project=%s intent=%s", project_id, intent.id)
-        return intent
+        return fact_ids == {"origin", "goal"} and len(project.facts) == 2 and not project.intents
 
     def _reason_trigger(self, project: ProjectDetail) -> str | None:
         open_intent_count = self._project_open_intent_count(project)

@@ -312,8 +312,8 @@
             </div>
             <div class="mt-2 flex flex-wrap items-center gap-1.5">
               <span class="inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-medium"
-                :class="projectModeBadgeClass(p.mode)"
-                x-text="projectModeLabel(p.mode)"></span>
+                :class="projectKindBadgeClass(p.project_kind)"
+                x-text="projectKindLabel(p.project_kind)"></span>
               <span class="inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-medium"
                 :class="projectAuthModeBadgeClass(p.auth_mode)"
                 x-text="projectAuthModeLabel(p.auth_mode)"></span>
@@ -386,11 +386,10 @@
                 </button>
               </template>
               <template x-if="p.status === 'completed'">
-                <button type="button" @click.stop="openReopenProject(p.id, p.title)"
-                  class="px-2 py-1 rounded-lg border border-sky-200 text-[11px] text-sky-600 hover:bg-sky-50 transition flex items-center gap-1">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 3v6h6"/></svg>
-                  Reopen
-                </button>
+                <span class="px-2 py-1 rounded-lg border border-slate-200 text-[11px] text-slate-400 flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75"/><circle cx="12" cy="12" r="8.5"/></svg>
+                  Archived
+                </span>
               </template>
               <button type="button" @click.stop="deleteProjectById(p.id, p.title)"
                 class="px-2 py-1 rounded-lg border border-rose-200 text-[11px] text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition flex items-center gap-1">
@@ -425,8 +424,8 @@
         :class="projectStatusBadgeClass(project.project.status)"
         x-text="project.project.status"></span>
       <span class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.12em] shrink-0"
-        :class="projectModeBadgeClass(project.project.mode)"
-        x-text="projectModeLabel(project.project.mode)"></span>
+        :class="projectKindBadgeClass(project.project.project_kind)"
+        x-text="projectKindLabel(project.project.project_kind)"></span>
       <span class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.12em] shrink-0"
         :class="projectAuthModeCompactBadgeClass(project.project.auth_mode)"
         x-text="projectAuthModeLabel(project.project.auth_mode)"></span>
@@ -480,11 +479,10 @@
         </button>
       </template>
       <template x-if="!replay.active && project.project.status === 'completed'">
-        <button @click="openReopenProject(project.project.id, project.project.title)"
-          class="px-2.5 py-1 rounded-lg border border-sky-200 text-xs text-sky-600 hover:bg-sky-50 transition flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.708"/><path d="M3 3v6h6"/></svg>
-          Reopen
-        </button>
+        <span class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-400 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 12.75 11.25 15 15 9.75"/><circle cx="12" cy="12" r="8.5"/></svg>
+          Archived
+        </span>
       </template>
       <button x-show="!replay.active" @click="deleteProject()" class="px-2.5 py-1 rounded-lg border border-rose-200 text-xs text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition flex items-center gap-1.5">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4.75A1.75 1.75 0 0 1 9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6"/><path d="M19 6l-.63 11.338A2 2 0 0 1 16.37 19.5H7.63a2 2 0 0 1-1.997-2.162L5 6"/><path d="M10 10.5v5"/><path d="M14 10.5v5"/></svg>
@@ -553,10 +551,22 @@
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
             Intent
           </button>
-          <button @click="openCompleteProject()" :disabled="!canActOnSelectedFacts()"
-            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-teal-200 text-teal-600 rounded-lg shadow-sm text-xs font-medium hover:bg-teal-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
-            Complete
+        </div>
+        <div class="flex gap-1.5" x-show="project?.project?.project_kind === 'recon' && !replay.active">
+          <button @click="evaluateRecon()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-sky-200 text-sky-600 rounded-lg shadow-sm text-xs font-medium hover:bg-sky-50 transition flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+            Evaluate
+          </button>
+          <button @click="createReconSnapshot()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-indigo-200 text-indigo-600 rounded-lg shadow-sm text-xs font-medium hover:bg-indigo-50 transition flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.25 3H7.5A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h9a2.25 2.25 0 0 0 2.25-2.25V8.25L14.25 3Z"/><path d="M14.25 3v5.25h4.5"/></svg>
+            Snapshot
+          </button>
+          <button @click="prepareForkVulnFromSelectedProject()"
+            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-rose-200 text-rose-600 rounded-lg shadow-sm text-xs font-medium hover:bg-rose-50 transition flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 3v6a3 3 0 0 0 3 3h6"/><path d="M6 21v-6a3 3 0 0 1 3-3"/><path d="m15 8 4 4-4 4"/></svg>
+            Fork Vuln
           </button>
         </div>
         <div class="flex gap-1.5" x-show="projectCanWriteHints()">
@@ -862,29 +872,47 @@
     <div class="space-y-3">
       <input x-model="newProject.title" placeholder="Project title" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
       <div class="grid grid-cols-2 gap-2">
-        <button type="button" @click="setNewProjectMode('standard')"
+        <button type="button" @click="setNewProjectKind('recon')"
           class="rounded-xl border px-3 py-2 text-left transition"
-          :class="newProject.mode === 'standard' ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'">
-          <span class="block text-sm font-medium">Standard</span>
-          <span class="block text-[11px] opacity-70">single-goal workflow</span>
+          :class="newProject.project_kind === 'recon' ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'">
+          <span class="block text-sm font-medium">Recon</span>
+          <span class="block text-[11px] opacity-70">collect and judge targets</span>
         </button>
-        <button type="button" @click="setNewProjectMode('src')"
+        <button type="button" @click="setNewProjectKind('vuln')"
           class="rounded-xl border px-3 py-2 text-left transition"
-          :class="newProject.mode === 'src' ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'">
-          <span class="block text-sm font-medium">SRC Vulnerability Mining</span>
-          <span class="block text-[11px] opacity-70">multi-finding workflow</span>
+          :class="newProject.project_kind === 'vuln' ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'">
+          <span class="block text-sm font-medium">Vulnerability</span>
+          <span class="block text-[11px] opacity-70">forked from recon snapshot</span>
         </button>
       </div>
       <textarea x-model="newProject.origin" placeholder="Origin — starting point" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
       <textarea x-model="newProject.goal" placeholder="Goal — what to achieve" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <label x-show="newProject.mode === 'standard'" class="flex items-center gap-2 px-1 text-sm text-slate-600">
-        <input type="checkbox" x-model="newProject.bootstrap" class="h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-200">
-        <span>Run bootstrap attempt</span>
-      </label>
-      <div x-show="newProject.mode === 'src'" class="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-        SRC mode starts with reason planning and does not run bootstrap automatically.
+      <div x-show="newProject.project_kind === 'recon'" class="space-y-1">
+        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max reason rounds</label>
+        <input type="number" min="1" x-model.number="newProject.recon_max_reason_rounds" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
       </div>
-      <div x-show="newProject.mode === 'src'" class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+      <div x-show="newProject.project_kind === 'vuln'" class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div>
+          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Parent recon project</label>
+          <select x-model="newProject.parent_project_id" @change="loadNewProjectSnapshots()" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+            <option value="">Select recon project</option>
+            <template x-for="p in reconProjects()" :key="`parent-${p.id}`">
+              <option :value="p.id" x-text="projectLabel(p.id, p.title)"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Parent snapshot</label>
+          <select x-model="newProject.parent_snapshot_id" :disabled="!newProject.parent_project_id || newProjectSnapshotsLoading" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition disabled:opacity-50">
+            <option value="" x-text="newProjectSnapshotsLoading ? 'Loading snapshots...' : 'Select snapshot'"></option>
+            <template x-for="snapshot in newProjectSnapshots" :key="snapshot.id">
+              <option :value="snapshot.id" x-text="`${snapshot.id} · ${formatDate(snapshot.created_at)}`"></option>
+            </template>
+          </select>
+        </div>
+        <p x-show="newProject.parent_project_id && !newProjectSnapshotsLoading && newProjectSnapshots.length === 0" class="text-[11px] text-rose-500">Create a recon snapshot before forking a vulnerability project.</p>
+      </div>
+      <div class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
         <div>
           <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Auth mode</span>
           <div class="grid grid-cols-2 gap-2 mt-2">
@@ -915,7 +943,7 @@
               <button type="button" @click="removeNewProjectAccount(idx)" :disabled="newProject.accounts.length <= 1" class="h-8 w-8 rounded-lg text-slate-300 hover:text-red-400 hover:bg-white transition disabled:opacity-30">&times;</button>
             </div>
           </template>
-          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500">Authenticated SRC projects require at least one username and password.</p>
+          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500">Authenticated projects require at least one username and password.</p>
         </div>
       </div>
 
@@ -976,7 +1004,7 @@
     <p class="text-xs text-slate-400 mb-4 font-mono" x-text="concludeForm.intentId"></p>
     <div class="space-y-3">
       <textarea x-model="concludeForm.description" placeholder="What did you find? (new fact)" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <textarea x-model="concludeForm.findingsJson" placeholder='Optional findings JSON array for SRC mode' rows="4" class="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      <textarea x-model="concludeForm.findingsJson" placeholder='Optional findings JSON array with lifecycle fields' rows="4" class="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
       <div class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
         Actor: <span class="font-medium text-slate-700" x-text="actorName()"></span>
       </div>
@@ -985,33 +1013,6 @@
       <button @click="showConcludeModal = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Cancel</button>
       <button @click="concludeIntent()" :disabled="!concludeForm.description"
         class="px-5 py-2 text-sm bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition disabled:opacity-30 shadow-sm shadow-teal-200">Conclude</button>
-    </div>
-  </div>
-</div>
-
-<!-- Complete Project -->
-<div x-show="showCompleteModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showCompleteModal = false">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200/60" @click.stop>
-    <h3 class="text-base font-semibold text-slate-700 mb-1">Complete Project</h3>
-    <p class="text-xs text-slate-400 mb-4">Mark project as completed</p>
-    <div class="space-y-3">
-      <div>
-        <label class="text-[11px] text-slate-400 mb-1 block font-medium">From facts</label>
-        <div class="w-full px-3 py-2 border border-slate-200 rounded-xl bg-slate-50 min-h-[42px] flex flex-wrap gap-1.5 items-center">
-          <template x-for="fid in selectedFacts" :key="`complete-from-${fid}`">
-            <span class="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-mono text-slate-600" x-text="fid"></span>
-          </template>
-        </div>
-      </div>
-      <textarea x-model="completeForm.description" placeholder="Why is the goal met?" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <div class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
-        Actor: <span class="font-medium text-slate-700" x-text="actorName()"></span>
-      </div>
-    </div>
-    <div class="flex justify-end gap-2 mt-5">
-      <button @click="showCompleteModal = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Cancel</button>
-      <button @click="completeProject()" :disabled="selectedFacts.length === 0 || !completeForm.description"
-        class="px-5 py-2 text-sm bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition disabled:opacity-30 shadow-sm shadow-teal-200">Complete</button>
     </div>
   </div>
 </div>
@@ -1032,25 +1033,6 @@
         class="px-5 py-2 text-sm bg-amber-500 text-white rounded-xl font-medium hover:bg-amber-600 transition disabled:opacity-30 shadow-sm shadow-amber-200">Add</button>
     </div>
 </div>
-</div>
-
-<!-- Reopen -->
-<div x-show="showReopenModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showReopenModal = false">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200/60" @click.stop>
-    <h3 class="text-base font-semibold text-slate-700 mb-1">Reopen Project</h3>
-    <p class="text-xs text-slate-400 mb-4" x-text="projectLabel(reopenForm.projectId, reopenForm.projectTitle)"></p>
-    <div class="space-y-3">
-      <textarea x-model="reopenForm.description" placeholder="Why is this project not actually complete?" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <div class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
-        Actor: <span class="font-medium text-slate-700" x-text="actorName()"></span>
-      </div>
-    </div>
-    <div class="flex justify-end gap-2 mt-5">
-      <button @click="showReopenModal = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Cancel</button>
-      <button @click="reopenProject()" :disabled="!reopenForm.projectId || !reopenForm.description"
-        class="px-5 py-2 text-sm bg-sky-500 text-white rounded-xl font-medium hover:bg-sky-600 transition disabled:opacity-30 shadow-sm shadow-sky-200">Reopen</button>
-    </div>
-  </div>
 </div>
 
 <!-- Rename Project -->
@@ -1204,9 +1186,7 @@ function cairnApp() {
     showNewProject: false,
     showIntentModal: false,
     showConcludeModal: false,
-    showCompleteModal: false,
     showHintModal: false,
-    showReopenModal: false,
     showRenameModal: false,
     showLocalPrefs: false,
     showSettings: false,
@@ -1219,17 +1199,19 @@ function cairnApp() {
       title: '',
       origin: '',
       goal: '',
-      mode: 'standard',
+      project_kind: 'recon',
       auth_mode: 'anonymous',
-      bootstrap: true,
+      parent_project_id: '',
+      parent_snapshot_id: '',
+      recon_max_reason_rounds: 8,
       accounts: [{ label: '', username: '', password: '' }],
       hints: [{ content: '' }],
     },
+    newProjectSnapshots: [],
+    newProjectSnapshotsLoading: false,
     intentForm: { description: '' },
     concludeForm: { description: '', intentId: '', findingsJson: '' },
-    completeForm: { description: '' },
     hintForm: { content: '' },
-    reopenForm: { projectId: '', projectTitle: '', description: '' },
     renameForm: { projectId: '', originalTitle: '', title: '' },
     localPrefs: { actor_name: 'Human', layout_mode: 'dagre_tb' },
     settingsForm: { intent_timeout: 5, reason_timeout: 5 },
@@ -1394,14 +1376,14 @@ function cairnApp() {
       return classes[status] || 'bg-slate-100 text-slate-500';
     },
 
-    projectModeLabel(mode) {
-      return mode === 'src' ? 'SRC' : 'Standard';
+    projectKindLabel(kind) {
+      return kind === 'recon' ? 'Recon' : 'Vuln';
     },
 
-    projectModeBadgeClass(mode) {
-      return mode === 'src'
-        ? 'border-rose-200 bg-rose-50 text-rose-700'
-        : 'border-slate-200 bg-slate-50 text-slate-500';
+    projectKindBadgeClass(kind) {
+      return kind === 'recon'
+        ? 'border-sky-200 bg-sky-50 text-sky-700'
+        : 'border-rose-200 bg-rose-50 text-rose-700';
     },
 
     projectAuthModeLabel(mode) {
@@ -1429,25 +1411,28 @@ function cairnApp() {
         title: '',
         origin: '',
         goal: '',
-        mode: 'standard',
+        project_kind: 'recon',
         auth_mode: 'anonymous',
-        bootstrap: true,
+        parent_project_id: '',
+        parent_snapshot_id: '',
+        recon_max_reason_rounds: 8,
         accounts: [this.blankNewProjectAccount()],
         hints: [{ content: '' }],
       };
+      this.newProjectSnapshots = [];
+      this.newProjectSnapshotsLoading = false;
     },
 
-    setNewProjectMode(mode) {
-      this.newProject.mode = mode;
-      if (mode === 'src') {
-        this.newProject.bootstrap = false;
-        if (!['anonymous', 'authenticated'].includes(this.newProject.auth_mode)) {
-          this.newProject.auth_mode = 'anonymous';
-        }
+    setNewProjectKind(kind) {
+      this.newProject.project_kind = kind === 'vuln' ? 'vuln' : 'recon';
+      if (kind === 'vuln') {
+        this.newProject.parent_project_id ||= this.reconProjects()[0]?.id || '';
+        if (this.newProject.parent_project_id) this.loadNewProjectSnapshots();
       }
-      if (mode === 'standard') {
-        this.newProject.auth_mode = 'anonymous';
-        if (this.newProject.bootstrap === false) this.newProject.bootstrap = true;
+      if (kind === 'recon') {
+        this.newProject.parent_project_id = '';
+        this.newProject.parent_snapshot_id = '';
+        this.newProjectSnapshots = [];
       }
     },
 
@@ -1478,18 +1463,53 @@ function cairnApp() {
     },
 
     newProjectAccountsValid() {
-      if (this.newProject.mode !== 'src' || this.newProject.auth_mode !== 'authenticated') return true;
+      if (this.newProject.auth_mode !== 'authenticated') return true;
       const accounts = this.cleanedNewProjectAccounts();
       return accounts.length > 0 && accounts.every(account => account.username && account.password);
     },
 
     newProjectCanCreate() {
-      return Boolean(
-        this.newProject.title?.trim()
-        && this.newProject.origin?.trim()
-        && this.newProject.goal?.trim()
-        && this.newProjectAccountsValid()
-      );
+      if (!this.newProject.title?.trim() || !this.newProject.origin?.trim() || !this.newProject.goal?.trim()) return false;
+      if (!this.newProjectAccountsValid()) return false;
+      if (this.newProject.project_kind === 'vuln') {
+        return Boolean(this.newProject.parent_project_id && this.newProject.parent_snapshot_id);
+      }
+      return true;
+    },
+
+    reconProjects() {
+      return this.projects.filter(project => project.project_kind === 'recon');
+    },
+
+    async loadNewProjectSnapshots() {
+      this.newProject.parent_snapshot_id = '';
+      this.newProjectSnapshots = [];
+      if (!this.newProject.parent_project_id) return;
+      this.newProjectSnapshotsLoading = true;
+      try {
+        this.newProjectSnapshots = await this.api('GET', `/projects/${this.newProject.parent_project_id}/snapshots`);
+        if (this.newProjectSnapshots.length > 0) {
+          this.newProject.parent_snapshot_id = this.newProjectSnapshots[0].id;
+        }
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      } finally {
+        this.newProjectSnapshotsLoading = false;
+      }
+    },
+
+    async prepareForkVulnFromSelectedProject() {
+      if (!this.project || this.project.project.project_kind !== 'recon') return;
+      this.resetNewProjectForm();
+      this.newProject.project_kind = 'vuln';
+      this.newProject.parent_project_id = this.project.project.id;
+      this.newProject.title = `${this.project.project.title} vulnerability validation`;
+      const origin = this.getFactRecord('origin');
+      const goal = this.getFactRecord('goal');
+      this.newProject.origin = origin?.description || this.project.project.title;
+      this.newProject.goal = goal?.description || 'Validate high-value vulnerability candidates from recon snapshot';
+      await this.loadNewProjectSnapshots();
+      this.showNewProject = true;
     },
 
     reasonBadgeText(reason, compact = false) {
@@ -1503,29 +1523,15 @@ function cairnApp() {
       return `Exploring · ${count}`;
     },
 
-    isBootstrapIntent(intent) {
-      return Boolean(
-        intent
-        && intent.description === 'bootstrap'
-        && intent.creator === 'dispatcher.bootstrap'
-        && Array.isArray(intent.from)
-        && intent.from.length === 1
-        && intent.from[0] === 'origin'
-        && intent.to === null,
-      );
-    },
-
     openIntentNodeType(intent) {
-      if (this.isBootstrapIntent(intent)) return intent.worker ? 'bootstrap_running' : 'bootstrap_pending';
       return intent.worker ? 'in_progress' : 'unclaimed';
     },
 
     openIntentNodeLabel(intent) {
-      return this.isBootstrapIntent(intent) ? 'Bootstrap' : '?';
+      return intent.intent_kind === 'report' ? 'R' : '?';
     },
 
     openIntentNodeSize(intent) {
-      if (this.isBootstrapIntent(intent)) return { width: 82, height: 30 };
       return { width: 22, height: 22 };
     },
 
@@ -1845,7 +1851,6 @@ function cairnApp() {
         if (!this.projectIsActive()) {
           this.showIntentModal = false;
           this.showConcludeModal = false;
-          this.showCompleteModal = false;
         }
         if (!this.projectCanWriteHints()) {
           this.showHintModal = false;
@@ -1877,12 +1882,6 @@ function cairnApp() {
       } finally {
         this.isStoppingAllProjects = false;
       }
-    },
-
-    openReopenProject(projectId, projectTitle = '') {
-      if (!projectId) return;
-      this.reopenForm = { projectId, projectTitle, description: '' };
-      this.showReopenModal = true;
     },
 
     openRenameProject(projectId, projectTitle = '') {
@@ -1940,7 +1939,7 @@ function cairnApp() {
       if (type === 'reason_started') return 1.6;
       if (type === 'intent_declared') return 1.05;
       if (type === 'intent_running') return 0.75;
-      if (type === 'intent_concluded' || type === 'project_completed') return 1.6;
+      if (type === 'intent_concluded') return 1.6;
       if (type === 'project_created' || type === 'hint_added') return 0.8;
       return 1.0;
     },
@@ -2106,7 +2105,7 @@ function cairnApp() {
         return;
       }
 
-      if (event.type !== 'intent_concluded' && event.type !== 'project_completed') return;
+      if (event.type !== 'intent_concluded') return;
       if (!sourceIntent) return;
 
       const replayIntent = replayProject.intents.find(intent => intent.id === sourceIntent.id);
@@ -2115,11 +2114,6 @@ function cairnApp() {
         replayIntent.worker = sourceIntent.worker || sourceIntent.creator;
         replayIntent.last_heartbeat_at = sourceIntent.last_heartbeat_at;
         replayIntent.concluded_at = sourceIntent.concluded_at;
-      }
-
-      if (event.type === 'project_completed') {
-        replayProject.project.status = 'completed';
-        return;
       }
 
       const producedFact = sourceProject.facts.find(fact => fact.id === sourceIntent.to);
@@ -2267,27 +2261,6 @@ function cairnApp() {
       });
     },
 
-    async reopenProject() {
-      const projectId = this.reopenForm.projectId || this.selectedProjectId;
-      if (!projectId) return;
-      try {
-        const actor = this.actorName();
-        await this.api('POST', `/projects/${projectId}/reopen`, {
-          description: this.reopenForm.description,
-          creator: actor,
-        });
-        this.showReopenModal = false;
-        this.reopenForm = { projectId: '', projectTitle: '', description: '' };
-        await this.loadProjects();
-        if (this.selectedProjectId === projectId && this.view === 'graph') {
-          await this.loadProject(projectId);
-          this.updateGraph();
-        }
-        this.showToast('Project reopened');
-      } catch (e) {
-        this.showToast(e.message, 'error');
-      }
-    },
 
     async openProject(id) {
       if (this.replay.active) {
@@ -2398,9 +2371,6 @@ function cairnApp() {
           for (const src of intent.from) {
             edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: phId, intentId: intent.id, label: lbl, status: nodeType }});
           }
-          if (this.isBootstrapIntent(intent)) {
-            edges.push({ data: { id: `${intent.id}_goal`, source: phId, target: 'goal', intentId: intent.id, label: '', status: nodeType, edgeType: 'bootstrap_scope' }});
-          }
         }
       }
       return { nodes, edges };
@@ -2434,15 +2404,9 @@ function cairnApp() {
         { selector: 'node[nodeType="fact"]', style: { ...common, shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'ellipse','background-color':'#f59e0b','background-opacity':0.8,label:'?',color:'#fff','font-size':'11px','font-weight':'bold',width:22,height:22,'border-width':2,'border-color':'#d97706' }},
         { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'ellipse','background-color':'#cbd5e1','background-opacity':0.5,label:'?',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:20,height:20,'border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
-        { selector: 'node[nodeType="bootstrap_pending"]', style: { ...common, shape:'round-rectangle','background-color':'#fff7ed','background-opacity':0.96,label:'data(label)',color:'#c2410c','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#fdba74','border-style':'dashed','text-wrap':'wrap','text-max-width':'70px' }},
-        { selector: 'node[nodeType="bootstrap_running"]', style: { ...common, shape:'round-rectangle','background-color':'#fb923c','background-opacity':0.96,label:'data(label)',color:'#fff7ed','font-size':'10px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#ea580c','text-wrap':'wrap','text-max-width':'70px' }},
-
         { selector: 'edge[status="concluded"]', style: { width:2,'line-color':'#6ee7b7','target-arrow-color':'#6ee7b7','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
         { selector: 'edge[status="in_progress"]', style: { width:2,'line-color':'#fbbf24','line-style':'dashed','line-dash-pattern':[8,4],'line-dash-offset':0,'target-arrow-color':'#fbbf24','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#b45309','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#fffbeb','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
         { selector: 'edge[status="unclaimed"]', style: { width:1.5,'line-color':'#cbd5e1','line-style':'dashed','line-dash-pattern':[5,5],'target-arrow-color':'#cbd5e1','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.7 }},
-        { selector: 'edge[status="bootstrap_pending"]', style: { width:2,'line-color':'#fdba74','line-style':'dashed','line-dash-pattern':[8,4],'line-dash-offset':0,'target-arrow-color':'#fdba74','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#c2410c','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'88px','text-wrap':'ellipsis','text-background-color':'#fff7ed','text-background-opacity':0.92,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.85 }},
-        { selector: 'edge[status="bootstrap_running"]', style: { width:2.5,'line-color':'#fb923c','line-style':'dashed','line-dash-pattern':[10,4],'line-dash-offset':0,'target-arrow-color':'#fb923c','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#c2410c','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'88px','text-wrap':'ellipsis','text-background-color':'#fff7ed','text-background-opacity':0.92,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.95 }},
-        { selector: 'edge[edgeType="bootstrap_scope"]', style: { label:'',width:1.8,'curve-style':'bezier','line-style':'dotted','line-dash-pattern':[2,5],'target-arrow-shape':'triangle-backcurve','arrow-scale':0.75,'target-distance-from-node':2 }},
 
         { selector: '.highlight', style: { 'z-index':999 }},
         { selector: 'edge.highlight', style: { 'z-index':999 }},
@@ -2621,12 +2585,11 @@ function cairnApp() {
 
     pulseActive() {
       if (!this.cy) return;
-      this.cy.nodes('[nodeType="in_progress"], [nodeType="bootstrap_running"]').forEach(node => {
+      this.cy.nodes('[nodeType="in_progress"]').forEach(node => {
         if (node.scratch('_pulseActive')) return;
         node.scratch('_pulseActive', true);
-        const isBootstrap = node.data('nodeType') === 'bootstrap_running';
-        const minOpacity = isBootstrap ? 0.55 : 0.35;
-        const maxOpacity = isBootstrap ? 0.98 : 0.8;
+        const minOpacity = 0.35;
+        const maxOpacity = 0.8;
         const pulseOut = () => {
           if (!node.inside()) {
             node.removeScratch('_pulseActive');
@@ -2643,20 +2606,19 @@ function cairnApp() {
         };
         pulseOut();
       });
-      this.cy.edges('[status="in_progress"], [status="bootstrap_running"]').forEach(edge => {
+      this.cy.edges('[status="in_progress"]').forEach(edge => {
         if (edge.scratch('_flowActive')) return;
         edge.scratch('_flowActive', true);
-        const isBootstrap = edge.data('status') === 'bootstrap_running';
-        const dashOffset = isBootstrap ? -16 : -12;
+        const dashOffset = -12;
         const flow = () => {
-          if (!edge.inside() || !['in_progress', 'bootstrap_running'].includes(edge.data('status'))) {
+          if (!edge.inside() || edge.data('status') !== 'in_progress') {
             edge.removeScratch('_flowActive');
             return;
           }
           edge.animate({ style:{'line-dash-offset':dashOffset} }, {
-            duration:isBootstrap ? 620 : 700,
+            duration:700,
             complete:() => {
-              if (!edge.inside() || !['in_progress', 'bootstrap_running'].includes(edge.data('status'))) {
+              if (!edge.inside() || edge.data('status') !== 'in_progress') {
                 edge.removeScratch('_flowActive');
                 return;
               }
@@ -2868,7 +2830,7 @@ function cairnApp() {
       const nt = node.data('nodeType');
       const keepLogFocus = this.sideTab === 'log';
 
-      if (['in_progress', 'unclaimed', 'bootstrap_pending', 'bootstrap_running'].includes(nt)) {
+      if (['in_progress', 'unclaimed'].includes(nt)) {
         this.selectIntent(node.data('intentId'));
         if (keepLogFocus) this.scrollTimelineToSelection();
         else this.sideTab = 'detail';
@@ -2969,10 +2931,6 @@ function cairnApp() {
       for (const sourceId of intent.from) {
         nodeIds.add(sourceId);
         edgeIds.add(`${intent.id}_${sourceId}`);
-      }
-      if (this.isBootstrapIntent(intent)) {
-        nodeIds.add('goal');
-        edgeIds.add(`${intent.id}_goal`);
       }
     },
 
@@ -3094,17 +3052,15 @@ function cairnApp() {
 
     intentDotClass(i) {
       if (i.to) return 'bg-teal-400';
-      if (this.isBootstrapIntent(i)) return i.worker ? 'bg-orange-400' : 'bg-orange-200';
       return i.worker ? 'bg-amber-400' : 'bg-slate-300';
     },
     intentStatusClass(i) {
       if (i.to) return 'text-teal-600';
-      if (this.isBootstrapIntent(i)) return i.worker ? 'text-orange-600' : 'text-orange-400';
       return i.worker ? 'text-amber-600' : 'text-slate-400';
     },
     intentStatusLabel(i) {
       if (i.to) return 'Concluded';
-      if (this.isBootstrapIntent(i)) return i.worker ? 'Bootstrap Running' : 'Bootstrap Pending';
+      if (i.intent_kind === 'report') return i.worker ? 'Report Running' : 'Report Queued';
       return i.worker ? 'In Progress' : 'Unclaimed';
     },
 
@@ -3167,24 +3123,6 @@ function cairnApp() {
         });
 
         if (!intent.concluded_at || !intent.to) continue;
-
-        if (intent.to === 'goal') {
-          events.push({
-            id: `project-completed-${intent.id}`,
-            type: 'project_completed',
-            timestamp: intent.concluded_at,
-            actor: intent.worker || intent.creator,
-            title: intent.description,
-            meta: [intent.id, `from ${intent.from.join(', ')}`],
-            targetType: 'fact',
-            targetId: 'goal',
-            order: order++,
-            intentId: intent.id,
-            producedFactId: 'goal',
-            sourceFactIds: [...intent.from],
-          });
-          continue;
-        }
 
         const fact = this.getFactRecord(intent.to);
         events.push({
@@ -3265,7 +3203,7 @@ function cairnApp() {
       }
 
       for (const event of bucket) {
-        if ((event.type === 'intent_concluded' || event.type === 'project_completed') && event.intentId) {
+        if (event.type === 'intent_concluded' && event.intentId) {
           addDependency(declareEventIdByIntent.get(event.intentId), event.id);
         }
 
@@ -3309,7 +3247,6 @@ function cairnApp() {
         intent_running: 'Execute',
         intent_concluded: 'Conclude',
         finding_created: 'Finding',
-        project_completed: 'Complete',
       };
       return labels[entry.type] || 'Event';
     },
@@ -3323,7 +3260,6 @@ function cairnApp() {
         intent_running: 'bg-amber-50 text-amber-700',
         intent_concluded: 'bg-teal-50 text-teal-700',
         finding_created: 'bg-rose-50 text-rose-700',
-        project_completed: 'bg-rose-50 text-rose-700',
       };
       return classes[entry.type] || 'bg-slate-100 text-slate-600';
     },
@@ -3345,7 +3281,6 @@ function cairnApp() {
         intent_running: 'bg-amber-400',
         intent_concluded: 'bg-teal-400',
         finding_created: 'bg-rose-400',
-        project_completed: 'bg-rose-400',
       };
       return classes[entry.type] || 'bg-slate-300';
     },
@@ -3518,10 +3453,16 @@ function cairnApp() {
           title: this.newProject.title.trim(),
           origin: this.newProject.origin.trim(),
           goal: this.newProject.goal.trim(),
-          mode: this.newProject.mode,
-          auth_mode: this.newProject.mode === 'src' ? this.newProject.auth_mode : 'anonymous',
-          bootstrap_enabled: this.newProject.mode === 'src' ? false : this.newProject.bootstrap,
+          project_kind: this.newProject.project_kind,
+          auth_mode: this.newProject.auth_mode,
         };
+        if (this.newProject.project_kind === 'recon') {
+          body.recon_max_reason_rounds = Number(this.newProject.recon_max_reason_rounds) || 8;
+        }
+        if (this.newProject.project_kind === 'vuln') {
+          body.parent_project_id = this.newProject.parent_project_id;
+          body.parent_snapshot_id = this.newProject.parent_snapshot_id;
+        }
         if (body.auth_mode === 'authenticated') {
           body.accounts = this.cleanedNewProjectAccounts();
         }
@@ -3534,6 +3475,32 @@ function cairnApp() {
         await this.openProject(data.project.id);
         this.showToast('Project created');
       } catch(e) { this.showToast(e.message, 'error'); }
+    },
+
+    async evaluateRecon() {
+      if (!this.selectedProjectId || this.project?.project?.project_kind !== 'recon') return;
+      try {
+        const data = await this.api('POST', `/projects/${this.selectedProjectId}/recon/judgements`);
+        await this.loadProject(this.selectedProjectId);
+        await this.loadProjects();
+        this.showToast(`Recon judgement queued: ${data.job_id}`);
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    },
+
+    async createReconSnapshot() {
+      if (!this.selectedProjectId || this.project?.project?.project_kind !== 'recon') return;
+      try {
+        const selected_fact_ids = this.selectedFacts.filter(fid => fid !== 'goal');
+        const snapshot = await this.api('POST', `/projects/${this.selectedProjectId}/snapshots`, {
+          snapshot_type: 'recon_fork',
+          selected_fact_ids,
+        });
+        this.showToast(`Snapshot created: ${snapshot.id}`);
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
     },
 
     openCreateIntent() {
@@ -3603,11 +3570,6 @@ function cairnApp() {
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
-    openCompleteProject() {
-      if (!this.canActOnSelectedFacts()) return;
-      this.completeForm = { description:'' };
-      this.showCompleteModal = true;
-    },
 
     openHintModal() {
       if (!this.projectCanWriteHints()) return;
@@ -3615,17 +3577,6 @@ function cairnApp() {
       this.showHintModal = true;
     },
 
-    async completeProject() {
-      try {
-        const actor = this.actorName();
-        await this.api('POST', `/projects/${this.selectedProjectId}/complete`, { from: this.selectedFacts, description: this.completeForm.description, worker: actor });
-        this.showCompleteModal = false;
-        await this.loadProjects();
-        await this.loadProject(this.selectedProjectId);
-        this.updateGraph();
-        this.showToast('Project completed');
-      } catch(e) { this.showToast(e.message, 'error'); }
-    },
 
     async addHint() {
       if (!this.projectCanWriteHints()) return;

@@ -98,7 +98,7 @@ def run_explore_task(
                 return "unhealthy"
 
         prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "explore.md", project.project.mode),
+            load_prompt(config.runtime.prompt_group, "explore.md", project.project.project_kind),
             {
                 "graph_yaml": write_graph_snapshot_reference(
                     container_manager,
@@ -195,7 +195,7 @@ def run_explore_task(
                 )
                 best_effort_release(client, project.project.id, intent.id, worker.name)
                 return "rejected"
-            return write_conclude_result(
+            outcome = write_conclude_result(
                 client,
                 project.project.id,
                 intent.id,
@@ -206,6 +206,7 @@ def run_explore_task(
                 phase_ms=execute_ms,
                 total_ms=int((time.perf_counter() - task_started) * 1000),
             )
+            return outcome
         if did_timeout(first):
             LOG.warning(
                 "explore timed out project=%s intent=%s worker=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -307,7 +308,7 @@ def _try_conclude_fallback(
     container_name = container_manager.ensure_running(project_id)
 
     prompt = render_prompt(
-        load_prompt(config.runtime.prompt_group, "explore_conclude.md", project.project.mode),
+        load_prompt(config.runtime.prompt_group, "explore_conclude.md", project.project.project_kind),
         {
             "graph_yaml": write_graph_snapshot_reference(
                 container_manager,
@@ -391,7 +392,7 @@ def _try_conclude_fallback(
         )
         best_effort_release(client, project_id, intent.id, worker.name)
         return "rejected"
-    return write_conclude_result(
+    outcome = write_conclude_result(
         client,
         project_id,
         intent.id,
@@ -401,6 +402,7 @@ def _try_conclude_fallback(
         source="explore_conclude",
         phase_ms=conclude_ms,
     )
+    return outcome
 
 
 def _payload_findings(payload: dict) -> list[dict] | None:
@@ -414,7 +416,7 @@ def _payload_findings(payload: dict) -> list[dict] | None:
 
 
 def format_auth_context(project: ProjectDetail, account: ProjectAccount | None) -> str:
-    if project.project.mode != "src" or project.project.auth_mode != "authenticated":
+    if project.project.auth_mode != "authenticated":
         return (
             "Project auth_mode is anonymous. Explore only the unauthenticated surface. "
             "Do not log in or use account credentials."

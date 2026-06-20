@@ -9,7 +9,7 @@ from pydantic import TypeAdapter
 import requests
 from requests.adapters import HTTPAdapter
 
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary, Settings
+from cairn.server.models import EphemeralJob, Intent, ProjectDetail, ProjectSummary, Settings
 
 LOG = logging.getLogger(__name__)
 
@@ -124,11 +124,18 @@ class CairnClient:
             json=body,
         )
 
-    def complete(self, project_id: str, from_ids: list[str], description: str, worker: str) -> ApiResult:
+    def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:
         return self._request_json(
             "POST",
-            f"/projects/{project_id}/complete",
-            json={"from": from_ids, "description": description, "worker": worker},
+            f"/projects/{project_id}/recon/reason-round",
+            json={"stable": stable},
+        )
+
+    def record_recon_explore_round(self, project_id: str) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/projects/{project_id}/recon/explore-round",
+            json={},
         )
 
     def create_intent(
@@ -137,6 +144,9 @@ class CairnClient:
         from_ids: list[str],
         description: str,
         creator: str,
+        *,
+        intent_kind: str = "explore",
+        finding_id: str | None = None,
     ) -> ApiResult:
         return self._request_json(
             "POST",
@@ -146,7 +156,57 @@ class CairnClient:
                 "description": description,
                 "creator": creator,
                 "worker": None,
+                "intent_kind": intent_kind,
+                "finding_id": finding_id,
             },
+        )
+
+    def conclude_report(
+        self,
+        project_id: str,
+        intent_id: str,
+        worker: str,
+        report_markdown: str,
+        report_json: dict[str, Any],
+    ) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/projects/{project_id}/intents/{intent_id}/report",
+            json={
+                "worker": worker,
+                "report_markdown": report_markdown,
+                "report_json": report_json,
+            },
+        )
+
+    def list_queued_ephemeral_jobs(self, job_type: str = "judge") -> list[EphemeralJob]:
+        response = self._session().get(
+            self._url("/ephemeral-jobs/queued"),
+            params={"job_type": job_type},
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        return [EphemeralJob.model_validate(item) for item in response.json()]
+
+    def claim_ephemeral_job(self, job_id: str, worker: str) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/ephemeral-jobs/{job_id}/claim",
+            json={"worker": worker},
+        )
+
+    def finish_ephemeral_job(self, job_id: str, worker: str, result: dict[str, Any]) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/ephemeral-jobs/{job_id}/finish",
+            json={"worker": worker, "result": result},
+        )
+
+    def fail_ephemeral_job(self, job_id: str, worker: str, error: str) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/ephemeral-jobs/{job_id}/fail",
+            json={"worker": worker, "error": error},
         )
 
     def _request_json(self, method: str, path: str, json: dict[str, Any]) -> ApiResult:

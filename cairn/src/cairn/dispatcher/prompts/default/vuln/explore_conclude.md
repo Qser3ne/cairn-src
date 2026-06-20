@@ -21,7 +21,7 @@
 发现可提交 SRC 漏洞时返回：
 
 ```json
-{"accepted": true, "data": {"description": "...", "findings": [{"title": "...", "vulnerability_type": "...", "severity": "medium", "target": "...", "location": "...", "impact": "...", "evidence": "...", "reproduction": "...", "remediation": "...", "status": "open"}]}}
+{"accepted": true, "data": {"description": "...", "findings": [{"title": "...", "vulnerability_type": "...", "severity": "medium", "target": "...", "location": "...", "impact": "...", "evidence": "...", "reproduction": "...", "remediation": "...", "status": "open", "research_value": "unknown", "next_action": "triage", "followup_reason": "", "followup_intent_description": ""}]}}
 ```
 
 ## 规则

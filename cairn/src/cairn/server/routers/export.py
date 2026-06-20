@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from datetime import datetime
+import json
 import yaml
 
 from cairn.server.db import get_conn
@@ -43,6 +44,10 @@ def _load_project_data(conn, project_id: str):
         "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at",
         (project_id,),
     ).fetchall()
+    reports = conn.execute(
+        "SELECT * FROM finding_reports WHERE project_id = ? ORDER BY created_at, id",
+        (project_id,),
+    ).fetchall()
 
     sources_by_intent = {}
     for i in intents:
@@ -52,11 +57,11 @@ def _load_project_data(conn, project_id: str):
         ).fetchall()
         sources_by_intent[i["id"]] = [r["fact_id"] for r in rows]
 
-    return proj, facts, hints, findings, accounts, intents, sources_by_intent
+    return proj, facts, hints, findings, accounts, intents, sources_by_intent, reports
 
 
 def _export_yaml(conn, project_id: str) -> str:
-    proj, facts, hints, findings, accounts, intents, sources_by_intent = _load_project_data(conn, project_id)
+    proj, facts, hints, findings, accounts, intents, sources_by_intent, reports = _load_project_data(conn, project_id)
 
     origin_desc = ""
     goal_desc = ""
@@ -71,11 +76,22 @@ def _export_yaml(conn, project_id: str) -> str:
             "title": proj["title"],
             "origin": origin_desc,
             "goal": goal_desc,
-            "mode": proj["mode"],
+            "project_kind": proj["project_kind"],
             "auth_mode": proj["auth_mode"],
-            "bootstrap_enabled": bool(proj["bootstrap_enabled"]),
+            "parent_project_id": proj["parent_project_id"],
+            "parent_snapshot_id": proj["parent_snapshot_id"],
         }
     }
+
+    if proj["project_kind"] == "recon":
+        data["recon"] = {
+            "max_reason_rounds": proj["recon_max_reason_rounds"],
+            "reason_rounds": proj["recon_reason_rounds"],
+            "explore_rounds": proj["recon_explore_rounds"],
+            "stable_rounds": proj["recon_stable_rounds"],
+            "judge_status": proj["judge_status"],
+            "judged_at": format_export_timestamp(proj["judged_at"]),
+        }
 
     if hints:
         data["hints"] = [
@@ -103,6 +119,14 @@ def _export_yaml(conn, project_id: str) -> str:
                 "reproduction": f["reproduction"],
                 "remediation": f["remediation"],
                 "status": f["status"],
+                "research_value": f["research_value"],
+                "next_action": f["next_action"],
+                "followup_reason": f["followup_reason"],
+                "followup_intent_description": f["followup_intent_description"],
+                "followup_intent_id": f["followup_intent_id"],
+                "report_status": f["report_status"],
+                "report_intent_id": f["report_intent_id"],
+                "triaged_at": format_export_timestamp(f["triaged_at"]),
                 "fact_id": f["fact_id"],
                 "intent_id": f["intent_id"],
                 "created_at": format_export_timestamp(f["created_at"]),
@@ -131,17 +155,32 @@ def _export_yaml(conn, project_id: str) -> str:
             "worker": i["worker"],
             "created_at": format_export_timestamp(i["created_at"]),
             "concluded_at": format_export_timestamp(i["concluded_at"]),
+            "intent_kind": i["intent_kind"],
+            "finding_id": i["finding_id"],
         }
         intent_list.append(entry)
 
     if intent_list:
         data["intents"] = intent_list
 
+    if reports:
+        data["reports"] = [
+            {
+                "id": report["id"],
+                "finding_id": report["finding_id"],
+                "intent_id": report["intent_id"],
+                "report_markdown": report["report_markdown"],
+                "report_json": json.loads(report["report_json"] or "{}"),
+                "created_at": format_export_timestamp(report["created_at"]),
+            }
+            for report in reports
+        ]
+
     return yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
 
 def _export_timeline(conn, project_id: str) -> str:
-    proj, facts, hints, findings, accounts, intents, sources_by_intent = _load_project_data(conn, project_id)
+    proj, facts, hints, findings, accounts, intents, sources_by_intent, reports = _load_project_data(conn, project_id)
 
     facts_by_id = {f["id"]: f["description"] for f in facts}
 
@@ -153,8 +192,8 @@ def _export_timeline(conn, project_id: str) -> str:
     ts = format_export_timestamp(proj["created_at"]) or ""
     block = (
         f"[{ts}] PROJECT CREATED\n"
-        f"  mode: {proj['mode']}\n"
-        f"  auth_mode: {proj['auth_mode']}\n"
+        f"  kind: {proj['project_kind']}\n"
+        f"  auth: {proj['auth_mode']}\n"
         f"  accounts: {len(accounts)}\n"
         f"  origin: {origin_desc}\n"
         f"  goal: {goal_desc}"
@@ -174,6 +213,7 @@ def _export_timeline(conn, project_id: str) -> str:
 
         ts = format_export_timestamp(i["created_at"]) or ""
         meta = f"  from: {from_str}"
+        meta += f"\n  kind: {i['intent_kind']}"
         if i["worker"] and not i["concluded_at"]:
             meta += f"\n  worker: {i['worker']} (in progress)"
         block = f"[{ts}] INTENT DECLARED {i['id']} by {i['creator']}\n{meta}\n  {i['description']}"
@@ -186,11 +226,8 @@ def _export_timeline(conn, project_id: str) -> str:
         ts = format_export_timestamp(i["concluded_at"]) or ""
         actor = i["worker"] or i["creator"]
 
-        if i["to_fact_id"] == "goal":
-            block = f"[{ts}] PROJECT COMPLETED by {actor}\n  via: {i['id']} from {from_str}"
-        else:
-            fact_desc = facts_by_id.get(i["to_fact_id"], "")
-            block = f"[{ts}] INTENT CONCLUDED {i['id']} by {actor}\n  from: {from_str}\n  produced: {i['to_fact_id']}\n  {fact_desc}"
+        fact_desc = facts_by_id.get(i["to_fact_id"], "")
+        block = f"[{ts}] INTENT CONCLUDED {i['id']} by {actor}\n  from: {from_str}\n  produced: {i['to_fact_id']}\n  {fact_desc}"
 
         events.append((i["concluded_at"] or "", order, block))
         order += 1
@@ -205,10 +242,23 @@ def _export_timeline(conn, project_id: str) -> str:
             f"  fact: {f['fact_id']}\n"
             f"  intent: {f['intent_id']}\n"
             f"  status: {f['status']}\n"
+            f"  research_value: {f['research_value']}\n"
+            f"  next_action: {f['next_action']}\n"
+            f"  report_status: {f['report_status']}\n"
             f"  impact: {f['impact']}\n"
             f"  evidence: {f['evidence']}"
         )
         events.append((f["created_at"] or "", order, block))
+        order += 1
+
+    for report in reports:
+        ts = format_export_timestamp(report["created_at"]) or ""
+        block = (
+            f"[{ts}] REPORT {report['id']} for {report['finding_id']}\n"
+            f"  intent: {report['intent_id']}\n"
+            f"  {report['report_markdown']}"
+        )
+        events.append((report["created_at"] or "", order, block))
         order += 1
 
     events.sort(key=lambda e: (e[0], e[1]))

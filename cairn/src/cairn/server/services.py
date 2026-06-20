@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
+import json
 
 from fastapi import HTTPException
 
-from cairn.server.models import Finding, Intent, ProjectAccount, ProjectMeta, ProjectReason
+from cairn.server.models import (
+    EphemeralJob,
+    Finding,
+    FindingReport,
+    Intent,
+    ProjectAccount,
+    ProjectMeta,
+    ProjectReason,
+    ProjectSnapshot,
+)
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -56,6 +66,21 @@ def next_account_id(conn: sqlite3.Connection, project_id: str) -> str:
     return _next_scoped_id(conn, "account", "a", project_id)
 
 
+def next_snapshot_id(conn: sqlite3.Connection, project_id: str) -> str:
+    return _next_scoped_id(conn, "snapshot", "snap_", project_id)
+
+
+def next_ephemeral_job_id(conn: sqlite3.Connection) -> str:
+    conn.execute("INSERT OR IGNORE INTO counters (name, value) VALUES ('ephemeral_job', 0)")
+    conn.execute("UPDATE counters SET value = value + 1 WHERE name = 'ephemeral_job'")
+    row = conn.execute("SELECT value FROM counters WHERE name = 'ephemeral_job'").fetchone()
+    return f"judge_{row['value']:03d}"
+
+
+def next_report_id(conn: sqlite3.Connection, project_id: str) -> str:
+    return _next_scoped_id(conn, "report", "r", project_id)
+
+
 def get_project_or_404(conn: sqlite3.Connection, project_id: str) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     if row is None:
@@ -77,10 +102,10 @@ def check_project_hint_writable(conn: sqlite3.Connection, project_id: str) -> sq
     return row
 
 
-def check_project_completed(conn: sqlite3.Connection, project_id: str) -> sqlite3.Row:
+def check_project_kind(conn: sqlite3.Connection, project_id: str, kind: str) -> sqlite3.Row:
     row = get_project_or_404(conn, project_id)
-    if row["status"] != "completed":
-        raise HTTPException(403, f"Project is {row['status']}")
+    if row["project_kind"] != kind:
+        raise HTTPException(400, f"Project must be {kind}")
     return row
 
 
@@ -170,16 +195,16 @@ def get_releasable_open_intent_or_404(
     return row
 
 
-def get_completion_intent_or_409(conn: sqlite3.Connection, project_id: str) -> sqlite3.Row:
-    rows = conn.execute(
-        "SELECT * FROM intents WHERE project_id = ? AND to_fact_id = 'goal'",
-        (project_id,),
-    ).fetchall()
-    if not rows:
-        raise HTTPException(409, "Completed project is missing its completion intent")
-    if len(rows) != 1:
-        raise HTTPException(409, "Completed project has multiple completion intents")
-    return rows[0]
+def get_finding_or_404(
+    conn: sqlite3.Connection, project_id: str, finding_id: str
+) -> sqlite3.Row:
+    row = conn.execute(
+        "SELECT * FROM findings WHERE id = ? AND project_id = ?",
+        (finding_id, project_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Finding not found")
+    return row
 
 
 def intent_to_model(conn: sqlite3.Connection, row: sqlite3.Row, project_id: str) -> Intent:
@@ -197,6 +222,8 @@ def intent_to_model(conn: sqlite3.Connection, row: sqlite3.Row, project_id: str)
         last_heartbeat_at=row["last_heartbeat_at"],
         created_at=row["created_at"],
         concluded_at=row["concluded_at"],
+        intent_kind=row["intent_kind"],
+        finding_id=row["finding_id"],
     )
 
 
@@ -221,6 +248,14 @@ def finding_to_model(row: sqlite3.Row) -> Finding:
         reproduction=row["reproduction"],
         remediation=row["remediation"],
         status=row["status"],
+        research_value=row["research_value"],
+        next_action=row["next_action"],
+        followup_reason=row["followup_reason"],
+        followup_intent_description=row["followup_intent_description"],
+        followup_intent_id=row["followup_intent_id"],
+        report_status=row["report_status"],
+        report_intent_id=row["report_intent_id"],
+        triaged_at=row["triaged_at"],
         fact_id=row["fact_id"],
         intent_id=row["intent_id"],
         created_at=row["created_at"],
@@ -278,11 +313,18 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
         id=row["id"],
         title=row["title"],
         status=row["status"],
-        mode=row["mode"],
+        project_kind=row["project_kind"],
         auth_mode=row["auth_mode"],
-        bootstrap_enabled=bool(row["bootstrap_enabled"]),
+        parent_project_id=row["parent_project_id"],
+        parent_snapshot_id=row["parent_snapshot_id"],
         created_at=row["created_at"],
         reason=project_reason_from_row(row),
+        recon_max_reason_rounds=row["recon_max_reason_rounds"],
+        recon_reason_rounds=row["recon_reason_rounds"],
+        recon_explore_rounds=row["recon_explore_rounds"],
+        recon_stable_rounds=row["recon_stable_rounds"],
+        judge_status=row["judge_status"],
+        judged_at=row["judged_at"],
     )
 
 
@@ -336,3 +378,131 @@ def expire_reason_leases(conn: sqlite3.Connection, project_id: str | None = None
         query = query.replace("WHERE ", "WHERE id = ? AND ", 1)
         params = (project_id, now, timeout)
     conn.execute(query, params)
+
+
+def maybe_stop_recon_by_round_limit(conn: sqlite3.Connection, project_id: str) -> None:
+    row = get_project_or_404(conn, project_id)
+    if row["project_kind"] != "recon":
+        return
+    if row["recon_max_reason_rounds"] is None:
+        return
+    if row["recon_reason_rounds"] < row["recon_max_reason_rounds"]:
+        return
+    conn.execute(
+        """
+        UPDATE projects
+        SET status = 'stopped',
+            reason_worker = NULL,
+            reason_trigger = NULL,
+            reason_started_at = NULL,
+            reason_last_heartbeat_at = NULL
+        WHERE id = ?
+        """,
+        (project_id,),
+    )
+    conn.execute(
+        "UPDATE intents SET worker = NULL WHERE project_id = ? AND concluded_at IS NULL",
+        (project_id,),
+    )
+
+
+def increment_recon_reason_round(conn: sqlite3.Connection, project_id: str, stable: bool) -> ProjectMeta:
+    row = check_project_kind(conn, project_id, "recon")
+    if row["status"] != "active":
+        raise HTTPException(403, f"Project is {row['status']}")
+    if stable:
+        conn.execute(
+            """
+            UPDATE projects
+            SET recon_reason_rounds = recon_reason_rounds + 1,
+                recon_stable_rounds = recon_stable_rounds + 1
+            WHERE id = ?
+            """,
+            (project_id,),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE projects
+            SET recon_reason_rounds = recon_reason_rounds + 1,
+                recon_stable_rounds = 0
+            WHERE id = ?
+            """,
+            (project_id,),
+        )
+    maybe_stop_recon_by_round_limit(conn, project_id)
+    return project_meta_from_row(get_project_or_404(conn, project_id))
+
+
+def increment_recon_explore_round(conn: sqlite3.Connection, project_id: str) -> ProjectMeta:
+    row = check_project_kind(conn, project_id, "recon")
+    if row["status"] != "active":
+        raise HTTPException(403, f"Project is {row['status']}")
+    conn.execute(
+        "UPDATE projects SET recon_explore_rounds = recon_explore_rounds + 1 WHERE id = ?",
+        (project_id,),
+    )
+    return project_meta_from_row(get_project_or_404(conn, project_id))
+
+
+def snapshot_to_model(row: sqlite3.Row) -> ProjectSnapshot:
+    return ProjectSnapshot(
+        id=row["id"],
+        project_id=row["project_id"],
+        snapshot_type=row["snapshot_type"],
+        summary_yaml=row["summary_yaml"],
+        selected_fact_ids=json.loads(row["selected_fact_ids_json"] or "[]"),
+        stats=json.loads(row["stats_json"] or "{}"),
+        created_at=row["created_at"],
+    )
+
+
+def get_snapshot_or_404(
+    conn: sqlite3.Connection, project_id: str, snapshot_id: str
+) -> sqlite3.Row:
+    row = conn.execute(
+        "SELECT * FROM project_snapshots WHERE id = ? AND project_id = ?",
+        (snapshot_id, project_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Snapshot not found")
+    return row
+
+
+def ephemeral_job_to_model(row: sqlite3.Row) -> EphemeralJob:
+    result = None
+    if row["result_json"]:
+        result = json.loads(row["result_json"])
+    return EphemeralJob(
+        id=row["id"],
+        project_id=row["project_id"],
+        job_type=row["job_type"],
+        status=row["status"],
+        input_snapshot_yaml=row["input_snapshot_yaml"],
+        result=result,
+        error=row["error"],
+        worker=row["worker"],
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
+        expires_at=row["expires_at"],
+    )
+
+
+def get_ephemeral_job_or_404(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM ephemeral_jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Ephemeral job not found")
+    return row
+
+
+def finding_report_to_model(row: sqlite3.Row) -> FindingReport:
+    return FindingReport(
+        id=row["id"],
+        project_id=row["project_id"],
+        finding_id=row["finding_id"],
+        intent_id=row["intent_id"],
+        report_markdown=row["report_markdown"],
+        report_json=json.loads(row["report_json"] or "{}"),
+        created_at=row["created_at"],
+    )

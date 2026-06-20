@@ -18,7 +18,7 @@ from cairn.dispatcher.runtime.process import ProcessResult
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.server import db
 from cairn.server.app import app
-from cairn.server.models import ProjectDetail, ProjectSummary, Settings
+from cairn.server.models import EphemeralJob, ProjectDetail, ProjectSummary, Settings
 
 
 class InProcessClient:
@@ -75,16 +75,7 @@ class InProcessClient:
         body = {"worker": worker, "description": description}
         if findings:
             body["findings"] = findings
-        return self._post(
-            f"/projects/{project_id}/intents/{intent_id}/conclude",
-            body,
-        )
-
-    def complete(self, project_id: str, from_ids: list[str], description: str, worker: str) -> ApiResult:
-        return self._post(
-            f"/projects/{project_id}/complete",
-            {"from": from_ids, "description": description, "worker": worker},
-        )
+        return self._post(f"/projects/{project_id}/intents/{intent_id}/conclude", body)
 
     def create_intent(
         self,
@@ -92,6 +83,9 @@ class InProcessClient:
         from_ids: list[str],
         description: str,
         creator: str,
+        *,
+        intent_kind: str = "explore",
+        finding_id: str | None = None,
     ) -> ApiResult:
         return self._post(
             f"/projects/{project_id}/intents",
@@ -100,8 +94,30 @@ class InProcessClient:
                 "description": description,
                 "creator": creator,
                 "worker": None,
+                "intent_kind": intent_kind,
+                "finding_id": finding_id,
             },
         )
+
+    def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:
+        return self._post(f"/projects/{project_id}/recon/reason-round", {"stable": stable})
+
+    def record_recon_explore_round(self, project_id: str) -> ApiResult:
+        return self._post(f"/projects/{project_id}/recon/explore-round", {})
+
+    def list_queued_ephemeral_jobs(self, job_type: str = "judge") -> list[EphemeralJob]:
+        response = self.http.get(f"/ephemeral-jobs/queued?job_type={job_type}")
+        response.raise_for_status()
+        return [EphemeralJob.model_validate(item) for item in response.json()]
+
+    def claim_ephemeral_job(self, job_id: str, worker: str) -> ApiResult:
+        return self._post(f"/ephemeral-jobs/{job_id}/claim", {"worker": worker})
+
+    def finish_ephemeral_job(self, job_id: str, worker: str, result: dict[str, Any]) -> ApiResult:
+        return self._post(f"/ephemeral-jobs/{job_id}/finish", {"worker": worker, "result": result})
+
+    def fail_ephemeral_job(self, job_id: str, worker: str, error: str) -> ApiResult:
+        return self._post(f"/ephemeral-jobs/{job_id}/fail", {"worker": worker, "error": error})
 
     def _post(self, path: str, payload: dict[str, Any]) -> ApiResult:
         response = self.http.post(path, json=payload)
@@ -219,11 +235,17 @@ def _phase(
 
 def _config(
     *,
-    bootstrap: str,
     reason: str,
-    explore: str,
+    explore: str | None = None,
+    judge: str | None = None,
     task_types: list[str] | None = None,
 ) -> DispatchConfig:
+    env = {
+        "MOCK_HEALTHCHECK": _phase("ok"),
+        "MOCK_REASON": reason,
+        "MOCK_EXPLORE_EXECUTE": explore or _phase("fact"),
+        "MOCK_JUDGE": judge or _phase("ready"),
+    }
     return DispatchConfig.model_validate(
         {
             "server": "in-process",
@@ -236,9 +258,10 @@ def _config(
                 "prompt_group": "mock",
             },
             "tasks": {
-                "bootstrap": {"timeout": 2, "conclude_timeout": 2},
                 "reason": {"timeout": 2, "max_intents": 1},
                 "explore": {"timeout": 2, "conclude_timeout": 2},
+                "judge": {"timeout": 2},
+                "report": {"timeout": 2},
             },
             "container": {
                 "image": "unused",
@@ -249,15 +272,10 @@ def _config(
                 {
                     "name": "mock-worker",
                     "type": "mock",
-                    "task_types": task_types or ["bootstrap", "reason", "explore"],
+                    "task_types": task_types or ["reason", "explore", "judge"],
                     "max_running": 1,
                     "priority": 0,
-                    "env": {
-                        "MOCK_HEALTHCHECK": _phase("ok"),
-                        "MOCK_BOOTSTRAP": bootstrap,
-                        "MOCK_REASON": reason,
-                        "MOCK_EXPLORE_EXECUTE": explore,
-                    },
+                    "env": env,
                 }
             ],
         }
@@ -295,100 +313,53 @@ def _dispatch_and_wait(loop: DispatcherLoop) -> None:
     loop._cancel_inactive_tasks(summaries)
     loop._queue_container_cleanups(summaries)
     loop._dispatch_available(summaries)
+    loop._dispatch_judge_jobs()
     assert loop.futures
     for future in list(loop.futures):
         future.result(timeout=5)
     loop._reap_futures()
 
 
-def _create_project(http: TestClient) -> str:
-    response = http.post(
-        "/projects",
-        json={"title": "integration", "origin": "start", "goal": "finish"},
-    )
-    assert response.status_code == 201
+def _create_project(http: TestClient, **overrides) -> str:
+    body = {"title": "integration", "origin": "start", "goal": "finish"}
+    body.update(overrides)
+    response = http.post("/projects", json=body)
+    assert response.status_code == 201, response.text
     return response.json()["project"]["id"]
 
 
-def test_mock_scheduler_bootstrap_completes_project_end_to_end(http_client: TestClient) -> None:
+def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
     containers = LocalContainerManager()
-    loop = _loop(
-        _config(
-            bootstrap=_phase("complete"),
-            reason=_phase("complete", zero_outcomes=["intent"]),
-            explore=_phase("fact"),
-        ),
-        client,
-        containers,
-    )
+    loop = _loop(_config(reason=_phase("intent"), explore=_phase("fact")), client, containers)
     project_id = _create_project(http_client)
 
     try:
+        _dispatch_and_wait(loop)
+        assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(2, 0, 0)
         _dispatch_and_wait(loop)
         project = client.get_project(project_id)
     finally:
         loop.close()
 
-    assert project.project.status == "completed"
+    assert project.project.status == "active"
+    assert project.project.recon_reason_rounds == 1
+    assert project.project.recon_explore_rounds == 1
     assert [fact.id for fact in project.facts] == ["origin", "goal", "f001"]
-    assert [(intent.id, intent.to) for intent in project.intents] == [("i001", "f001"), ("i002", "goal")]
+    assert [(intent.id, intent.to) for intent in project.intents] == [("i001", "f001")]
+    assert any("/reason_execute-" in path for _, path, _ in containers.writes)
+    assert any("/explore_execute-" in path for _, path, _ in containers.writes)
 
 
-def test_mock_scheduler_runs_reason_explore_reason_complete_chain(http_client: TestClient) -> None:
+def test_mock_scheduler_recon_stable_can_stop_at_reason_limit(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
     containers = LocalContainerManager()
     loop = _loop(
-        _config(
-            bootstrap=_phase("complete"),
-            reason=_phase("intent", rules=[{"fact_ids_gte": 3, "force": "complete"}]),
-            explore=_phase("fact"),
-        ),
+            _config(reason=_phase("stable", zero_outcomes=["intent"])),
         client,
         containers,
     )
-    project_id = _create_project(http_client)
-    seed = client.create_intent(project_id, ["origin"], "seed", "seed-worker")
-    assert seed.ok
-    assert client.heartbeat(project_id, "i001", "seed-worker").ok
-    assert client.conclude(project_id, "i001", "seed-worker", "seed fact").ok
-
-    try:
-        _dispatch_and_wait(loop)
-        assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(3, 0, 0)
-        _dispatch_and_wait(loop)
-        _dispatch_and_wait(loop)
-        project = client.get_project(project_id)
-    finally:
-        loop.close()
-
-    assert project.project.status == "completed"
-    assert [fact.id for fact in project.facts] == ["origin", "goal", "f001", "f002"]
-    assert [(intent.id, intent.to) for intent in project.intents] == [
-        ("i001", "f001"),
-        ("i002", "f002"),
-        ("i003", "goal"),
-    ]
-    assert any("/reason_execute-" in path and "f002" in content for _, path, content in containers.writes)
-    assert any("/explore_execute-" in path and "f001" in content for _, path, content in containers.writes)
-
-
-def test_mock_scheduler_enabled_project_skips_bootstrap_when_worker_does_not_support_it(
-    http_client: TestClient,
-) -> None:
-    client = InProcessClient(http_client)
-    containers = LocalContainerManager()
-    loop = _loop(
-        _config(
-            bootstrap=_phase("complete"),
-            reason=_phase("complete", zero_outcomes=["intent"]),
-            explore=_phase("fact"),
-            task_types=["reason", "explore"],
-        ),
-        client,
-        containers,
-    )
-    project_id = _create_project(http_client)
+    project_id = _create_project(http_client, recon_max_reason_rounds=1)
 
     try:
         _dispatch_and_wait(loop)
@@ -396,7 +367,29 @@ def test_mock_scheduler_enabled_project_skips_bootstrap_when_worker_does_not_sup
     finally:
         loop.close()
 
-    assert project.project.status == "completed"
-    assert [(intent.description, intent.to) for intent in project.intents] == [
-        ("mock complete from origin", "goal")
-    ]
+    assert project.project.status == "stopped"
+    assert project.project.recon_reason_rounds == 1
+    assert project.project.recon_stable_rounds == 1
+
+
+def test_mock_scheduler_processes_recon_judge_job(http_client: TestClient) -> None:
+    project_id = _create_project(http_client)
+    response = http_client.post(f"/projects/{project_id}/recon/judgements")
+    assert response.status_code == 201
+    client = InProcessClient(http_client)
+    containers = LocalContainerManager()
+    loop = _loop(
+        _config(reason=_phase("stable", zero_outcomes=["intent"]), judge=_phase("ready"), task_types=["judge"]),
+        client,
+        containers,
+    )
+
+    try:
+        _dispatch_and_wait(loop)
+        project = client.get_project(project_id)
+    finally:
+        loop.close()
+
+    assert project.project.judge_status == "ready"
+    assert len(project.facts) == 2
+    assert any("/judge_execute-" in path for _, path, _ in containers.writes)

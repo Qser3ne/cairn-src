@@ -66,13 +66,19 @@ https://github.com/user-attachments/assets/e557b1ac-dda4-41cb-87dd-9d56dbf05133
 
 ## How It Works
 
-Three task types, all executed by the same Worker:
+Cairn now runs an SRC-only flow with two project kinds:
+
+- **Recon** projects collect attack-surface facts and candidate leads.
+- **Vuln** projects are forked from recon snapshots to validate and report vulnerabilities.
+
+Four task types are scheduled by the dispatcher:
 
 | Task | What it does | Output |
 |------|-------------|--------|
-| **Bootstrap** | At project start, attempts to solve the problem directly | Fact + possible Complete |
-| **Reason** | Reads the full graph: is the goal met? What should be explored next? | Complete / new Intents / no-op |
-| **Explore** | Claims one Intent, executes the exploration, reports findings | One Fact |
+| **Reason** | Reads the graph and proposes the next non-duplicate intents | New Intents / no-op |
+| **Explore** | Claims one Intent and executes it | One Fact, plus optional Findings in vuln projects |
+| **Judge** | Evaluates whether recon is ready to fork | Ephemeral judgement result |
+| **Report** | Drafts an SRC report for a finding | Report artifact |
 
 System architecture:
 
@@ -102,6 +108,8 @@ System architecture:
 **Cairn Server** maintains graph consistency only.
 
 **Cairn Dispatcher** reads the graph, schedules tasks, spins up and tears down worker containers, and is the sole writer to the protocol. Each project gets its own Worker Container; multiple Agent Workers run concurrently inside it. Agent Workers only receive a prompt and return structured output.
+
+Projects are archived manually with `completed`; workers no longer auto-complete projects.
 
 Supported worker backends: **Claude Code**, **Codex**, and **Pi**.
 

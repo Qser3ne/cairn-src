@@ -111,7 +111,7 @@ def run_reason_task(
             len(open_intents),
         )
         prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "reason.md", project.project.mode),
+            load_prompt(config.runtime.prompt_group, "reason.md", project.project.project_kind),
             {
                 "graph_yaml": write_graph_snapshot_reference(
                     container_manager,
@@ -211,39 +211,6 @@ def run_reason_task(
                 preview(result.stdout),
             )
             return "rejected"
-        if kind == "complete":
-            if project.project.mode == "src":
-                LOG.info(
-                    "src reason ignored complete payload project=%s worker=%s from=%s execute_ms=%s total_ms=%s",
-                    project.project.id,
-                    worker.name,
-                    data["from"],
-                    execute_ms,
-                    total_ms,
-                )
-                return "success"
-            response = client.complete(project.project.id, data["from"], data["description"], worker.name)
-            if response.status_code == 403:
-                LOG.info("project became inactive during reason complete project=%s worker=%s", project.project.id, worker.name)
-                return "success"
-            if not response.ok:
-                LOG.warning(
-                    "reason complete write failed project=%s worker=%s status=%s body=%s",
-                    project.project.id,
-                    worker.name,
-                    response.status_code,
-                    response.text,
-                )
-                return "failed"
-            LOG.info(
-                "project completed project=%s worker=%s from=%s execute_ms=%s total_ms=%s",
-                project.project.id,
-                worker.name,
-                data["from"],
-                execute_ms,
-                total_ms,
-            )
-            return "success"
         if kind == "intents":
             created = 0
             for intent_data in data:
@@ -291,17 +258,28 @@ def run_reason_task(
                 execute_ms,
                 total_ms,
             )
-            if created == 0 and project.project.mode != "src":
-                LOG.warning(
-                    "reason created no intents project=%s worker=%s attempted=%s execute_ms=%s total_ms=%s",
-                    project.project.id,
-                    worker.name,
-                    len(data),
-                    execute_ms,
-                    total_ms,
-                )
-                return "failed"
+            if project.project.project_kind == "recon":
+                response = client.record_recon_reason_round(project.project.id, stable=False)
+                if not response.ok and response.status_code not in (403, 409):
+                    LOG.warning(
+                        "recon reason round update failed project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        response.status_code,
+                        response.text,
+                    )
             return "success"
+        if kind in ("noop", "stable"):
+            if project.project.project_kind == "recon":
+                response = client.record_recon_reason_round(project.project.id, stable=(kind == "stable"))
+                if not response.ok and response.status_code not in (403, 409):
+                    LOG.warning(
+                        "recon reason round update failed project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        response.status_code,
+                        response.text,
+                    )
         LOG.info(
             "reason finished without graph change project=%s worker=%s execute_ms=%s total_ms=%s",
             project.project.id,
