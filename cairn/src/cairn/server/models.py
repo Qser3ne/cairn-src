@@ -405,6 +405,18 @@ class JudgementCreateResponse(BaseModel):
     status: str
 
 
+class JudgementResult(BaseModel):
+    id: str
+    status: EphemeralJobStatus
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    worker: str | None = None
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    expires_at: str
+
+
 class EphemeralJob(BaseModel):
     id: str
     project_id: str

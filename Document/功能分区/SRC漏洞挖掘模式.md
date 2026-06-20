@@ -13,7 +13,8 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 
 - 用户创建 recon 项目，输入 title、origin、hints，可选择 `auth_mode=anonymous|authenticated`；项目目的由 `project_kind` 固化，recon 用于信息收集，vuln 用于漏洞挖掘。
 - recon 项目通过 reason 规划 recon intents，通过 explore 产出资产、入口、边界和候选攻击面 facts。
-- 用户可触发 Evaluate Recon，系统创建 ephemeral judge job，评估当前 recon 是否足够 fork vuln；judge 只更新 `judge_status`，不写 facts/intents/findings。
+- 用户可触发 Evaluate Recon，系统创建 ephemeral judge job，评估当前 recon 是否足够 fork vuln；judge 只更新 `judge_status` 和 judgement result，不写 facts/intents/findings。
+- Evaluate Recon 的最新结果会在项目 Detail 面板展示 verdict、score、recommended action、checklist、blocking gaps 和 non-blocking gaps，并保留最近历史结果，避免只看到 `judge_status` 而丢失具体判断理由。
 - 用户从 recon 创建 snapshot，再从 snapshot fork 一个 vuln 项目；新 vuln 必须记录 `parent_project_id` 和 `parent_snapshot_id`。
 - vuln 项目 reason 只规划非重复漏洞验证 intents；explore 可写 facts 和 findings；finding 可触发 follow-up intent 或 report intent。
 - report intent 由 report task 生成 `finding_reports` 草稿，并更新 finding 的 `report_status`。
@@ -43,6 +44,6 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 - UI 不再出现 Standard、SRC mode 按钮、bootstrap checkbox、Complete/Reopen modal。
 - 可创建 anonymous/authenticated recon；authenticated 无 accounts 返回 422。
 - 可从 recon 创建 snapshot 并 fork vuln；authenticated vuln 必须提供 accounts。
-- recon 能展示 rounds、judge status、Evaluate Recon、Stop Recon、Create Vulnerability Project。
+- recon 能展示 rounds、judge status、Evaluate Recon、Evaluate result、Stop Recon、Create Vulnerability Project。
 - vuln 能展示 finding lifecycle、follow-up/report 状态。
 - reason 输出 `complete` 被判为非法；recon stable/noop 会递增 recon round，达到上限后自动 stopped。

@@ -15,6 +15,7 @@ from cairn.server.models import (
     HeartbeatRequest,
     Hint,
     JudgementCreateResponse,
+    JudgementResult,
     ProjectDetail,
     ProjectMeta,
     ProjectSnapshot,
@@ -519,6 +520,36 @@ def create_recon_judgement(project_id: str):
             (job_id, project_id, _export_yaml(conn, project_id), now, expires),
         )
         return JudgementCreateResponse(job_id=job_id, status="queued")
+
+
+@router.get("/projects/{project_id}/recon/judgements", response_model=list[JudgementResult])
+def list_recon_judgements(project_id: str):
+    with get_conn() as conn:
+        check_project_kind(conn, project_id, "recon")
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM ephemeral_jobs
+            WHERE project_id = ? AND job_type = 'judge'
+            ORDER BY created_at DESC, id DESC
+            """,
+            (project_id,),
+        ).fetchall()
+        jobs = [ephemeral_job_to_model(row) for row in rows]
+        return [
+            JudgementResult(
+                id=job.id,
+                status=job.status,
+                result=job.result,
+                error=job.error,
+                worker=job.worker,
+                created_at=job.created_at,
+                started_at=job.started_at,
+                finished_at=job.finished_at,
+                expires_at=job.expires_at,
+            )
+            for job in jobs
+        ]
 
 
 @router.get("/projects/{project_id}/recon/judgements/{job_id}", response_model=EphemeralJob)

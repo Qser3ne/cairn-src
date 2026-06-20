@@ -208,6 +208,33 @@ def test_recon_judgement_job_lifecycle_updates_project_judge_status(client: Test
     ]
 
 
+def test_recon_judgement_results_are_listed_without_snapshot_payload(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    other_project_id = _create_recon(client, title="other")["project"]["id"]
+    first_job_id = client.post(f"/projects/{project_id}/recon/judgements").json()["job_id"]
+    second_job_id = client.post(f"/projects/{project_id}/recon/judgements").json()["job_id"]
+    other_job_id = client.post(f"/projects/{other_project_id}/recon/judgements").json()["job_id"]
+
+    client.post(f"/ephemeral-jobs/{first_job_id}/claim", json={"worker": "judge-a"})
+    client.post(
+        f"/ephemeral-jobs/{first_job_id}/finish",
+        json={"worker": "judge-a", "result": {"verdict": "ready", "score": 88}},
+    )
+    client.post(f"/ephemeral-jobs/{second_job_id}/claim", json={"worker": "judge-b"})
+    client.post(
+        f"/ephemeral-jobs/{second_job_id}/finish",
+        json={"worker": "judge-b", "result": {"verdict": "not_ready", "score": 61}},
+    )
+
+    results = client.get(f"/projects/{project_id}/recon/judgements").json()
+
+    assert [item["id"] for item in results] == [second_job_id, first_job_id]
+    assert results[0]["result"] == {"verdict": "not_ready", "score": 61}
+    assert results[1]["result"] == {"verdict": "ready", "score": 88}
+    assert "input_snapshot_yaml" not in results[0]
+    assert other_job_id not in [item["id"] for item in results]
+
+
 def test_conclude_finding_lifecycle_creates_followup_and_report_intents(client: TestClient) -> None:
     project_id = _create_recon(client)["project"]["id"]
     client.post(

@@ -21,6 +21,8 @@
 6. Explore conclude 写入 fact；vuln explore 可附带 findings，recon explore 不应附带 findings。
 7. Finding 的 `next_action="follow_up"` 自动创建 explore intent；`next_action="report"` 自动创建 report intent。
 8. Report intent 由 report task 调度，写入 `finding_reports` 并将 finding `report_status` 改为 `drafted`。
+9. Evaluate Recon 由 `POST /projects/{project_id}/recon/judgements` 创建 ephemeral judge job；任务完成后 `result_json` 保留完整 verdict/score/checklist/gaps，`GET /projects/{project_id}/recon/judgements` 返回当前 recon 项目的轻量 judgement result 列表，不返回大体积 `input_snapshot_yaml`。
+10. 前端 `cairn/src/cairn/server/static/index.html` 在项目 Detail 面板展示最新 Evaluate Recon 结果和最近历史结果；`ProjectDetail` 本身仍只保留 `judge_status/judged_at` 摘要，完整 judgement 输出通过独立接口加载。
 
 ## 去重约定
 
@@ -31,6 +33,7 @@
 - `from` 只要求引用现有 facts；Goal 已删除，不再有特殊禁止来源节点。
 - Dispatcher 遇到重复 intent 的 409 会跳过，不把 reason 任务视为失败。
 - `intent_kind="report"` 的 intent 只能绑定 `finding_id`，由 report task 消费，不走 explore prompt。
+- Judge job 是 ephemeral，不参与 intent 图谱，不应作为 fact、intent 或 finding 写入 graph；UI 展示只用于辅助判断是否创建 snapshot/fork vuln。
 
 ## 验证命令
 
