@@ -32,8 +32,7 @@
 
 - 容器内已预装常见黑盒 SRC 工具，可直接尝试，例如 `nuclei`、`ffuf`、`feroxbuster`、`gobuster`、`dirsearch`、`katana`、`dalfox`、`naabu`、`nikto`、`sqlmap`、`whatweb`、`wafw00f`、`netexec`、`impacket-*`、`proxychains4`、`chisel-common-binaries`。
 - Web SRC 轻量工具链覆盖资产发现、URL 收集、参数整理和 XSS/OOB 辅助，例如 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`。
-- 推荐 Web SRC 流程：资产发现 -> 存活探测 -> URL 收集 -> 参数归一化 -> 低频验证 -> 证据保存 -> finding 判断。新增工具多数只产生线索，不能把扫描结果直接作为漏洞。
-- 容器内也预装少量白盒和依赖审计工具，例如 `semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner`。这些工具用于辅助发现线索；白盒或依赖审计结果必须能落到真实外部入口、实际部署场景和可复现攻击链，不能单独作为 SRC finding。
+- 容器内也预装少量白盒和依赖审计工具，例如 `semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner`。
 - 常用本地资源和目录：
   - `/home/kali/.local/nuclei-templates`
   - `/home/kali/.gf`

@@ -15,7 +15,6 @@
 - 已要求长输出、扫描日志、截图、PoC 输出和请求响应摘要保存到 `/home/kali/evidence`，最终报告草稿保存到 `/home/kali/reports`，并在结论中引用路径。
 - 已约定 `/home/kali/workspace` 用于任务过程文件，`/home/kali/targets` 用于只读挂载源码、样本或安装包，`/home/kali/cache` 用于工具缓存。
 - `container/AGENTS.md` 明确 worker 黑盒 SRC 工具优先，`semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner` 只作为白盒和依赖审计辅助；白盒结果必须落到真实外部入口和可复现攻击链，不能单独作为 SRC finding。
-- `container/AGENTS.md` 已加入 Web SRC 推荐流程：资产发现 -> 存活探测 -> URL 收集 -> 参数归一化 -> 低频验证 -> 证据保存 -> finding 判断。
 - Web SRC 轻量工具链包括 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`；这些工具多数用于产生线索，不能把扫描结果直接作为漏洞。
 - `interactsh-client` 仅用于当前授权目标的 OOB 验证，结论中必须记录 interaction ID、触发时间、目标入口和请求摘要。
 - 当前 `container/Dockerfile` 采用 `kalilinux/kali-rolling:latest` 作为基镜像。
