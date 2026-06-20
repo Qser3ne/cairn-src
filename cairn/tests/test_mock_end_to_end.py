@@ -321,7 +321,7 @@ def _dispatch_and_wait(loop: DispatcherLoop) -> None:
 
 
 def _create_project(http: TestClient, **overrides) -> str:
-    body = {"title": "integration", "origin": "start", "goal": "finish"}
+    body = {"title": "integration", "origin": "start"}
     body.update(overrides)
     response = http.post("/projects", json=body)
     assert response.status_code == 201, response.text
@@ -336,7 +336,7 @@ def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client
 
     try:
         _dispatch_and_wait(loop)
-        assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(2, 0, 0)
+        assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(1, 0, 0)
         _dispatch_and_wait(loop)
         project = client.get_project(project_id)
     finally:
@@ -345,7 +345,7 @@ def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client
     assert project.project.status == "active"
     assert project.project.recon_reason_rounds == 1
     assert project.project.recon_explore_rounds == 1
-    assert [fact.id for fact in project.facts] == ["origin", "goal", "f001"]
+    assert [fact.id for fact in project.facts] == ["origin", "f001"]
     assert [(intent.id, intent.to) for intent in project.intents] == [("i001", "f001")]
     assert any("/reason_execute-" in path for _, path, _ in containers.writes)
     assert any("/explore_execute-" in path for _, path, _ in containers.writes)
@@ -391,5 +391,5 @@ def test_mock_scheduler_processes_recon_judge_job(http_client: TestClient) -> No
         loop.close()
 
     assert project.project.judge_status == "ready"
-    assert len(project.facts) == 2
+    assert len(project.facts) == 1
     assert any("/judge_execute-" in path for _, path, _ in containers.writes)

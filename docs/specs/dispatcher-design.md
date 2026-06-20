@@ -285,7 +285,7 @@ The main loop:
 Project dispatch rules:
 
 - inactive projects are skipped.
-- initial project means facts are exactly `origin` and `goal`, and there are no intents.
+- initial project means facts are exactly `origin`, and there are no intents.
 - initial active project dispatches reason directly.
 - there is no bootstrap branch.
 - if authenticated explore wait queue has dispatchable item, dispatch it first.

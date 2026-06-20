@@ -11,7 +11,7 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 
 ## 用户场景
 
-- 用户创建 recon 项目，输入 title、origin、goal、hints，可选择 `auth_mode=anonymous|authenticated`。
+- 用户创建 recon 项目，输入 title、origin、hints，可选择 `auth_mode=anonymous|authenticated`；项目目的由 `project_kind` 固化，recon 用于信息收集，vuln 用于漏洞挖掘。
 - recon 项目通过 reason 规划 recon intents，通过 explore 产出资产、入口、边界和候选攻击面 facts。
 - 用户可触发 Evaluate Recon，系统创建 ephemeral judge job，评估当前 recon 是否足够 fork vuln；judge 只更新 `judge_status`，不写 facts/intents/findings。
 - 用户从 recon 创建 snapshot，再从 snapshot fork 一个 vuln 项目；新 vuln 必须记录 `parent_project_id` 和 `parent_snapshot_id`。
@@ -21,7 +21,7 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 ## 行为边界
 
 - `POST /projects` 默认创建 `project_kind="recon"`。
-- `POST /projects` 传入旧字段 `mode` 或 `bootstrap_enabled` 会因 `extra="forbid"` 返回 422。
+- `POST /projects` 传入旧字段 `mode`、`bootstrap_enabled` 或 `goal` 会因 `extra="forbid"` 返回 422。
 - 新建 `vuln` 项目必须带 `parent_project_id` 和 `parent_snapshot_id`，且 parent 必须是 recon，snapshot 必须属于 parent。
 - legacy `mode="src"` 数据库迁移为 parentless `project_kind="vuln"` 仅用于读取旧数据；新建 vuln 不允许 parent/snapshot 为空。
 - 旧 `mode="standard"` 数据库启动失败，要求用户先导出或删除。
@@ -31,7 +31,7 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 
 ## 输入输出
 
-- recon 输入：title、origin、goal、hints、`auth_mode`、可选 accounts、`recon_max_reason_rounds`。
+- recon 输入：title、origin、hints、`auth_mode`、可选 accounts、`recon_max_reason_rounds`。
 - recon 输出：recon facts/intents、round counters、snapshot、judge job/result、children 列表。
 - vuln 输入：父 recon、snapshot、title、`auth_mode`、authenticated 账号。
 - vuln 输出：facts/intents、findings、follow-up intents、report intents、finding reports。

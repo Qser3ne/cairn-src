@@ -43,7 +43,7 @@
 - 如果没有明显的新方向，返回 decision=noop 且 intents=[]；不要为了推进而硬造宽泛 intent。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。
 - 每个 intent 的 description 必须包含清晰的去重语义：目标或入口、漏洞假设、验证重点。避免“继续测试”“深入挖掘”等泛泛描述。
-- `data.intents[*].from` 必须来自 `Valid facts`，不能包含 `goal`。
+- `data.intents[*].from` 必须来自 `Valid facts`。
 
 ## 上下文
 

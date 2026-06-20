@@ -25,7 +25,7 @@ runtime:
 
 tasks:
   reason:
-    # Reason decides whether the goal is met and whether new intents should be proposed.
+    # Reason decides whether useful mode-specific work remains and whether new intents should be proposed.
     timeout: 300
     # Hard cap on how many new intents one reason step may create.
     max_intents: 2

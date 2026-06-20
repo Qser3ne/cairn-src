@@ -120,11 +120,6 @@ def validate_facts_exist(
             raise HTTPException(404, f"Fact {fid} not found")
 
 
-def validate_goal_not_in_sources(fact_ids: list[str]) -> None:
-    if "goal" in fact_ids:
-        raise HTTPException(400, "goal cannot be used in from")
-
-
 def validate_intent_creator_worker(creator: str, worker: str | None) -> None:
     if worker is not None and worker != creator:
         raise HTTPException(400, "worker must be null or equal to creator")

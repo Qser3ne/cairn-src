@@ -186,6 +186,7 @@ def configure(path: Path) -> None:
         _ensure_project_snapshots_table(conn)
         _ensure_ephemeral_jobs_table(conn)
         _ensure_finding_reports_table(conn)
+        _remove_goal_facts(conn)
 
 
 def _ensure_no_legacy_standard_projects(conn: sqlite3.Connection) -> None:
@@ -512,6 +513,20 @@ def _ensure_finding_reports_table(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+def _remove_goal_facts(conn: sqlite3.Connection) -> None:
+    table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'facts'"
+    ).fetchone()
+    if table is None:
+        return
+    sources_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'intent_sources'"
+    ).fetchone()
+    if sources_table is not None:
+        conn.execute("DELETE FROM intent_sources WHERE fact_id = 'goal'")
+    conn.execute("DELETE FROM facts WHERE id = 'goal'")
 
 
 @contextmanager

@@ -148,10 +148,6 @@ def create_project(body: CreateProjectRequest):
             "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
             ("origin", pid, body.origin),
         )
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            ("goal", pid, body.goal),
-        )
 
         hints = []
         for h in body.hints or []:
@@ -184,7 +180,6 @@ def create_project(body: CreateProjectRequest):
             project=project,
             facts=[
                 Fact(id="origin", description=body.origin),
-                Fact(id="goal", description=body.goal),
             ],
             intents=[],
             hints=hints,
@@ -429,17 +424,9 @@ def fork_vuln_project(project_id: str, body: ForkVulnRequest):
             "SELECT description FROM facts WHERE id = 'origin' AND project_id = ?",
             (project_id,),
         ).fetchone()
-        goal = conn.execute(
-            "SELECT description FROM facts WHERE id = 'goal' AND project_id = ?",
-            (project_id,),
-        ).fetchone()
         conn.execute(
             "INSERT INTO facts (id, project_id, description) VALUES ('origin', ?, ?)",
             (pid, origin["description"] if origin else parent["title"]),
-        )
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES ('goal', ?, ?)",
-            (pid, goal["description"] if goal else f"Validate vulnerabilities from recon snapshot {body.snapshot_id}"),
         )
         conn.execute(
             "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",

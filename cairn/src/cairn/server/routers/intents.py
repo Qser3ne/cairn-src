@@ -30,7 +30,6 @@ from cairn.server.services import (
     utcnow,
     validate_facts_exist,
     validate_intent_creator_worker,
-    validate_goal_not_in_sources,
 )
 
 router = APIRouter(tags=["intents"])
@@ -45,7 +44,6 @@ def create_intent(project_id: str, body: CreateIntentRequest):
     with get_conn() as conn:
         check_project_active(conn, project_id)
         validate_facts_exist(conn, project_id, body.from_)
-        validate_goal_not_in_sources(body.from_)
         validate_intent_creator_worker(body.creator, body.worker)
         check_duplicate_intent(conn, project_id, body.from_, body.description)
 

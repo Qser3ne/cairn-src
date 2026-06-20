@@ -19,7 +19,6 @@ def _create_recon(client: TestClient, **overrides) -> dict:
     body = {
         "title": "recon",
         "origin": "https://target.test",
-        "goal": "map attack surface",
         "hints": [{"content": "initial clue", "creator": "human"}],
     }
     body.update(overrides)
@@ -46,13 +45,12 @@ def test_create_project_defaults_to_recon_and_forbids_old_fields(client: TestCli
     assert "mode" not in payload["project"]
     assert "bootstrap_enabled" not in payload["project"]
 
-    for field, value in (("mode", "src"), ("bootstrap_enabled", False)):
+    for field, value in (("mode", "src"), ("bootstrap_enabled", False), ("goal", "finish")):
         response = client.post(
             "/projects",
             json={
                 "title": "legacy",
                 "origin": "start",
-                "goal": "finish",
                 field: value,
             },
         )
@@ -65,7 +63,6 @@ def test_authenticated_projects_require_accounts_and_persist_account_pool(client
         json={
             "title": "auth recon",
             "origin": "start",
-            "goal": "finish",
             "auth_mode": "authenticated",
         },
     )
@@ -97,7 +94,6 @@ def test_new_vuln_project_requires_parent_snapshot(client: TestClient) -> None:
         json={
             "title": "vuln",
             "origin": "start",
-            "goal": "validate",
             "project_kind": "vuln",
         },
     )
@@ -110,7 +106,6 @@ def test_new_vuln_project_requires_parent_snapshot(client: TestClient) -> None:
         json={
             "title": "vuln",
             "origin": "start",
-            "goal": "validate",
             "project_kind": "vuln",
             "parent_project_id": parent,
             "parent_snapshot_id": snapshot["id"],
@@ -210,7 +205,6 @@ def test_recon_judgement_job_lifecycle_updates_project_judge_status(client: Test
     assert detail["project"]["judge_status"] == "ready"
     assert detail["facts"] == [
         {"id": "origin", "description": "https://target.test"},
-        {"id": "goal", "description": "map attack surface"},
     ]
 
 

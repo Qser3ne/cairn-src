@@ -64,18 +64,14 @@ def _export_yaml(conn, project_id: str) -> str:
     proj, facts, hints, findings, accounts, intents, sources_by_intent, reports = _load_project_data(conn, project_id)
 
     origin_desc = ""
-    goal_desc = ""
     for f in facts:
         if f["id"] == "origin":
             origin_desc = f["description"]
-        elif f["id"] == "goal":
-            goal_desc = f["description"]
 
     data: dict = {
         "project": {
             "title": proj["title"],
             "origin": origin_desc,
-            "goal": goal_desc,
             "project_kind": proj["project_kind"],
             "auth_mode": proj["auth_mode"],
             "parent_project_id": proj["parent_project_id"],
@@ -188,15 +184,13 @@ def _export_timeline(conn, project_id: str) -> str:
     order = 0
 
     origin_desc = facts_by_id.get("origin", "")
-    goal_desc = facts_by_id.get("goal", "")
     ts = format_export_timestamp(proj["created_at"]) or ""
     block = (
         f"[{ts}] PROJECT CREATED\n"
         f"  kind: {proj['project_kind']}\n"
         f"  auth: {proj['auth_mode']}\n"
         f"  accounts: {len(accounts)}\n"
-        f"  origin: {origin_desc}\n"
-        f"  goal: {goal_desc}"
+        f"  origin: {origin_desc}"
     )
     events.append((proj["created_at"] or "", order, block))
     order += 1

@@ -56,7 +56,6 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
         ),
         facts=[
             Fact(id="origin", description="start"),
-            Fact(id="goal", description="finish"),
             Fact(id="f001", description="known fact"),
         ],
         intents=intents or [],

@@ -151,3 +151,55 @@ def test_legacy_intent_session_lock_column_is_removed_and_new_columns_added(tmp_
     assert row["description"] == "old work"
     assert row["intent_kind"] == "explore"
     assert row["finding_id"] is None
+
+
+def test_legacy_goal_facts_are_removed_on_startup(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "goal-facts.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE facts (
+                id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                description TEXT NOT NULL,
+                PRIMARY KEY (id, project_id)
+            );
+            CREATE TABLE intent_sources (
+                intent_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                fact_id TEXT NOT NULL,
+                PRIMARY KEY (intent_id, project_id, fact_id)
+            );
+            INSERT INTO projects (id, title, created_at)
+            VALUES ('proj_001', 'legacy', '2026-01-01T00:00:00Z');
+            INSERT INTO facts (id, project_id, description)
+            VALUES
+                ('origin', 'proj_001', 'start'),
+                ('goal', 'proj_001', 'finish'),
+                ('f001', 'proj_001', 'known');
+            INSERT INTO intent_sources (intent_id, project_id, fact_id)
+            VALUES ('i001', 'proj_001', 'goal');
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        fact_ids = [
+            row["id"]
+            for row in conn.execute("SELECT id FROM facts WHERE project_id = 'proj_001' ORDER BY id")
+        ]
+        source_ids = [
+            row["fact_id"]
+            for row in conn.execute("SELECT fact_id FROM intent_sources WHERE project_id = 'proj_001'")
+        ]
+
+    assert fact_ids == ["f001", "origin"]
+    assert source_ids == []

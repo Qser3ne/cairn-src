@@ -100,7 +100,7 @@ def run_reason_task(
             for intent in project.intents
             if intent.to is None
         ]
-        allowed_fact_ids = [fact.id for fact in project.facts if fact.id != "goal"]
+        allowed_fact_ids = [fact.id for fact in project.facts]
         LOG.debug(
             "reason context prepared project=%s worker=%s facts=%s allowed_fact_ids=%s hints=%s open_intents=%s",
             project.project.id,

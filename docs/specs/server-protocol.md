@@ -49,7 +49,6 @@ Status rules:
 Facts are immutable graph nodes. Each project starts with:
 
 - `origin`
-- `goal`
 
 Regular facts use scoped IDs such as `f001`.
 
@@ -59,7 +58,7 @@ Intent fields:
 
 ```text
 id
-from                  # source fact IDs, at least one, never goal
+from                  # source fact IDs, at least one
 to                    # produced fact ID; null while open
 description
 creator
@@ -129,7 +128,6 @@ Creates a project. Body:
 {
   "title": "Recon target",
   "origin": "https://target.example",
-  "goal": "Map attack surface",
   "project_kind": "recon",
   "auth_mode": "anonymous",
   "recon_max_reason_rounds": 8,
@@ -141,7 +139,7 @@ Creates a project. Body:
 Rules:
 
 - `project_kind` defaults to `recon`.
-- `mode` and `bootstrap_enabled` are forbidden extra fields and return 422.
+- `mode`, `bootstrap_enabled`, and legacy `goal` are forbidden extra fields and return 422.
 - recon projects cannot have parent fields.
 - new vuln projects require `parent_project_id` and `parent_snapshot_id`.
 - vuln parent must be recon.
@@ -283,7 +281,7 @@ Rules:
 - snapshot must belong to the parent.
 - child is created as `project_kind="vuln"`.
 - child records `parent_project_id` and `parent_snapshot_id`.
-- child gets `origin`, `goal`, and `f001` containing `recon_snapshot`.
+- child gets `origin` and `f001` containing `recon_snapshot`.
 - selected parent facts may be copied into the child.
 - authenticated child vuln requires accounts in the fork request.
 
@@ -359,7 +357,7 @@ Body:
 Rules:
 
 - only `active` projects allow creation.
-- `from` must reference existing facts and must not include `goal`.
+- `from` must reference existing facts.
 - `worker` must be null or equal to `creator`.
 - `intent_kind="report"` requires `finding_id`.
 

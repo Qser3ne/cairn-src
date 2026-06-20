@@ -14,7 +14,7 @@
   </a>
 </p>
 
-Cairn is a general-purpose problem-solving engine. <br/>It defines no roles, no workflows. Given an origin and a goal, it searches for a path through an unknown state space. <br/>AI Penetration Testing is one such problem — and a proven one.
+Cairn is a graph-driven SRC security workflow engine. <br/>Given an origin and a project kind, it grows a fact-intent graph through unknown attack-surface and vulnerability state space. <br/>AI Penetration Testing is one such problem — and a proven one.
 
 <p>
   <a href="https://discord.gg/nDSy4NZVP" target="_blank" rel="noopener noreferrer">
@@ -35,13 +35,13 @@ Cairn is a general-purpose problem-solving engine. <br/>It defines no roles, no 
 
 ## What is Cairn?
 
-Penetration testing is fundamentally a **directed search through a near-infinite state space**:
+SRC security testing is fundamentally a **directed search through a near-infinite state space**:
 
 - **Origin**: known (target IP, target system)
-- **Goal**: defined (get a shell, capture the flag)
+- **Project kind**: fixed (`recon` collects information; `vuln` mines vulnerabilities)
 - **Path**: unknown
 
-This structure is not unique to penetration testing. Vulnerability research, mathematical proof, CTF challenges — any problem with a clear starting point, a clear success condition, and an unknown path in between shares the same shape.
+This structure is not unique to penetration testing. Vulnerability research, CTF challenges, and security assessment all benefit from a clear starting point, a fixed task mode, and an unknown path in between.
 
 Cairn is built for this class of problems. Penetration testing is the first domain it has been validated on.
 
@@ -53,7 +53,7 @@ The engine is built on a **Blackboard Architecture** with an explicit fact-inten
 | **Intent** | A declared direction of exploration, not yet executed |
 | **Hint** | Human judgment injected at any time; absorbed by agents on the next read |
 
-The graph grows from `origin` toward `goal`. Every new Fact is a stepping stone; every Intent is a step into the unknown.
+The graph grows from `origin` according to the project's mode. Every new Fact is a stepping stone; every Intent is a step into the unknown.
 
 Agent Workers run an OODA loop — Observe the full graph, Orient to the current state, Decide on next intents, Act to explore — and write their findings back as new Facts. Workers have no fixed roles. Tasks are generated at runtime from the graph's current state, not from predefined job descriptions.
 

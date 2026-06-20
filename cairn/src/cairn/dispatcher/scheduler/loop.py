@@ -775,7 +775,7 @@ class DispatcherLoop:
 
     def _is_initial_project(self, project: ProjectDetail) -> bool:
         fact_ids = {fact.id for fact in project.facts}
-        return fact_ids == {"origin", "goal"} and len(project.facts) == 2 and not project.intents
+        return fact_ids == {"origin"} and len(project.facts) == 1 and not project.intents
 
     def _reason_trigger(self, project: ProjectDetail) -> str | None:
         open_intent_count = self._project_open_intent_count(project)

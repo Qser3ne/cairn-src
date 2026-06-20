@@ -40,7 +40,7 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         parent_project_id=None,
         parent_snapshot_id=None,
         created_at="2026-01-01T00:00:00Z",
-        fact_count=2,
+        fact_count=1,
         intent_count=0,
         working_intent_count=0,
         unclaimed_intent_count=0,
@@ -113,11 +113,11 @@ def _prepare_real_dispatch(loop: DispatcherLoop, project, *, task_types: list[st
 def test_reason_trigger_detects_new_facts_and_open_intent_completion() -> None:
     loop = _loop()
     project = make_project(intents=[make_intent()])
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(3, 1, 1)
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(2, 1, 1)
     project.facts.append(Fact(id="f002", description="new"))
     project.intents = []
 
-    assert loop._reason_trigger(project) == "facts:3->4,open_intents:1->0"
+    assert loop._reason_trigger(project) == "facts:2->3,open_intents:1->0"
 
 
 def test_refresh_runtime_projects_discards_active_and_changed_cleanup_markers() -> None:
@@ -176,7 +176,7 @@ def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
     project = make_project(intents=[make_intent()])
     project.intents[0].worker = None
     project.facts.append(Fact(id="f002", description="new"))
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(3, 1, 1)
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(2, 1, 1)
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
     loop.client = type(
         "Client",
@@ -191,7 +191,7 @@ def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
     loop._dispatch_explore = lambda *_args: dispatched.append(("explore", "")) or True
 
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
-    assert dispatched == [("reason", "facts:3->4")]
+    assert dispatched == [("reason", "facts:2->3")]
 
 
 def test_initial_project_dispatches_reason_directly() -> None:
@@ -199,7 +199,7 @@ def test_initial_project_dispatches_reason_directly() -> None:
     loop.config = make_config()
     loop.futures = {}
     project = make_project()
-    project.facts = project.facts[:2]
+    project.facts = project.facts[:1]
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
     loop.client = type(
         "Client",
@@ -364,7 +364,7 @@ def test_initialize_reason_checkpoint_only_for_active_projects_with_open_intents
     loop._initialize_reason_checkpoints([active, _summary("idle", "active"), _summary("stopped", "stopped")])
 
     assert loop.reason_checkpoints == {
-        "active": ReasonCheckpoint(fact_count=2, hint_count=0, open_intent_count=1)
+        "active": ReasonCheckpoint(fact_count=1, hint_count=0, open_intent_count=1)
     }
 
 

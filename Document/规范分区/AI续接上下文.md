@@ -9,6 +9,8 @@
 
 - 项目模型已从 `mode=standard|src` 改为 `project_kind=recon|vuln`。
 - 新建项目默认 recon；新建 vuln 必须来自 recon snapshot。
+- Goal 概念已删除；新项目只内置 `origin` fact，`goal` 作为 legacy 输入会返回 422，旧库启动迁移会删除 `facts.id="goal"` 和对应 intent source。
+- 模式目的由 `project_kind` 固化：recon 用于信息收集，vuln 用于漏洞挖掘。
 - legacy `mode="src"` 数据库迁移为 parentless vuln；legacy `mode="standard"` 数据库启动失败。
 - Standard/bootstrap 自动完成流已从 dispatcher、prompt、配置和 UI 中移除。
 - `/complete` 和 `/reopen` 路由只保留兼容入口并返回 410。
@@ -21,7 +23,7 @@
 - recon explore conclude 成功后记录 recon explore round。
 - recon 达到 `recon_max_reason_rounds` 后自动 `stopped` 并清空 reason lease。
 - judge 是 `ephemeral_jobs`，只写 job result 和 project `judge_status/judged_at`，不写 graph。
-- snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`recon_snapshot` fact，可复制 selected facts。
+- snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` fact，可复制 selected facts。
 - vuln explore 可写 findings；finding lifecycle 可自动创建 follow-up explore intent 或 report intent。
 - report task 写入 `finding_reports` 并更新 finding `report_status="drafted"`。
 - authenticated recon/vuln 必须有 `project_accounts`，账号字段为 `label`、`username`、`password`。
@@ -30,8 +32,8 @@
 
 - 查看状态：`git status --short --branch`
 - 语法检查：`python3 -m compileall -q cairn/src/cairn cairn/tests`
-- 完整测试：`cd cairn && pytest -q tests`
-- 当前环境缺少 `uv` 时，使用项目外临时 venv；本轮临时测试环境为 `/home/qser3ne/Application/carin-dev/.venv-test`，不要纳入提交。
+- 完整测试：`cd cairn && ../.venv-test/bin/python -m pytest -q -s tests`
+- 当前环境缺少 `uv` 时，使用项目外临时 venv；本轮临时测试环境为 `/home/qser3ne/Application/carin-dev/.venv-test`，不要纳入提交。当前 pytest 全局捕获在该临时环境会触发 `FileNotFoundError`，使用 `-s` 禁用捕获。
 
 ## 项目级 Skill 约束
 

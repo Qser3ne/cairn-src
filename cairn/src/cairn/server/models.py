@@ -208,7 +208,6 @@ class CreateProjectRequest(BaseModel):
 
     title: str
     origin: str
-    goal: str
     project_kind: ProjectKind = "recon"
     auth_mode: AuthMode = "anonymous"
     parent_project_id: str | None = None
@@ -217,7 +216,7 @@ class CreateProjectRequest(BaseModel):
     hints: list[CreateHintInline] | None = None
     accounts: list[ProjectAccountCreate] | None = None
 
-    @field_validator("title", "origin", "goal")
+    @field_validator("title", "origin")
     @classmethod
     def validate_non_empty_text(cls, value: str) -> str:
         text = value.strip()

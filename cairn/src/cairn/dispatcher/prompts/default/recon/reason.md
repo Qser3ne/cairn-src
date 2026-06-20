@@ -28,7 +28,7 @@ When no new high-value recon work remains:
 - Only create asset discovery, endpoint sampling, auth boundary mapping, attack-surface candidate collection, scope clarification, or noise-filtering intents.
 - Do not output `complete`.
 - Use at most {max_intents} intents.
-- Every `from` id must come from Valid facts and must not include `goal`.
+- Every `from` id must come from Valid facts.
 - If Open Intents already cover the useful next work, return `decision="noop"` with empty intents.
 
 ## Graph

@@ -637,8 +637,7 @@
                       <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold shrink-0"
                         :class="{
                           'bg-teal-50 text-teal-700': fact.id === 'origin',
-                          'bg-rose-50 text-rose-600': fact.id === 'goal',
-                          'bg-brand-50 text-brand-700': fact.id !== 'origin' && fact.id !== 'goal'
+                          'bg-brand-50 text-brand-700': fact.id !== 'origin'
                         }" x-text="fact.id"></span>
                       <span class="text-[11px] text-slate-400 uppercase tracking-wider">Fact</span>
                     </div>
@@ -652,10 +651,7 @@
                     <template x-if="fact.id === 'origin'">
                       <p>Project starting point</p>
                     </template>
-                    <template x-if="fact.id === 'goal'">
-                      <p>Project target fact</p>
-                    </template>
-                    <template x-if="fact.id !== 'origin' && fact.id !== 'goal' && getProducingIntent(fact.id)">
+                    <template x-if="fact.id !== 'origin' && getProducingIntent(fact.id)">
                       <p x-text="`Produced by ${getProducingIntent(fact.id).id} from ${getProducingIntent(fact.id).from.join(', ')}`"></p>
                     </template>
                   </div>
@@ -671,8 +667,7 @@
                 <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold"
                   :class="{
                     'bg-teal-50 text-teal-700': selectedFactId() === 'origin',
-                    'bg-rose-50 text-rose-600': selectedFactId() === 'goal',
-                    'bg-brand-50 text-brand-700': selectedFactId() !== 'origin' && selectedFactId() !== 'goal'
+                    'bg-brand-50 text-brand-700': selectedFactId() !== 'origin'
                   }" x-text="selectedFactId()"></span>
                 <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Fact</span>
               </div>
@@ -686,20 +681,7 @@
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Role</span><span class="text-slate-600 text-right break-words">Project starting point</span></div>
                   </div>
                 </template>
-                <template x-if="selectedFactId() === 'goal'">
-                  <div class="pt-4 border-t border-slate-100 space-y-3">
-                    <p class="text-[10px] font-semibold text-rose-500 uppercase tracking-widest">Goal</p>
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Role</span><span class="text-slate-600 text-right break-words">Project target fact</span></div>
-                    <template x-if="selectedFactProducingIntent()">
-                      <div class="pt-1 space-y-3">
-                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Completed By</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().id"></span></div>
-                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().worker || '—'"></span></div>
-                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedFactProducingIntent().concluded_at || selectedFactProducingIntent().created_at)"></span></div>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-                <template x-if="selectedFactId() !== 'origin' && selectedFactId() !== 'goal' && selectedFactProducingIntent()">
+                <template x-if="selectedFactId() !== 'origin' && selectedFactProducingIntent()">
                   <div class="pt-4 border-t border-slate-100 space-y-3">
                     <p class="text-[10px] font-semibold text-brand-500 uppercase tracking-widest">Produced By</p>
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Intent</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().id"></span></div>
@@ -886,7 +868,6 @@
         </button>
       </div>
       <textarea x-model="newProject.origin" placeholder="Origin — starting point" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <textarea x-model="newProject.goal" placeholder="Goal — what to achieve" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
       <div x-show="newProject.project_kind === 'recon'" class="space-y-1">
         <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max reason rounds</label>
         <input type="number" min="1" x-model.number="newProject.recon_max_reason_rounds" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
@@ -1198,7 +1179,6 @@ function cairnApp() {
     newProject: {
       title: '',
       origin: '',
-      goal: '',
       project_kind: 'recon',
       auth_mode: 'anonymous',
       parent_project_id: '',
@@ -1410,7 +1390,6 @@ function cairnApp() {
       this.newProject = {
         title: '',
         origin: '',
-        goal: '',
         project_kind: 'recon',
         auth_mode: 'anonymous',
         parent_project_id: '',
@@ -1469,7 +1448,7 @@ function cairnApp() {
     },
 
     newProjectCanCreate() {
-      if (!this.newProject.title?.trim() || !this.newProject.origin?.trim() || !this.newProject.goal?.trim()) return false;
+      if (!this.newProject.title?.trim() || !this.newProject.origin?.trim()) return false;
       if (!this.newProjectAccountsValid()) return false;
       if (this.newProject.project_kind === 'vuln') {
         return Boolean(this.newProject.parent_project_id && this.newProject.parent_snapshot_id);
@@ -1505,9 +1484,7 @@ function cairnApp() {
       this.newProject.parent_project_id = this.project.project.id;
       this.newProject.title = `${this.project.project.title} vulnerability validation`;
       const origin = this.getFactRecord('origin');
-      const goal = this.getFactRecord('goal');
       this.newProject.origin = origin?.description || this.project.project.title;
-      this.newProject.goal = goal?.description || 'Validate high-value vulnerability candidates from recon snapshot';
       await this.loadNewProjectSnapshots();
       this.showNewProject = true;
     },
@@ -1552,7 +1529,7 @@ function cairnApp() {
     },
 
     canActOnSelectedFacts() {
-      return this.projectIsActive() && this.selectedFacts.length > 0 && !this.selectedFacts.includes('goal');
+      return this.projectIsActive() && this.selectedFacts.length > 0;
     },
 
     async loadProjects() {
@@ -1593,7 +1570,7 @@ function cairnApp() {
       if (/^\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})\s*$/.test(value)) return `<span style="color:#b45309">${escaped}</span>`;
       if (/^\s*(true|false|null|~)\s*$/i.test(value)) return `<span style="color:#b91c1c">${escaped}</span>`;
       if (/^\s*-?\d+(\.\d+)?\s*$/.test(value)) return `<span style="color:#0f766e">${escaped}</span>`;
-      if (/^\s*(origin|goal|f\d+|i\d+)\s*$/i.test(value)) return `<span style="color:#6d28d9">${escaped}</span>`;
+      if (/^\s*(origin|f\d+|i\d+)\s*$/i.test(value)) return `<span style="color:#6d28d9">${escaped}</span>`;
       return `<span style="color:#0f172a">${escaped}</span>`;
     },
 
@@ -1971,14 +1948,13 @@ function cairnApp() {
 
     buildInitialReplayProject(sourceProject) {
       const origin = sourceProject.facts.find(fact => fact.id === 'origin');
-      const goal = sourceProject.facts.find(fact => fact.id === 'goal');
       return {
         project: {
           ...this.cloneData(sourceProject.project),
           status: 'active',
           reason: null,
         },
-        facts: [origin, goal].filter(Boolean).map(fact => this.cloneData(fact)),
+        facts: [origin].filter(Boolean).map(fact => this.cloneData(fact)),
         intents: [],
         hints: [],
       };
@@ -2337,7 +2313,7 @@ function cairnApp() {
       const nodes = [];
       const edges = [];
       for (const f of this.project.facts) {
-        const nodeType = f.id === 'origin' ? 'origin' : f.id === 'goal' ? 'goal' : 'fact';
+        const nodeType = f.id === 'origin' ? 'origin' : 'fact';
         const label = this.summarizeFactLabel(f);
         const size = this.factNodeSize(label, nodeType);
         nodes.push({ data: {
@@ -2400,7 +2376,6 @@ function cairnApp() {
       const common = { 'text-valign':'center','text-halign':'center','font-family':'-apple-system,BlinkMacSystemFont,Inter,sans-serif' };
       return [
         { selector: 'node[nodeType="origin"]', style: { ...common, shape:'round-rectangle','background-color':'#14b8a6',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
-        { selector: 'node[nodeType="goal"]', style: { ...common, shape:'round-rectangle','background-color':'#f43f5e',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="fact"]', style: { ...common, shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'ellipse','background-color':'#f59e0b','background-opacity':0.8,label:'?',color:'#fff','font-size':'11px','font-weight':'bold',width:22,height:22,'border-width':2,'border-color':'#d97706' }},
         { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'ellipse','background-color':'#cbd5e1','background-opacity':0.5,label:'?',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:20,height:20,'border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
@@ -2655,7 +2630,6 @@ function cairnApp() {
 
     summarizeFactLabel(fact) {
       if (fact.id === 'origin') return 'Origin';
-      if (fact.id === 'goal') return 'Goal';
       const normalized = fact.description.replace(/\s+/g, ' ').trim();
       const chars = Array.from(normalized);
       if (chars.length <= 24) return normalized || fact.id;
@@ -3072,7 +3046,6 @@ function cairnApp() {
       const events = [];
       let order = 0;
       const origin = this.getFactRecord('origin');
-      const goal = this.getFactRecord('goal');
 
       events.push({
         id: `project-created-${this.project.project.id}`,
@@ -3080,7 +3053,7 @@ function cairnApp() {
         timestamp: this.project.project.created_at,
         actor: 'system',
         title: this.project.project.title,
-        meta: [origin ? origin.description : null, goal ? `goal: ${goal.description}` : null].filter(Boolean),
+        meta: [origin ? origin.description : null].filter(Boolean),
         targetType: 'fact',
         targetId: 'origin',
         order: order++,
@@ -3452,7 +3425,6 @@ function cairnApp() {
         const body = {
           title: this.newProject.title.trim(),
           origin: this.newProject.origin.trim(),
-          goal: this.newProject.goal.trim(),
           project_kind: this.newProject.project_kind,
           auth_mode: this.newProject.auth_mode,
         };
@@ -3492,7 +3464,7 @@ function cairnApp() {
     async createReconSnapshot() {
       if (!this.selectedProjectId || this.project?.project?.project_kind !== 'recon') return;
       try {
-        const selected_fact_ids = this.selectedFacts.filter(fid => fid !== 'goal');
+        const selected_fact_ids = this.selectedFacts;
         const snapshot = await this.api('POST', `/projects/${this.selectedProjectId}/snapshots`, {
           snapshot_type: 'recon_fork',
           selected_fact_ids,
