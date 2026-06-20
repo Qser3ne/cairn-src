@@ -35,6 +35,10 @@ def _load_project_data(conn, project_id: str):
         "SELECT * FROM findings WHERE project_id = ? ORDER BY created_at, id",
         (project_id,),
     ).fetchall()
+    accounts = conn.execute(
+        "SELECT * FROM project_accounts WHERE project_id = ? ORDER BY id",
+        (project_id,),
+    ).fetchall()
     intents = conn.execute(
         "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at",
         (project_id,),
@@ -48,11 +52,11 @@ def _load_project_data(conn, project_id: str):
         ).fetchall()
         sources_by_intent[i["id"]] = [r["fact_id"] for r in rows]
 
-    return proj, facts, hints, findings, intents, sources_by_intent
+    return proj, facts, hints, findings, accounts, intents, sources_by_intent
 
 
 def _export_yaml(conn, project_id: str) -> str:
-    proj, facts, hints, findings, intents, sources_by_intent = _load_project_data(conn, project_id)
+    proj, facts, hints, findings, accounts, intents, sources_by_intent = _load_project_data(conn, project_id)
 
     origin_desc = ""
     goal_desc = ""
@@ -68,8 +72,8 @@ def _export_yaml(conn, project_id: str) -> str:
             "origin": origin_desc,
             "goal": goal_desc,
             "mode": proj["mode"],
+            "auth_mode": proj["auth_mode"],
             "bootstrap_enabled": bool(proj["bootstrap_enabled"]),
-            "session_lock_enabled": bool(proj["session_lock_enabled"]),
         }
     }
 
@@ -106,6 +110,17 @@ def _export_yaml(conn, project_id: str) -> str:
             for f in findings
         ]
 
+    if accounts:
+        data["accounts"] = [
+            {
+                "id": account["id"],
+                "label": account["label"],
+                "username": account["username"],
+                "password": account["password"],
+            }
+            for account in accounts
+        ]
+
     intent_list = []
     for i in intents:
         entry: dict = {
@@ -114,7 +129,6 @@ def _export_yaml(conn, project_id: str) -> str:
             "description": i["description"],
             "creator": i["creator"],
             "worker": i["worker"],
-            "session_lock": bool(i["session_lock"]),
             "created_at": format_export_timestamp(i["created_at"]),
             "concluded_at": format_export_timestamp(i["concluded_at"]),
         }
@@ -127,7 +141,7 @@ def _export_yaml(conn, project_id: str) -> str:
 
 
 def _export_timeline(conn, project_id: str) -> str:
-    proj, facts, hints, findings, intents, sources_by_intent = _load_project_data(conn, project_id)
+    proj, facts, hints, findings, accounts, intents, sources_by_intent = _load_project_data(conn, project_id)
 
     facts_by_id = {f["id"]: f["description"] for f in facts}
 
@@ -137,7 +151,14 @@ def _export_timeline(conn, project_id: str) -> str:
     origin_desc = facts_by_id.get("origin", "")
     goal_desc = facts_by_id.get("goal", "")
     ts = format_export_timestamp(proj["created_at"]) or ""
-    block = f"[{ts}] PROJECT CREATED\n  mode: {proj['mode']}\n  origin: {origin_desc}\n  goal: {goal_desc}"
+    block = (
+        f"[{ts}] PROJECT CREATED\n"
+        f"  mode: {proj['mode']}\n"
+        f"  auth_mode: {proj['auth_mode']}\n"
+        f"  accounts: {len(accounts)}\n"
+        f"  origin: {origin_desc}\n"
+        f"  goal: {goal_desc}"
+    )
     events.append((proj["created_at"] or "", order, block))
     order += 1
 

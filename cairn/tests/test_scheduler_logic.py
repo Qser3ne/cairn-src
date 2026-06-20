@@ -4,18 +4,20 @@ from collections import deque
 from concurrent.futures import Future
 
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
+from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.server.models import Fact, ProjectSummary
 
-from conftest import make_config, make_intent, make_project
+from conftest import make_account, make_config, make_intent, make_project
 
 
 def _loop() -> DispatcherLoop:
     loop = DispatcherLoop.__new__(DispatcherLoop)
     loop.reason_checkpoints = {}
-    loop.session_lock_wait_queues = {}
+    loop.authenticated_wait_queues = {}
+    loop.account_leases = {}
     loop.runtime_project_ids = set()
     loop.futures = {}
     loop.cleanup_futures = {}
@@ -34,8 +36,8 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         title=project_id,
         status=status,
         mode="standard",
+        auth_mode="anonymous",
         bootstrap_enabled=True,
-        session_lock_enabled=True,
         created_at="2026-01-01T00:00:00Z",
         fact_count=2,
         intent_count=0,
@@ -44,6 +46,62 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         hint_count=0,
         finding_count=0,
     )
+
+
+class _RecordingExecutor:
+    def __init__(self) -> None:
+        self.futures: list[Future[str]] = []
+        self.submissions: list[tuple[object, tuple[object, ...]]] = []
+
+    def submit(self, fn, *args):  # noqa: ANN001
+        future: Future[str] = Future()
+        self.futures.append(future)
+        self.submissions.append((fn, args))
+        return future
+
+
+def _authenticated_project(intent_count: int, account_count: int = 3):
+    intents = []
+    for index in range(1, intent_count + 1):
+        intent = make_intent(f"i{index:03d}")
+        intent.worker = None
+        intent.created_at = f"2026-01-01T00:00:{index:02d}Z"
+        intents.append(intent)
+    project = make_project(intents=intents)
+    project.project.mode = "src"
+    project.project.auth_mode = "authenticated"
+    project.accounts = [make_account(f"a{index:03d}") for index in range(1, account_count + 1)]
+    return project
+
+
+def _prepare_real_explore_dispatch(loop: DispatcherLoop, project) -> _RecordingExecutor:
+    config = make_config()
+    config = config.model_copy(
+        update={
+            "runtime": config.runtime.model_copy(update={"max_workers": 3, "max_project_workers": 3}),
+            "workers": [config.workers[0].model_copy(update={"max_running": 3})],
+        }
+    )
+    executor = _RecordingExecutor()
+    loop.config = config
+    loop.executor = executor
+    loop.futures = {}
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+            "heartbeat": lambda _self, _project_id, _intent_id, _worker: ApiResult(200, {}),
+        },
+    )()
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
+        fact_count=len(project.facts),
+        hint_count=len(project.hints),
+        open_intent_count=len([intent for intent in project.intents if intent.to is None]),
+    )
+    return executor
 
 
 def test_reason_trigger_detects_new_facts_and_open_intent_completion() -> None:
@@ -157,156 +215,92 @@ def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
     assert dispatched == [("reason", "facts:3->4")]
 
 
-def test_locked_intent_waits_behind_running_session_lock_and_unlocked_intent_can_dispatch() -> None:
+def test_authenticated_project_dispatches_with_available_accounts() -> None:
     loop = _loop()
-    loop.config = make_config()
-    locked = make_intent("i001")
-    locked.worker = None
-    locked.session_lock = True
-    unlocked = make_intent("i002")
-    unlocked.worker = None
-    unlocked.session_lock = False
-    project = make_project(intents=[locked, unlocked])
-    loop.futures = {
-        Future(): RunningTask(
-            project_id="proj_001",
-            task_type="explore",
-            worker_name="worker-a",
-            cancellation=TaskCancellation(),
-            intent_id="i000",
-            session_lock=True,
-        )
-    }
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
-        fact_count=3,
-        hint_count=1,
-        open_intent_count=2,
-    )
-    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
-    loop.client = type(
-        "Client",
-        (),
-        {
-            "get_project": lambda _self, _project_id: project,
-            "export_project": lambda _self, _project_id: "graph",
-        },
-    )()
-    dispatched: list[str] = []
-    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append(intent.id) or True
+    project = _authenticated_project(intent_count=2, account_count=3)
+    executor = _prepare_real_explore_dispatch(loop, project)
 
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
 
-    assert dispatched == ["i002"]
-    assert list(loop.session_lock_wait_queues["proj_001"]) == ["i001"]
+    assert len(executor.submissions) == 2
+    assert len(loop.futures) == 2
+    assert loop.account_leases["proj_001"] == {"a001": "i002", "a002": "i001"}
+    assert loop.authenticated_wait_queues == {}
+    assert [task.account.id for task in loop.futures.values()] == ["a001", "a002"]
 
 
-def test_waiting_locked_intent_dispatches_before_reason_trigger_after_lock_releases() -> None:
+def test_authenticated_intent_queues_when_all_accounts_are_busy() -> None:
     loop = _loop()
-    loop.config = make_config()
-    locked = make_intent("i001")
-    locked.worker = None
-    locked.session_lock = True
-    normal = make_intent("i002")
-    normal.worker = None
-    normal.session_lock = False
-    project = make_project(intents=[locked, normal])
+    project = _authenticated_project(intent_count=4, account_count=3)
+    executor = _prepare_real_explore_dispatch(loop, project)
+    loop.account_leases = {"proj_001": {"a001": "i004", "a002": "i003", "a003": "i002"}}
+    loop.futures = {
+        Future(): RunningTask("proj_001", "explore", "worker-a", TaskCancellation(), intent_id="i004", account=project.accounts[0]),
+        Future(): RunningTask("proj_001", "explore", "worker-b", TaskCancellation(), intent_id="i003", account=project.accounts[1]),
+        Future(): RunningTask("proj_001", "explore", "worker-c", TaskCancellation(), intent_id="i002", account=project.accounts[2]),
+    }
+
+    assert not loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert executor.submissions == []
+    assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
+
+
+def test_released_account_dispatches_queued_authenticated_intent_before_reason() -> None:
+    loop = _loop()
+    project = _authenticated_project(intent_count=4, account_count=3)
     project.facts.append(Fact(id="f002", description="new"))
-    loop.futures = {}
-    loop.session_lock_wait_queues = {"proj_001": deque(["i001"])}
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
-        fact_count=3,
-        hint_count=1,
-        open_intent_count=2,
-    )
-    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
-    loop.client = type(
-        "Client",
-        (),
-        {
-            "get_project": lambda _self, _project_id: project,
-            "export_project": lambda _self, _project_id: "graph",
-        },
-    )()
-    dispatched: list[tuple[str, str]] = []
-    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
-    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append(("explore", intent.id)) or True
-
-    assert loop._try_dispatch_project(_summary("proj_001", "active"))
-
-    assert dispatched == [("explore", "i001")]
-
-
-def test_disabled_project_session_lock_ignores_wait_queue_and_dispatches_locked_intent() -> None:
-    loop = _loop()
-    loop.config = make_config()
-    locked = make_intent("i001")
-    locked.worker = None
-    locked.session_lock = True
-    project = make_project(intents=[locked])
-    project.project.session_lock_enabled = False
+    executor = _prepare_real_explore_dispatch(loop, project)
+    done: Future[str] = Future()
+    running_a = Future()
+    running_b = Future()
     loop.futures = {
-        Future(): RunningTask(
-            project_id="proj_001",
-            task_type="explore",
-            worker_name="worker-a",
-            cancellation=TaskCancellation(),
-            intent_id="i000",
-            session_lock=True,
-        )
+        done: RunningTask("proj_001", "explore", "worker-a", TaskCancellation(), intent_id="i004", account=project.accounts[0]),
+        running_a: RunningTask("proj_001", "explore", "worker-b", TaskCancellation(), intent_id="i003", account=project.accounts[1]),
+        running_b: RunningTask("proj_001", "explore", "worker-c", TaskCancellation(), intent_id="i002", account=project.accounts[2]),
     }
-    loop.session_lock_wait_queues = {"proj_001": deque(["i001"])}
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
-        fact_count=3,
-        hint_count=1,
-        open_intent_count=1,
-    )
-    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
-    loop.client = type(
-        "Client",
-        (),
-        {
-            "get_project": lambda _self, _project_id: project,
-            "export_project": lambda _self, _project_id: "graph",
-        },
-    )()
-    dispatched: list[str] = []
-    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append(intent.id) or True
+    loop.account_leases = {"proj_001": {"a001": "i004", "a002": "i003", "a003": "i002"}}
+    loop.authenticated_wait_queues = {"proj_001": deque(["i001"])}
+    done.set_result("success")
 
-    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+    loop._reap_futures()
+    loop._try_dispatch_project(_summary("proj_001", "active"))
 
-    assert dispatched == ["i001"]
-    assert loop.session_lock_wait_queues == {}
+    assert "a001" in loop.account_leases["proj_001"]
+    assert loop.account_leases["proj_001"]["a001"] == "i001"
+    assert loop.authenticated_wait_queues == {}
+    assert [task.intent_id for task in loop.futures.values()].count("i001") == 1
+    assert executor.submissions[-1][1][5].id == "i001"
 
 
-def test_session_lock_wait_queue_discards_invalid_or_inactive_projects() -> None:
+def test_authenticated_wait_queue_discards_invalid_or_inactive_projects() -> None:
     loop = _loop()
     valid = make_intent("i001")
     valid.worker = None
-    valid.session_lock = True
     claimed = make_intent("i002")
     claimed.worker = "worker"
-    claimed.session_lock = True
-    project = make_project(intents=[claimed, valid])
-    loop.session_lock_wait_queues = {
+    project = _authenticated_project(intent_count=0, account_count=2)
+    project.intents = [claimed, valid]
+    loop.authenticated_wait_queues = {
         "proj_001": deque(["missing", "i002", "i001"]),
         "stopped": deque(["i001"]),
-        "disabled": deque(["i001"]),
+        "anonymous": deque(["i001"]),
     }
 
-    assert loop._next_session_lock_waiting_intent(project) == valid
-    assert list(loop.session_lock_wait_queues["proj_001"]) == ["i001"]
+    assert loop._next_authenticated_waiting_intent(project) == valid
+    assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
 
-    disabled_summary = _summary("disabled", "active")
-    disabled_summary.session_lock_enabled = False
-    loop._cleanup_session_lock_wait_queues(
+    anonymous_summary = _summary("anonymous", "active")
+    loop._cleanup_authenticated_wait_queues(
         [
-            _summary("proj_001", "active"),
-            _summary("stopped", "stopped"),
-            disabled_summary,
+            _summary("proj_001", "active").model_copy(update={"mode": "src", "auth_mode": "authenticated"}),
+            _summary("stopped", "stopped").model_copy(update={"mode": "src", "auth_mode": "authenticated"}),
+            anonymous_summary,
         ]
     )
 
-    assert set(loop.session_lock_wait_queues) == {"proj_001"}
+    assert set(loop.authenticated_wait_queues) == {"proj_001"}
 
 
 def test_initial_enabled_project_without_bootstrap_worker_dispatches_reason() -> None:

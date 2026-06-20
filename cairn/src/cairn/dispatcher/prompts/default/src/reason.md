@@ -17,7 +17,7 @@
 如果需要提出新的 intents，则返回：
 
 ```json
-{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "...", "session_lock": true}, {"from": ["f002", "f003"], "description": "...", "session_lock": false}]}}
+{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "..."}, {"from": ["f002", "f003"], "description": "..."}]}}
 ```
 
 如果没有新的高价值、非重复探索方向，则返回：
@@ -29,6 +29,9 @@
 ## 规则
 
 - 不要输出 `complete`。SRC 模式由人工决定何时停止或完成，不能因为发现一个漏洞就结束项目。
+- 图快照中的 `project.auth_mode` 决定探索范围：
+  - `anonymous` 只规划未登录状态可达的攻击面，不要创建需要账号登录的 intent。
+  - `authenticated` 只规划登录状态下的攻击面，可围绕账号态、越权、认证后接口和用户数据边界创建 intent。
 - 创建任何 intent 前，必须基于图快照完成覆盖分析：
   - Open Intents 正在探索哪些目标、入口、漏洞类型和验证方式。
   - Concluded Intents 已经探索过哪些方向，结论是否有效或无效。
@@ -40,9 +43,6 @@
 - 如果没有明显的新方向，返回空 data；不要为了推进而硬造宽泛 intent。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。
 - 每个 intent 的 description 必须包含清晰的去重语义：目标或入口、漏洞假设、验证重点。避免“继续测试”“深入挖掘”等泛泛描述。
-- 每个 Intent 必须显式输出布尔字段 `session_lock`。
-- 涉及登录态、Cookie、Token、账号状态、认证链路、共享会话或会改动全局认证上下文的 intent 必须设置 `"session_lock": true`。
-- 纯只读、独立目标、不会改动共享认证或会话状态的 intent 可以设置 `"session_lock": false`。
 - `data.intents[*].from` 必须来自 `Valid facts`，不能包含 `goal`。
 
 ## 上下文

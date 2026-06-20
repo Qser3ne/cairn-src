@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from cairn.server.models import ProjectAccount
+
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 
 
@@ -12,7 +14,7 @@ class RunningTask:
     worker_name: str
     cancellation: TaskCancellation
     intent_id: str | None = None
-    session_lock: bool = False
+    account: ProjectAccount | None = None
     fact_count: int | None = None
     hint_count: int | None = None
     open_intent_count: int | None = None

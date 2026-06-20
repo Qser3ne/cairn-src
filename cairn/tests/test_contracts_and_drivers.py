@@ -26,8 +26,8 @@ def test_reason_payload_limits_number_of_intents() -> None:
             "accepted": True,
             "data": {
                 "intents": [
-                    {"from": ["f001"], "description": "one", "session_lock": True},
-                    {"from": ["f001"], "description": "two", "session_lock": False},
+                    {"from": ["f001"], "description": "one"},
+                    {"from": ["f001"], "description": "two"},
                 ]
             },
         },
@@ -36,35 +36,7 @@ def test_reason_payload_limits_number_of_intents() -> None:
     )
 
     assert kind == "intents"
-    assert intents == [{"from": ["f001"], "description": "one", "session_lock": True}]
-
-
-def test_reason_payload_requires_session_lock_on_intents() -> None:
-    with pytest.raises(ValueError, match="session_lock is required"):
-        validate_reason_payload(
-            {
-                "accepted": True,
-                "data": {"intents": [{"from": ["f001"], "description": "one"}]},
-            },
-            open_intents_empty=True,
-            max_intents=3,
-        )
-
-
-def test_reason_payload_requires_boolean_session_lock() -> None:
-    with pytest.raises(ValueError, match="session_lock must be boolean"):
-        validate_reason_payload(
-            {
-                "accepted": True,
-                "data": {
-                    "intents": [
-                        {"from": ["f001"], "description": "one", "session_lock": "yes"}
-                    ]
-                },
-            },
-            open_intents_empty=True,
-            max_intents=3,
-        )
+    assert intents == [{"from": ["f001"], "description": "one"}]
 
 
 def test_reason_payload_requires_intent_when_none_are_open() -> None:

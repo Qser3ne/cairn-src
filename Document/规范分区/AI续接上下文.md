@@ -18,6 +18,14 @@
 - 查看远程：`git remote -v`
 - 查看最近提交：`git log --oneline --decorate -5`
 
+## 当前功能上下文
+
+- SRC 项目使用项目级 `auth_mode`：`anonymous` 只做未登录探索，`authenticated` 只做登录态探索。
+- authenticated SRC 项目必须有 `project_accounts`，账号字段为 `label`、`username`、`password`。
+- `projects.session_lock_enabled` 和 `intents.session_lock` 已从物理表、API、UI、prompt 契约中移除；只在迁移兼容代码和迁移测试中保留旧列名字符串。
+- Dispatcher 使用 `authenticated_wait_queues` 和 `account_leases` 管理账号池排队；释放账号后优先补派队首 intent。
+- 测试可用命令：`python3 -m compileall -q cairn/src/cairn cairn/tests`；完整 pytest 在 `/tmp/cairn-authmode-test-venv` 中已验证。
+
 ## 项目级 Skill 约束
 
 - 项目级 Codex skill 放在 `.agent/skills/` 下。

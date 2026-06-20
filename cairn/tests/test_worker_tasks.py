@@ -13,6 +13,7 @@ from conftest import (
     FakeContainerManager,
     FakeDriver,
     FakeLease,
+    make_account,
     make_config,
     make_intent,
     make_project,
@@ -44,7 +45,7 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
         "run_worker_process",
         lambda *_args, **_kwargs: ProcessResult(
             0,
-            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next step","session_lock":true}]}}',
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next step"}]}}',
             "",
         ),
     )
@@ -60,7 +61,7 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker", True)]
+    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker")]
     assert client.released_reasons == [("proj_001", "test-worker")]
     assert lease.started and lease.stopped
     assert len(containers.writes) == 1
@@ -280,7 +281,7 @@ def test_reason_startup_only_mode_skips_task_healthcheck(monkeypatch) -> None:
         "run_worker_process",
         lambda *_args, **_kwargs: ProcessResult(
             0,
-            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next","session_lock":false}]}}',
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"description":"next"}]}}',
             "",
         ),
     )
@@ -296,4 +297,51 @@ def test_reason_startup_only_mode_skips_task_healthcheck(monkeypatch) -> None:
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker", False)]
+    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker")]
+
+
+def test_authenticated_explore_prompt_includes_leased_account(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    account = make_account("a001")
+    project = make_project(intents=[intent])
+    project.project.mode = "src"
+    project.project.auth_mode = "authenticated"
+    project.accounts = [account]
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    driver = FakeDriver()
+    lease = FakeLease()
+
+    monkeypatch.setattr(explore, "get_driver", lambda _name: driver)
+    monkeypatch.setattr(explore.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(explore, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        explore,
+        "_run_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"description":"authenticated fact"}}',
+            "",
+        ),
+    )
+
+    outcome = explore.run_explore_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+        account,
+    )
+
+    assert outcome == "success"
+    prompt = driver.execute_prompts[0]
+    assert "auth_mode is authenticated" in prompt
+    assert "account_id: a001" in prompt
+    assert "username: user-a001" in prompt
+    assert "password: pass-a001" in prompt
+    assert "/home/kali/workspace/auth/proj_001/a001" in prompt

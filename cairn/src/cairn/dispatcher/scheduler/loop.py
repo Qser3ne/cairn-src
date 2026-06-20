@@ -48,7 +48,8 @@ class DispatcherLoop:
         self.futures: dict[Future[str], RunningTask] = {}
         self.cleanup_futures: dict[Future[bool], tuple[str, str | None, str | None]] = {}
         self.reason_checkpoints: dict[str, ReasonCheckpoint] = {}
-        self.session_lock_wait_queues: dict[str, deque[str]] = {}
+        self.authenticated_wait_queues: dict[str, deque[str]] = {}
+        self.account_leases: dict[str, dict[str, str]] = {}
         self.runtime_project_ids: set[str] = set()
         self.worker_unhealthy_until: dict[str, float] = {}
         self.worker_rejected_until: dict[tuple[str, str, str], float] = {}
@@ -84,7 +85,7 @@ class DispatcherLoop:
                     summaries = self.client.list_projects()
                     self._initialize_reason_checkpoints(summaries)
                     self._refresh_runtime_projects(summaries)
-                    self._cleanup_session_lock_wait_queues(summaries)
+                    self._cleanup_authenticated_wait_queues(summaries)
                     self._cancel_inactive_tasks(summaries)
                     self._queue_container_cleanups(summaries)
                     self._dispatch_available(summaries)
@@ -121,6 +122,7 @@ class DispatcherLoop:
         self._startup_healthchecks_checked = True
 
     def _dispatch_available(self, summaries: list[ProjectSummary]) -> None:
+        self._sync_authenticated_wait_queues(summaries)
         if len(self.futures) >= self.config.runtime.max_workers:
             self._log_changed(
                 "dispatch/global",
@@ -172,6 +174,20 @@ class DispatcherLoop:
                     dispatched = True
                     break
 
+    def _sync_authenticated_wait_queues(self, summaries: list[ProjectSummary]) -> None:
+        for summary in summaries:
+            if summary.status != "active" or summary.mode != "src" or summary.auth_mode != "authenticated":
+                continue
+            if summary.unclaimed_intent_count <= 0:
+                continue
+            try:
+                project = self.client.get_project(summary.id)
+            except requests.RequestException:
+                raise
+            if not self._project_uses_account_pool(project):
+                continue
+            self._enqueue_current_authenticated_waiters(project)
+
     def _ordered_projects(self, summaries: list[ProjectSummary]) -> list[ProjectSummary]:
         if not summaries:
             return []
@@ -195,16 +211,6 @@ class DispatcherLoop:
                 container_name,
             )
             return False
-        if self._project_running_task_count(summary.id) >= self.config.runtime.max_project_workers:
-            self._log_changed(
-                f"{skip_scope}:max_project_workers",
-                logging.INFO,
-                "skip project=%s because max_project_workers reached running_tasks=%s",
-                summary.id,
-                self._project_running_task_summary(summary.id),
-            )
-            return False
-
         project = self.client.get_project(summary.id)
         if project.project.status != "active":
             self._log_changed(
@@ -222,8 +228,25 @@ class DispatcherLoop:
                 return self._dispatch_initial_project(project)
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_reason(project, export_yaml, "initial")
-        self._enqueue_current_session_lock_waiters(project)
-        queued_intent = self._next_session_lock_waiting_intent(project)
+        self._enqueue_current_authenticated_waiters(project)
+        if self._project_running_task_count(summary.id) >= self.config.runtime.max_project_workers:
+            self._log_changed(
+                f"{skip_scope}:max_project_workers",
+                logging.INFO,
+                "skip project=%s because max_project_workers reached running_tasks=%s",
+                summary.id,
+                self._project_running_task_summary(summary.id),
+            )
+            return False
+        if len(self.futures) >= self.config.runtime.max_workers:
+            self._log_changed(
+                "dispatch/global",
+                logging.INFO,
+                "skip dispatch because max_workers reached running_tasks=%s",
+                len(self.futures),
+            )
+            return False
+        queued_intent = self._next_authenticated_waiting_intent(project)
         if queued_intent is not None:
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_explore(project, export_yaml, queued_intent)
@@ -241,7 +264,6 @@ class DispatcherLoop:
             and intent.id not in running_intent_ids
             and not self._is_bootstrap_intent(intent)
         ]
-        dispatchable_intents = self._filter_session_lock_dispatchable_intents(project, unclaimed_intents)
         if running_intent_ids and not unclaimed_intents:
             self._log_changed(
                 f"{skip_scope}:explore_running",
@@ -250,8 +272,8 @@ class DispatcherLoop:
                 summary.id,
                 sorted(running_intent_ids),
             )
-        if dispatchable_intents:
-            newest = max(dispatchable_intents, key=lambda i: i.created_at)
+        if unclaimed_intents:
+            newest = max(unclaimed_intents, key=lambda i: i.created_at)
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_explore(project, export_yaml, newest)
         if project.project.reason is not None:
@@ -430,9 +452,35 @@ class DispatcherLoop:
         return True
 
     def _dispatch_explore(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
+        account = None
+        if project.project.mode == "src" and project.project.auth_mode == "authenticated":
+            if not project.accounts:
+                self._log_changed(
+                    f"project:{project.project.id}:accounts:missing",
+                    logging.WARNING,
+                    "authenticated explore cannot dispatch because project has no accounts project=%s intent=%s",
+                    project.project.id,
+                    intent.id,
+                )
+                return False
+            account = self._lease_account(project, intent)
+            if account is None:
+                self._enqueue_authenticated_waiting_intents(project.project.id, [intent])
+                self._log_changed(
+                    f"project:{project.project.id}:accounts:busy",
+                    logging.INFO,
+                    "authenticated explore waiting for account project=%s intent=%s busy_accounts=%s total_accounts=%s",
+                    project.project.id,
+                    intent.id,
+                    len(self.account_leases.get(project.project.id, {})),
+                    len(project.accounts),
+                )
+                return False
         selection = self._select_worker(project.project.id, "explore")
         worker = selection.worker
         if worker is None:
+            if account is not None:
+                self._release_account(project.project.id, account.id)
             self._log_changed(
                 f"project:{project.project.id}:worker:explore",
                 logging.INFO,
@@ -447,6 +495,8 @@ class DispatcherLoop:
         self._clear_log_state(f"project:{project.project.id}:worker:explore")
         claim = self.client.heartbeat(project.project.id, intent.id, worker.name)
         if claim.status_code in (403, 409):
+            if account is not None:
+                self._release_account(project.project.id, account.id)
             level = logging.INFO if claim.status_code == 403 else logging.WARNING
             LOG.log(
                 level,
@@ -458,6 +508,8 @@ class DispatcherLoop:
             )
             return False
         if not claim.ok:
+            if account is not None:
+                self._release_account(project.project.id, account.id)
             LOG.warning(
                 "explore claim failed project=%s intent=%s worker=%s status=%s",
                 project.project.id,
@@ -477,9 +529,12 @@ class DispatcherLoop:
                 intent,
                 worker,
                 cancellation := TaskCancellation(),
+                account,
             )
         except Exception:
             LOG.exception("failed to submit explore task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
+            if account is not None:
+                self._release_account(project.project.id, account.id)
             self._best_effort_release(project.project.id, intent.id, worker.name)
             return False
         self.futures[future] = RunningTask(
@@ -488,12 +543,21 @@ class DispatcherLoop:
             worker_name=worker.name,
             cancellation=cancellation,
             intent_id=intent.id,
-            session_lock=project.project.session_lock_enabled and intent.session_lock,
+            account=account,
         )
-        self._discard_session_lock_waiting_intent(project.project.id, intent.id)
+        self._discard_authenticated_waiting_intent(project.project.id, intent.id)
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
-        LOG.info("dispatched explore project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
+        if account is None:
+            LOG.info("dispatched explore project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
+        else:
+            LOG.info(
+                "dispatched authenticated explore project=%s intent=%s worker=%s account=%s",
+                project.project.id,
+                intent.id,
+                worker.name,
+                account.id,
+            )
         return True
 
     def _select_worker(self, project_id: str, task_type: str) -> WorkerSelection:
@@ -589,30 +653,15 @@ class DispatcherLoop:
             if task.project_id == project_id and task.task_type == "explore" and task.intent_id is not None
         }
 
-    def _project_has_running_session_lock(self, project_id: str) -> bool:
-        return any(
-            task.project_id == project_id and task.session_lock
-            for task in self.futures.values()
-        )
+    def _project_uses_account_pool(self, project: ProjectDetail) -> bool:
+        return project.project.mode == "src" and project.project.auth_mode == "authenticated"
 
-    def _filter_session_lock_dispatchable_intents(
-        self, project: ProjectDetail, intents: list[Intent]
-    ) -> list[Intent]:
-        if not project.project.session_lock_enabled:
-            self.session_lock_wait_queues.pop(project.project.id, None)
-            return intents
-        if not self._project_has_running_session_lock(project.project.id):
-            return intents
-
-        blocked = [intent for intent in intents if intent.session_lock]
-        self._enqueue_session_lock_waiting_intents(project.project.id, blocked)
-        return [intent for intent in intents if not intent.session_lock]
-
-    def _enqueue_current_session_lock_waiters(self, project: ProjectDetail) -> None:
-        if not project.project.session_lock_enabled:
-            self.session_lock_wait_queues.pop(project.project.id, None)
+    def _enqueue_current_authenticated_waiters(self, project: ProjectDetail) -> None:
+        if not self._project_uses_account_pool(project):
+            self.authenticated_wait_queues.pop(project.project.id, None)
+            self.account_leases.pop(project.project.id, None)
             return
-        if not self._project_has_running_session_lock(project.project.id):
+        if len(self.account_leases.get(project.project.id, {})) < len(project.accounts):
             return
         running_intent_ids = self._project_running_explore_intents(project.project.id)
         blocked = [
@@ -621,15 +670,14 @@ class DispatcherLoop:
             if intent.to is None
             and intent.worker is None
             and intent.id not in running_intent_ids
-            and intent.session_lock
             and not self._is_bootstrap_intent(intent)
         ]
-        self._enqueue_session_lock_waiting_intents(project.project.id, blocked)
+        self._enqueue_authenticated_waiting_intents(project.project.id, blocked)
 
-    def _enqueue_session_lock_waiting_intents(self, project_id: str, intents: list[Intent]) -> None:
+    def _enqueue_authenticated_waiting_intents(self, project_id: str, intents: list[Intent]) -> None:
         if not intents:
             return
-        queue = self.session_lock_wait_queues.setdefault(project_id, deque())
+        queue = self.authenticated_wait_queues.setdefault(project_id, deque())
         queued = set(queue)
         for intent in sorted(intents, key=lambda item: (item.created_at, item.id)):
             if intent.id in queued:
@@ -637,14 +685,14 @@ class DispatcherLoop:
             queue.append(intent.id)
             queued.add(intent.id)
 
-    def _next_session_lock_waiting_intent(self, project: ProjectDetail) -> Intent | None:
-        if not project.project.session_lock_enabled:
-            self.session_lock_wait_queues.pop(project.project.id, None)
+    def _next_authenticated_waiting_intent(self, project: ProjectDetail) -> Intent | None:
+        if not self._project_uses_account_pool(project):
+            self.authenticated_wait_queues.pop(project.project.id, None)
             return None
-        if self._project_has_running_session_lock(project.project.id):
+        if len(self.account_leases.get(project.project.id, {})) >= len(project.accounts):
             return None
 
-        queue = self.session_lock_wait_queues.get(project.project.id)
+        queue = self.authenticated_wait_queues.get(project.project.id)
         if not queue:
             return None
         intents_by_id = {intent.id: intent for intent in project.intents}
@@ -654,31 +702,50 @@ class DispatcherLoop:
                 intent is not None
                 and intent.to is None
                 and intent.worker is None
-                and intent.session_lock
                 and not self._is_bootstrap_intent(intent)
             ):
                 return intent
             queue.popleft()
-        self.session_lock_wait_queues.pop(project.project.id, None)
+        self.authenticated_wait_queues.pop(project.project.id, None)
         return None
 
-    def _discard_session_lock_waiting_intent(self, project_id: str, intent_id: str) -> None:
-        queue = self.session_lock_wait_queues.get(project_id)
+    def _discard_authenticated_waiting_intent(self, project_id: str, intent_id: str) -> None:
+        queue = self.authenticated_wait_queues.get(project_id)
         if not queue:
             return
-        self.session_lock_wait_queues[project_id] = deque(item for item in queue if item != intent_id)
-        if not self.session_lock_wait_queues[project_id]:
-            self.session_lock_wait_queues.pop(project_id, None)
+        self.authenticated_wait_queues[project_id] = deque(item for item in queue if item != intent_id)
+        if not self.authenticated_wait_queues[project_id]:
+            self.authenticated_wait_queues.pop(project_id, None)
 
-    def _cleanup_session_lock_wait_queues(self, summaries: list[ProjectSummary]) -> None:
-        active_enabled_ids = {
+    def _cleanup_authenticated_wait_queues(self, summaries: list[ProjectSummary]) -> None:
+        active_authenticated_ids = {
             summary.id
             for summary in summaries
-            if summary.status == "active" and summary.session_lock_enabled
+            if summary.status == "active" and summary.mode == "src" and summary.auth_mode == "authenticated"
         }
-        for project_id in list(self.session_lock_wait_queues):
-            if project_id not in active_enabled_ids:
-                self.session_lock_wait_queues.pop(project_id, None)
+        for project_id in list(self.authenticated_wait_queues):
+            if project_id not in active_authenticated_ids:
+                self.authenticated_wait_queues.pop(project_id, None)
+        for project_id in list(self.account_leases):
+            if project_id not in active_authenticated_ids:
+                self.account_leases.pop(project_id, None)
+
+    def _lease_account(self, project: ProjectDetail, intent: Intent):
+        leased = self.account_leases.setdefault(project.project.id, {})
+        for account in project.accounts:
+            if account.id in leased:
+                continue
+            leased[account.id] = intent.id
+            return account
+        return None
+
+    def _release_account(self, project_id: str, account_id: str) -> None:
+        leases = self.account_leases.get(project_id)
+        if not leases:
+            return
+        leases.pop(account_id, None)
+        if not leases:
+            self.account_leases.pop(project_id, None)
 
     def _running_project_count(self, summaries: list[ProjectSummary]) -> int:
         active_ids = {summary.id for summary in summaries if summary.status == "active"}
@@ -766,6 +833,14 @@ class DispatcherLoop:
         done = [future for future in self.futures if future.done()]
         for future in done:
             task = self.futures.pop(future)
+            if task.account is not None:
+                self._release_account(task.project_id, task.account.id)
+                LOG.info(
+                    "released authenticated account project=%s intent=%s account=%s",
+                    task.project_id,
+                    task.intent_id,
+                    task.account.id,
+                )
             try:
                 outcome = future.result()
                 if outcome == "cancelled":

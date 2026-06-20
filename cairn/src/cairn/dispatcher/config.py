@@ -53,6 +53,15 @@ PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
     }
 }
 
+PROMPT_REQUIRED_TOKENS_BY_MODE: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
+    "default": {
+        "src": {
+            "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
+            "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
+        }
+    }
+}
+
 MOCK_ALLOWED_OUTCOMES: dict[str, frozenset[str]] = {
     "healthcheck": frozenset({"ok", "fail"}),
     "reason": frozenset({"complete", "intent", "noop", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
@@ -280,7 +289,9 @@ def validate_prompt_resources(prompt_group: str) -> None:
         prompt_dirs = [group_dir]
     for prompt_dir in prompt_dirs:
         label = f"{prompt_group}/{prompt_dir.name}" if prompt_dir != group_dir else prompt_group
-        _validate_prompt_dir(prompt_dir, label, required_tokens)
+        mode_tokens = PROMPT_REQUIRED_TOKENS_BY_MODE.get(prompt_group, {}).get(prompt_dir.name, {})
+        merged_tokens = {**required_tokens, **mode_tokens}
+        _validate_prompt_dir(prompt_dir, label, merged_tokens)
 
 
 def _validate_prompt_dir(prompt_dir, prompt_group: str, required_tokens: dict[str, tuple[str, ...]]) -> None:

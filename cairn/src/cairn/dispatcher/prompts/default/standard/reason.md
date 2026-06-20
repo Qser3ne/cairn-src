@@ -26,7 +26,7 @@
 如果 Goal 未满足，但需要提出新的 intents，则返回：
 
 ```json
-{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "...", "session_lock": true}, {"from": ["f002", "f003"], "description": "...", "session_lock": false}]}}
+{"accepted": true, "data": {"intents": [{"from": ["f001"], "description": "..."}, {"from": ["f002", "f003"], "description": "..."}]}}
 ```
 
 如果 Goal 未满足且当前不应提出新的 intent，则返回：
@@ -44,9 +44,6 @@
 - 如果 Open Intents 数量较多，且当前情况没有出现比已有 intents 更有价值的新方向，可以选择不提出新的 intent（返回空 data）。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。每个 intent 应该是一个独立、可并行执行的探索路径。
 - 每个 Intent 应该是一个高价值的探索方向，不需要过于详细，强调核心洞察与清晰方向即可。避免过于宽泛或冗余，也避免过度具体。重点是独立且清晰的探索路径。
-- 每个 Intent 必须显式输出布尔字段 `session_lock`。
-- 涉及登录态、Cookie、Token、账号状态、认证链路、共享会话或会改动全局认证上下文的 intent 必须设置 `"session_lock": true`。
-- 纯只读、独立目标、不会改动共享认证或会话状态的 intent 可以设置 `"session_lock": false`。
 - 一个 Intent 可以基于多个 facts 共同生成。
 - 不同 intents 应覆盖不同维度的探索方向，避免重复或高度重叠。
 

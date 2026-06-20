@@ -83,7 +83,6 @@ if phase=="reason":
             intents.append({
                 "from":fi,
                 "description":f"mock intent {idx+1} from {fi[0] if fi else 'none'}",
-                "session_lock": False,
             })
         print(json.dumps({"accepted":True,"data":{"intents":intents}}, ensure_ascii=False))
     elif outcome=="noop":

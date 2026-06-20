@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from cairn.server.models import Finding, Intent, ProjectMeta, ProjectReason
+from cairn.server.models import Finding, Intent, ProjectAccount, ProjectMeta, ProjectReason
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -50,6 +50,10 @@ def next_hint_id(conn: sqlite3.Connection, project_id: str) -> str:
 
 def next_finding_id(conn: sqlite3.Connection, project_id: str) -> str:
     return _next_scoped_id(conn, "finding", "v", project_id)
+
+
+def next_account_id(conn: sqlite3.Connection, project_id: str) -> str:
+    return _next_scoped_id(conn, "account", "a", project_id)
 
 
 def get_project_or_404(conn: sqlite3.Connection, project_id: str) -> sqlite3.Row:
@@ -190,7 +194,6 @@ def intent_to_model(conn: sqlite3.Connection, row: sqlite3.Row, project_id: str)
         description=row["description"],
         creator=row["creator"],
         worker=row["worker"],
-        session_lock=bool(row["session_lock"]),
         last_heartbeat_at=row["last_heartbeat_at"],
         created_at=row["created_at"],
         concluded_at=row["concluded_at"],
@@ -232,6 +235,23 @@ def build_findings(conn: sqlite3.Connection, project_id: str) -> list[Finding]:
     return [finding_to_model(row) for row in rows]
 
 
+def account_to_model(row: sqlite3.Row) -> ProjectAccount:
+    return ProjectAccount(
+        id=row["id"],
+        label=row["label"],
+        username=row["username"],
+        password=row["password"],
+    )
+
+
+def build_project_accounts(conn: sqlite3.Connection, project_id: str) -> list[ProjectAccount]:
+    rows = conn.execute(
+        "SELECT * FROM project_accounts WHERE project_id = ? ORDER BY id",
+        (project_id,),
+    ).fetchall()
+    return [account_to_model(row) for row in rows]
+
+
 def get_intent_timeout(conn: sqlite3.Connection) -> int:
     row = conn.execute("SELECT intent_timeout FROM settings WHERE rowid = 1").fetchone()
     return row["intent_timeout"]
@@ -259,8 +279,8 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
         title=row["title"],
         status=row["status"],
         mode=row["mode"],
+        auth_mode=row["auth_mode"],
         bootstrap_enabled=bool(row["bootstrap_enabled"]),
-        session_lock_enabled=bool(row["session_lock_enabled"]),
         created_at=row["created_at"],
         reason=project_reason_from_row(row),
     )

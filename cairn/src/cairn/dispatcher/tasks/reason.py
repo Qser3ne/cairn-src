@@ -96,7 +96,6 @@ def run_reason_task(
                 "from": intent.from_,
                 "description": intent.description,
                 "worker": intent.worker,
-                "session_lock": intent.session_lock,
             }
             for intent in project.intents
             if intent.to is None
@@ -253,7 +252,6 @@ def run_reason_task(
                     intent_data["from"],
                     intent_data["description"],
                     worker.name,
-                    session_lock=intent_data["session_lock"],
                 )
                 if response.status_code == 403:
                     LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)

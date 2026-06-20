@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from cairn.dispatcher.config import DispatchConfig
 from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.workers.base import DriverResult
-from cairn.server.models import Fact, Hint, Intent, ProjectDetail, ProjectMeta
+from cairn.server.models import Fact, Hint, Intent, ProjectAccount, ProjectDetail, ProjectMeta
 
 
 def make_config() -> DispatchConfig:
@@ -50,8 +50,8 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
             title="test",
             status="active",
             mode="standard",
+            auth_mode="anonymous",
             bootstrap_enabled=True,
-            session_lock_enabled=True,
             created_at="2026-01-01T00:00:00Z",
         ),
         facts=[
@@ -69,6 +69,16 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
             )
         ],
         findings=[],
+        accounts=[],
+    )
+
+
+def make_account(account_id: str = "a001") -> ProjectAccount:
+    return ProjectAccount(
+        id=account_id,
+        label=f"account-{account_id}",
+        username=f"user-{account_id}",
+        password=f"pass-{account_id}",
     )
 
 
@@ -115,7 +125,7 @@ class FakeClient:
     project: ProjectDetail
     concluded: list[tuple[str, str, str, str]] = field(default_factory=list)
     completed: list[tuple[str, list[str], str, str]] = field(default_factory=list)
-    created_intents: list[tuple[str, list[str], str, str, bool]] = field(default_factory=list)
+    created_intents: list[tuple[str, list[str], str, str]] = field(default_factory=list)
     released: list[tuple[str, str, str]] = field(default_factory=list)
     released_reasons: list[tuple[str, str]] = field(default_factory=list)
 
@@ -146,9 +156,8 @@ class FakeClient:
         from_ids: list[str],
         description: str,
         creator: str,
-        session_lock: bool = False,
     ) -> ApiResult:
-        self.created_intents.append((project_id, from_ids, description, creator, session_lock))
+        self.created_intents.append((project_id, from_ids, description, creator))
         return ApiResult(201, {})
 
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:

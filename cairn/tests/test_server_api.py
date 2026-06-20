@@ -28,7 +28,8 @@ def _create_project(client: TestClient) -> str:
     assert response.status_code == 201
     assert response.json()["project"]["bootstrap_enabled"] is True
     assert response.json()["project"]["mode"] == "standard"
-    assert response.json()["project"]["session_lock_enabled"] is True
+    assert response.json()["project"]["auth_mode"] == "anonymous"
+    assert response.json()["accounts"] == []
     return response.json()["project"]["id"]
 
 
@@ -41,7 +42,7 @@ def test_project_workflow_create_conclude_complete_and_reopen(client: TestClient
     )
     assert response.status_code == 201
     assert response.json()["id"] == "i001"
-    assert response.json()["session_lock"] is False
+    assert "session_lock" not in response.json()
 
     response = client.post(
         f"/projects/{project_id}/intents/i001/heartbeat",
@@ -127,61 +128,71 @@ def test_settings_and_export_are_backed_by_the_same_database(client: TestClient)
     assert exported.status_code == 200
     assert "origin: starting point" in exported.text
     assert "goal: finish" in exported.text
-    assert "session_lock_enabled: true" in exported.text
+    assert "auth_mode: anonymous" in exported.text
     assert client.get(f"/projects/{project_id}/export?format=invalid").status_code == 400
 
 
-def test_project_settings_toggle_session_lock(client: TestClient) -> None:
-    project_id = _create_project(client)
-
-    response = client.put(
-        f"/projects/{project_id}/settings",
-        json={"session_lock_enabled": False},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["session_lock_enabled"] is False
-    assert client.get(f"/projects/{project_id}").json()["project"]["session_lock_enabled"] is False
-    assert client.get("/projects").json()[0]["session_lock_enabled"] is False
-    exported = client.get(f"/projects/{project_id}/export?format=yaml")
-    assert "session_lock_enabled: false" in exported.text
-
-
-def test_project_creation_can_disable_session_lock(client: TestClient) -> None:
+def test_authenticated_src_project_requires_accounts(client: TestClient) -> None:
     response = client.post(
         "/projects",
         json={
-            "title": "no lock",
+            "title": "auth src",
+            "origin": "https://target.test",
+            "goal": "find authenticated issues",
+            "mode": "src",
+            "auth_mode": "authenticated",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_anonymous_project_rejects_accounts(client: TestClient) -> None:
+    response = client.post(
+        "/projects",
+        json={
+            "title": "anonymous",
             "origin": "start",
             "goal": "finish",
-            "session_lock_enabled": False,
+            "accounts": [{"username": "alice", "password": "secret"}],
         },
     )
 
-    assert response.status_code == 201
-    assert response.json()["project"]["session_lock_enabled"] is False
+    assert response.status_code == 422
 
 
-def test_intent_creation_persists_session_lock(client: TestClient) -> None:
-    project_id = _create_project(client)
-
+def test_authenticated_src_project_persists_accounts_and_exports_plaintext(client: TestClient) -> None:
     response = client.post(
-        f"/projects/{project_id}/intents",
+        "/projects",
         json={
-            "from": ["origin"],
-            "description": "login flow",
-            "creator": "reasoner",
-            "worker": None,
-            "session_lock": True,
+            "title": "auth src",
+            "origin": "https://target.test",
+            "goal": "find authenticated issues",
+            "mode": "src",
+            "auth_mode": "authenticated",
+            "accounts": [
+                {"label": "alice", "username": "alice@example.test", "password": "secret-1"},
+                {"username": "bob@example.test", "password": "secret-2"},
+            ],
         },
     )
 
     assert response.status_code == 201
-    assert response.json()["session_lock"] is True
+    payload = response.json()
+    project_id = payload["project"]["id"]
+    assert payload["project"]["auth_mode"] == "authenticated"
+    assert payload["project"]["bootstrap_enabled"] is False
+    assert payload["accounts"] == [
+        {"id": "a001", "label": "alice", "username": "alice@example.test", "password": "secret-1"},
+        {"id": "a002", "label": "account-2", "username": "bob@example.test", "password": "secret-2"},
+    ]
     detail = client.get(f"/projects/{project_id}").json()
-    assert detail["intents"][0]["session_lock"] is True
+    assert detail["accounts"][1]["label"] == "account-2"
+    assert client.get("/projects").json()[0]["auth_mode"] == "authenticated"
     exported = client.get(f"/projects/{project_id}/export?format=yaml")
-    assert "session_lock: true" in exported.text
+    assert "auth_mode: authenticated" in exported.text
+    assert "username: alice@example.test" in exported.text
+    assert "password: secret-1" in exported.text
 
 
 def test_expired_intent_and_reason_leases_can_be_reclaimed(client: TestClient) -> None:

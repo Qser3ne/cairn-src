@@ -5,7 +5,7 @@ import sqlite3
 from cairn.server import db
 
 
-def test_configure_adds_bootstrap_enabled_to_legacy_projects_table(tmp_path, monkeypatch) -> None:
+def test_configure_adds_auth_mode_and_drops_legacy_session_lock_project_column(tmp_path, monkeypatch) -> None:
     path = tmp_path / "legacy.db"
     with sqlite3.connect(path) as conn:
         conn.execute(
@@ -14,6 +14,7 @@ def test_configure_adds_bootstrap_enabled_to_legacy_projects_table(tmp_path, mon
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'active',
+                session_lock_enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 reason_worker TEXT,
                 reason_trigger TEXT,
@@ -30,11 +31,15 @@ def test_configure_adds_bootstrap_enabled_to_legacy_projects_table(tmp_path, mon
     db.configure(path)
 
     with db.get_conn() as conn:
-        row = conn.execute(
-            "SELECT bootstrap_enabled, session_lock_enabled FROM projects WHERE id = 'proj_001'"
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+        row = conn.execute("SELECT bootstrap_enabled, auth_mode FROM projects WHERE id = 'proj_001'").fetchone()
+        account_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_accounts'"
         ).fetchone()
     assert row["bootstrap_enabled"] == 1
-    assert row["session_lock_enabled"] == 1
+    assert row["auth_mode"] == "anonymous"
+    assert "session_lock_enabled" not in columns
+    assert account_table is not None
 
 
 def test_configure_maps_disabled_bootstrap_mode_to_false(tmp_path, monkeypatch) -> None:
@@ -73,7 +78,7 @@ def test_configure_maps_disabled_bootstrap_mode_to_false(tmp_path, monkeypatch) 
     ]
 
 
-def test_configure_adds_session_lock_to_legacy_intents_table(tmp_path, monkeypatch) -> None:
+def test_configure_drops_legacy_session_lock_intent_column(tmp_path, monkeypatch) -> None:
     path = tmp_path / "legacy-intents.db"
     with sqlite3.connect(path) as conn:
         conn.executescript(
@@ -96,6 +101,7 @@ def test_configure_adds_session_lock_to_legacy_intents_table(tmp_path, monkeypat
                 creator TEXT NOT NULL,
                 worker TEXT,
                 last_heartbeat_at TEXT,
+                session_lock INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 concluded_at TEXT,
                 PRIMARY KEY (id, project_id)
@@ -121,5 +127,7 @@ def test_configure_adds_session_lock_to_legacy_intents_table(tmp_path, monkeypat
     db.configure(path)
 
     with db.get_conn() as conn:
-        row = conn.execute("SELECT session_lock FROM intents WHERE id = 'i001'").fetchone()
-    assert row["session_lock"] == 0
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(intents)")}
+        row = conn.execute("SELECT id, description FROM intents WHERE id = 'i001'").fetchone()
+    assert "session_lock" not in columns
+    assert row["description"] == "old work"

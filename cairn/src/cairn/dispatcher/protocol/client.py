@@ -137,7 +137,6 @@ class CairnClient:
         from_ids: list[str],
         description: str,
         creator: str,
-        session_lock: bool = False,
     ) -> ApiResult:
         return self._request_json(
             "POST",
@@ -147,7 +146,6 @@ class CairnClient:
                 "description": description,
                 "creator": creator,
                 "worker": None,
-                "session_lock": session_lock,
             },
         )
 

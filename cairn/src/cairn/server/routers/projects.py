@@ -13,12 +13,12 @@ from cairn.server.models import (
     ProjectSummary,
     ReopenRequest,
     ReopenResponse,
-    UpdateProjectSettingsRequest,
     ReasonClaimRequest,
     UpdateProjectTitleRequest,
     UpdateProjectStatusRequest,
 )
 from cairn.server.services import (
+    build_project_accounts,
     build_findings,
     build_intents,
     check_project_completed,
@@ -29,6 +29,7 @@ from cairn.server.services import (
     get_completion_intent_or_409,
     get_project_or_404,
     intent_to_model,
+    next_account_id,
     next_fact_id,
     next_hint_id,
     next_intent_id,
@@ -65,8 +66,8 @@ def list_projects():
                 title=row["title"],
                 status=row["status"],
                 mode=row["mode"],
+                auth_mode=row["auth_mode"],
                 bootstrap_enabled=bool(row["bootstrap_enabled"]),
-                session_lock_enabled=bool(row["session_lock_enabled"]),
                 created_at=row["created_at"],
                 reason=project_reason_from_row(row),
                 fact_count=row["fact_count"],
@@ -92,8 +93,8 @@ def create_project(body: CreateProjectRequest):
         )
 
         conn.execute(
-            "INSERT INTO projects (id, title, status, mode, bootstrap_enabled, session_lock_enabled, created_at) VALUES (?, ?, 'active', ?, ?, ?, ?)",
-            (pid, body.title, body.mode, bootstrap_enabled, body.session_lock_enabled, now),
+            "INSERT INTO projects (id, title, status, mode, auth_mode, bootstrap_enabled, created_at) VALUES (?, ?, 'active', ?, ?, ?, ?)",
+            (pid, body.title, body.mode, body.auth_mode, bootstrap_enabled, now),
         )
         conn.execute(
             "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
@@ -114,14 +115,31 @@ def create_project(body: CreateProjectRequest):
                 )
                 hints.append(Hint(id=hid, content=h.content, creator=h.creator, created_at=now))
 
+        accounts = []
+        for index, account in enumerate(body.accounts or [], start=1):
+            account_id = next_account_id(conn, pid)
+            label = account.label or f"account-{index}"
+            conn.execute(
+                "INSERT INTO project_accounts (id, project_id, label, username, password) VALUES (?, ?, ?, ?, ?)",
+                (account_id, pid, label, account.username, account.password),
+            )
+            accounts.append(
+                {
+                    "id": account_id,
+                    "label": label,
+                    "username": account.username,
+                    "password": account.password,
+                }
+            )
+
         return ProjectDetail(
             project=ProjectMeta(
                 id=pid,
                 title=body.title,
                 status="active",
                 mode=body.mode,
+                auth_mode=body.auth_mode,
                 bootstrap_enabled=bootstrap_enabled,
-                session_lock_enabled=body.session_lock_enabled,
                 created_at=now,
                 reason=None,
             ),
@@ -132,6 +150,7 @@ def create_project(body: CreateProjectRequest):
             intents=[],
             hints=hints,
             findings=[],
+            accounts=accounts,
         )
 
 
@@ -156,6 +175,7 @@ def get_project(project_id: str):
             intents=build_intents(conn, project_id),
             hints=[Hint(**dict(h)) for h in hints],
             findings=build_findings(conn, project_id),
+            accounts=build_project_accounts(conn, project_id),
         )
 
 
@@ -173,18 +193,6 @@ def update_project_title(project_id: str, body: UpdateProjectTitleRequest):
         conn.execute(
             "UPDATE projects SET title = ? WHERE id = ?",
             (body.title, project_id),
-        )
-        updated = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-        return project_meta_from_row(updated)
-
-
-@router.put("/projects/{project_id}/settings", response_model=ProjectMeta)
-def update_project_settings(project_id: str, body: UpdateProjectSettingsRequest):
-    with get_conn() as conn:
-        get_project_or_404(conn, project_id)
-        conn.execute(
-            "UPDATE projects SET session_lock_enabled = ? WHERE id = ?",
-            (body.session_lock_enabled, project_id),
         )
         updated = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
         return project_meta_from_row(updated)
@@ -293,7 +301,7 @@ def complete_project(project_id: str, body: CompleteRequest):
         iid = next_intent_id(conn, project_id)
 
         conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, session_lock, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, 'goal', ?, ?, ?, 0, ?, ?, ?)",
+            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, 'goal', ?, ?, ?, ?, ?, ?)",
             (iid, project_id, body.description, body.worker, body.worker, now, now, now),
         )
         for fid in body.from_:
@@ -321,7 +329,6 @@ def complete_project(project_id: str, body: CompleteRequest):
             description=body.description,
             creator=body.worker,
             worker=body.worker,
-            session_lock=False,
             last_heartbeat_at=now,
             created_at=now,
             concluded_at=now,
@@ -358,7 +365,7 @@ def reopen_project(project_id: str, body: ReopenRequest):
             (fact_id, project_id, description),
         )
         conn.execute(
-            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, session_lock, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+            "INSERT INTO intents (id, project_id, to_fact_id, description, creator, worker, last_heartbeat_at, created_at, concluded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (intent_id, project_id, fact_id, "external_feedback", creator, creator, now, now, now),
         )
         for source_id in source_ids:

@@ -23,7 +23,7 @@ from cairn.dispatcher.tasks.common import (
     write_graph_snapshot_reference,
 )
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.server.models import Intent, ProjectDetail
+from cairn.server.models import Intent, ProjectAccount, ProjectDetail
 
 LOG = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ def run_explore_task(
     intent: Intent,
     worker: WorkerConfig,
     cancellation: TaskCancellation,
+    account: ProjectAccount | None = None,
 ) -> str:
     driver = get_driver(worker.type)
     task_started = time.perf_counter()
@@ -107,6 +108,7 @@ def run_explore_task(
                 ),
                 "intent_id": intent.id,
                 "intent_description": intent.description,
+                "auth_context": format_auth_context(project, account),
             },
         )
 
@@ -179,6 +181,7 @@ def run_explore_task(
                     session,
                     lease,
                     cancellation,
+                    account,
                 )
             if kind == "rejected":
                 LOG.warning(
@@ -227,6 +230,7 @@ def run_explore_task(
                 session,
                 lease,
                 cancellation,
+                account,
             )
         LOG.warning(
             "explore command failed project=%s intent=%s worker=%s code=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -262,6 +266,7 @@ def _try_conclude_fallback(
     session: str | None,
     lease: HeartbeatLease,
     cancellation: TaskCancellation,
+    account: ProjectAccount | None,
 ) -> str:
     project_id = project.project.id
     if not driver.supports_conclude() or not session:
@@ -312,6 +317,7 @@ def _try_conclude_fallback(
             ),
             "intent_id": intent.id,
             "intent_description": intent.description,
+            "auth_context": format_auth_context(project, account),
         },
     )
     conclude_argv = driver.build_conclude(worker, prompt, session)
@@ -405,6 +411,30 @@ def _payload_findings(payload: dict) -> list[dict] | None:
     if not isinstance(findings, list) or not findings:
         return None
     return [finding for finding in findings if isinstance(finding, dict)]
+
+
+def format_auth_context(project: ProjectDetail, account: ProjectAccount | None) -> str:
+    if project.project.mode != "src" or project.project.auth_mode != "authenticated":
+        return (
+            "Project auth_mode is anonymous. Explore only the unauthenticated surface. "
+            "Do not log in or use account credentials."
+        )
+    if account is None:
+        return (
+            "Project auth_mode is authenticated, but no account lease was attached. "
+            "Report that authenticated exploration could not start without credentials."
+        )
+    profile_dir = f"/home/kali/workspace/auth/{project.project.id}/{account.id}"
+    return (
+        "Project auth_mode is authenticated. Use only the leased account below for this task.\n\n"
+        f"- account_id: {account.id}\n"
+        f"- label: {account.label}\n"
+        f"- username: {account.username}\n"
+        f"- password: {account.password}\n"
+        f"- isolated_session_dir: {profile_dir}\n\n"
+        "Store browser profiles, cookies, tokens, temporary login state, and account-specific cache "
+        "under isolated_session_dir. Do not reuse another account's session files."
+    )
 
 
 def _run_process(

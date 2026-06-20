@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ProjectMode = Literal["standard", "src"]
+ProjectAuthMode = Literal["anonymous", "authenticated"]
 
 
 class Settings(BaseModel):
@@ -72,7 +73,6 @@ class Intent(BaseModel):
     description: str
     creator: str
     worker: str | None = None
-    session_lock: bool = False
     last_heartbeat_at: str | None = None
     created_at: str
     concluded_at: str | None = None
@@ -87,6 +87,37 @@ class Hint(BaseModel):
     created_at: str
 
 
+class ProjectAccount(BaseModel):
+    id: str
+    label: str
+    username: str
+    password: str
+
+
+class ProjectAccountCreate(BaseModel):
+    label: str | None = None
+    username: str
+    password: str
+
+    @field_validator("label")
+    @classmethod
+    def validate_optional_account_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        return text
+
+    @field_validator("username", "password")
+    @classmethod
+    def validate_required_account_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
 class ProjectReason(BaseModel):
     worker: str
     trigger: str
@@ -99,8 +130,8 @@ class ProjectMeta(BaseModel):
     title: str
     status: Literal["active", "stopped", "completed"]
     mode: ProjectMode = "standard"
+    auth_mode: ProjectAuthMode = "anonymous"
     bootstrap_enabled: bool
-    session_lock_enabled: bool = True
     created_at: str
     reason: ProjectReason | None = None
 
@@ -120,6 +151,7 @@ class ProjectDetail(BaseModel):
     intents: list[Intent]
     hints: list[Hint]
     findings: list[Finding] = Field(default_factory=list)
+    accounts: list[ProjectAccount] = Field(default_factory=list)
 
 
 class CreateHintInline(BaseModel):
@@ -140,9 +172,10 @@ class CreateProjectRequest(BaseModel):
     origin: str
     goal: str
     mode: ProjectMode = "standard"
+    auth_mode: ProjectAuthMode = "anonymous"
     bootstrap_enabled: bool | None = None
-    session_lock_enabled: bool = True
     hints: list[CreateHintInline] | None = None
+    accounts: list[ProjectAccountCreate] | None = None
 
     @field_validator("title", "origin", "goal")
     @classmethod
@@ -151,6 +184,17 @@ class CreateProjectRequest(BaseModel):
         if not text:
             raise ValueError("must not be empty")
         return text
+
+    @model_validator(mode="after")
+    def validate_auth_mode_accounts(self) -> "CreateProjectRequest":
+        if self.mode != "src" and self.auth_mode != "anonymous":
+            raise ValueError("auth_mode=authenticated is only supported for src projects")
+        accounts = self.accounts or []
+        if self.auth_mode != "authenticated" and accounts:
+            raise ValueError("accounts are only supported for authenticated src projects")
+        if self.auth_mode == "authenticated" and not accounts:
+            raise ValueError("authenticated src projects require at least one account")
+        return self
 
 
 class CreateHintRequest(BaseModel):
@@ -171,7 +215,6 @@ class CreateIntentRequest(BaseModel):
     description: str
     creator: str
     worker: str | None = None
-    session_lock: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -283,10 +326,6 @@ class UpdateProjectTitleRequest(BaseModel):
         if not text:
             raise ValueError("must not be empty")
         return text
-
-
-class UpdateProjectSettingsRequest(BaseModel):
-    session_lock_enabled: bool
 
 
 class ReopenRequest(BaseModel):

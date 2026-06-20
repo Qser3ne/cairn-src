@@ -43,10 +43,6 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
 def _validate_reason_intent(intent: Any, index: int) -> None:
     if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
         raise ValueError(f"invalid intent at index {index}")
-    if "session_lock" not in intent:
-        raise ValueError(f"intent session_lock is required at index {index}")
-    if not isinstance(intent["session_lock"], bool):
-        raise ValueError(f"intent session_lock must be boolean at index {index}")
 
 
 def _looks_like_bootstrap_execute_data(payload: dict[str, Any]) -> bool:
