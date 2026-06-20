@@ -45,15 +45,33 @@ def create_intent(project_id: str, body: CreateIntentRequest):
         check_project_active(conn, project_id)
         validate_facts_exist(conn, project_id, body.from_)
         validate_intent_creator_worker(body.creator, body.worker)
-        check_duplicate_intent(conn, project_id, body.from_, body.description)
+        project = conn.execute(
+            "SELECT project_kind, auth_mode FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if project is None:
+            raise HTTPException(404, "Project not found")
 
-        now = utcnow()
-        iid = next_intent_id(conn, project_id)
-        claimed = body.worker is not None
+        if body.intent_kind == "explore" and body.auth_scope is None:
+            body.auth_scope = (
+                project["auth_mode"]
+                if project["project_kind"] == "vuln"
+                else "anonymous"
+            )
+        if (
+            body.intent_kind == "explore"
+            and project["project_kind"] == "vuln"
+            and body.auth_scope != project["auth_mode"]
+        ):
+            raise HTTPException(400, "vuln intent auth_scope must match project auth_mode")
         if body.intent_kind == "report":
             if not body.finding_id:
                 raise HTTPException(400, "finding_id is required for report intents")
             get_finding_or_404(conn, project_id, body.finding_id)
+            body.auth_scope = None
+        check_duplicate_intent(conn, project_id, body.from_, body.description, body.auth_scope)
+        now = utcnow()
+        iid = next_intent_id(conn, project_id)
+        claimed = body.worker is not None
         conn.execute(
             """
             INSERT INTO intents (
@@ -67,8 +85,9 @@ def create_intent(project_id: str, body: CreateIntentRequest):
                 created_at,
                 concluded_at,
                 intent_kind,
-                finding_id
-            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?)
+                finding_id,
+                auth_scope
+            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
             """,
             (
                 iid,
@@ -80,6 +99,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
                 now,
                 body.intent_kind,
                 body.finding_id,
+                body.auth_scope,
             ),
         )
         for fid in body.from_:
@@ -100,6 +120,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
             concluded_at=None,
             intent_kind=body.intent_kind,
             finding_id=body.finding_id,
+            auth_scope=body.auth_scope,
         )
 
 
@@ -154,7 +175,7 @@ def release(project_id: str, intent_id: str, body: HeartbeatRequest):
 def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
     with get_conn() as conn:
         check_project_active(conn, project_id)
-        get_claimable_open_intent_or_404(conn, project_id, intent_id, body.worker)
+        intent = get_claimable_open_intent_or_404(conn, project_id, intent_id, body.worker)
 
         now = utcnow()
         fid = next_fact_id(conn, project_id)
@@ -231,10 +252,18 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
                         created_at,
                         concluded_at,
                         intent_kind,
-                        finding_id
-                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_followup', NULL, NULL, ?, NULL, 'explore', ?)
+                        finding_id,
+                        auth_scope
+                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_followup', NULL, NULL, ?, NULL, 'explore', ?, ?)
                     """,
-                    (followup_intent_id, project_id, finding.followup_intent_description, now, finding_id),
+                    (
+                        followup_intent_id,
+                        project_id,
+                        finding.followup_intent_description,
+                        now,
+                        finding_id,
+                        intent["auth_scope"],
+                    ),
                 )
                 conn.execute(
                     "INSERT INTO intent_sources (intent_id, project_id, fact_id) VALUES (?, ?, ?)",
@@ -259,8 +288,9 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
                         created_at,
                         concluded_at,
                         intent_kind,
-                        finding_id
-                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_report', NULL, NULL, ?, NULL, 'report', ?)
+                        finding_id,
+                        auth_scope
+                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_report', NULL, NULL, ?, NULL, 'report', ?, NULL)
                     """,
                     (
                         report_intent_id,

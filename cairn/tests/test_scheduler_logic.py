@@ -66,6 +66,7 @@ def _authenticated_project(intent_count: int, account_count: int = 3):
     for index in range(1, intent_count + 1):
         intent = make_intent(f"i{index:03d}")
         intent.worker = None
+        intent.auth_scope = "authenticated"
         intent.created_at = f"2026-01-01T00:00:{index:02d}Z"
         intents.append(intent)
     project = make_project(intents=intents)
@@ -169,7 +170,7 @@ def test_choose_worker_prefers_priority_then_lower_running_count() -> None:
     assert [worker.name for worker in ordered] == ["first", "busy", "lower"]
 
 
-def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
+def test_unclaimed_explore_dispatches_before_new_reason_trigger() -> None:
     loop = _loop()
     loop.config = make_config()
     loop.futures = {}
@@ -191,7 +192,7 @@ def test_new_fact_dispatches_reason_before_unclaimed_explore_intent() -> None:
     loop._dispatch_explore = lambda *_args: dispatched.append(("explore", "")) or True
 
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
-    assert dispatched == [("reason", "facts:2->3")]
+    assert dispatched == [("explore", "")]
 
 
 def test_initial_project_dispatches_reason_directly() -> None:
@@ -229,6 +230,20 @@ def test_authenticated_project_dispatches_with_available_accounts() -> None:
     assert loop.account_leases["proj_001"] == {"a001": "i002", "a002": "i001"}
     assert loop.authenticated_wait_queues == {}
     assert [task.account.id for task in loop.futures.values()] == ["a001", "a002"]
+
+
+def test_anonymous_intent_dispatches_without_account_lease() -> None:
+    loop = _loop()
+    project = _authenticated_project(intent_count=1, account_count=1)
+    project.intents[0].auth_scope = "anonymous"
+    executor = _prepare_real_dispatch(loop, project)
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert len(executor.submissions) == 1
+    assert loop.account_leases == {}
+    assert loop.authenticated_wait_queues == {}
+    assert loop.futures[executor.futures[0]].account is None
 
 
 def test_authenticated_intent_queues_when_all_accounts_are_busy() -> None:
@@ -278,8 +293,10 @@ def test_authenticated_wait_queue_discards_invalid_or_inactive_projects() -> Non
     loop = _loop()
     valid = make_intent("i001")
     valid.worker = None
+    valid.auth_scope = "authenticated"
     claimed = make_intent("i002")
     claimed.worker = "worker"
+    claimed.auth_scope = "authenticated"
     project = _authenticated_project(intent_count=0, account_count=2)
     project.intents = [claimed, valid]
     loop.authenticated_wait_queues = {

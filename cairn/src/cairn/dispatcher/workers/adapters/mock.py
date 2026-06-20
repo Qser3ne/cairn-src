@@ -71,16 +71,21 @@ if outcome=="invalid_json":
 if phase=="reason":
     fact_ids=prompt.get("fact_ids") or []
     max_i=prompt.get("max_intents",3)
+    project_kind=prompt.get("project_kind")
     from_ids=[random.choice(fact_ids)] if fact_ids else []
     if outcome=="intent":
-        count=random.randint(1,max(1,max_i))
+        initial_recon = project_kind=="recon" and len(fact_ids)==1 and not prompt.get("open_intents")
+        count=2 if initial_recon else random.randint(1,max(1,max_i))
         intents=[]
         for idx in range(count):
             fi=[random.choice(fact_ids)] if fact_ids else []
-            intents.append({
+            intent={
                 "from":fi,
                 "description":f"mock intent {idx+1} from {fi[0] if fi else 'none'}",
-            })
+            }
+            if project_kind=="recon":
+                intent["auth_scope"]="anonymous" if idx % 2 == 0 else "authenticated"
+            intents.append(intent)
         print(json.dumps({"accepted":True,"data":{"intents":intents}}, ensure_ascii=False))
     elif outcome=="noop":
         print(json.dumps({"accepted":True,"data":{"decision":"noop","intents":[]}}, ensure_ascii=False))

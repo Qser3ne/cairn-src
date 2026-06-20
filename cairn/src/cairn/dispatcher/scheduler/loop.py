@@ -226,7 +226,7 @@ class DispatcherLoop:
 
     def _sync_authenticated_wait_queues(self, summaries: list[ProjectSummary]) -> None:
         for summary in summaries:
-            if summary.status != "active" or summary.auth_mode != "authenticated":
+            if summary.status != "active":
                 continue
             if summary.unclaimed_intent_count <= 0:
                 continue
@@ -271,6 +271,18 @@ class DispatcherLoop:
                 project.project.status,
             )
             return False
+        if (
+            project.project.project_kind == "recon"
+            and project.project.auth_mode == "dual"
+            and not project.accounts
+        ):
+            self._log_changed(
+                f"{skip_scope}:accounts:missing",
+                logging.WARNING,
+                "skip recon project=%s because dual-line recon requires at least one account",
+                summary.id,
+            )
+            return False
         if self._is_initial_project(project):
             if project.project.reason is not None:
                 return False
@@ -298,11 +310,6 @@ class DispatcherLoop:
         if queued_intent is not None:
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_explore(project, export_yaml, queued_intent)
-        if project.project.reason is None:
-            reason_trigger = self._reason_trigger(project)
-            if reason_trigger is not None:
-                export_yaml = self.client.export_project(summary.id)
-                return self._dispatch_reason(project, export_yaml, reason_trigger)
         running_intent_ids = self._project_running_explore_intents(summary.id)
         unclaimed_intents = [
             intent
@@ -325,6 +332,11 @@ class DispatcherLoop:
             if newest.intent_kind == "report":
                 return self._dispatch_report(project, export_yaml, newest)
             return self._dispatch_explore(project, export_yaml, newest)
+        if project.project.reason is None:
+            reason_trigger = self._reason_trigger(project)
+            if reason_trigger is not None:
+                export_yaml = self.client.export_project(summary.id)
+                return self._dispatch_reason(project, export_yaml, reason_trigger)
         if project.project.reason is not None:
             self._log_changed(
                 f"{skip_scope}:reason_claimed",
@@ -475,7 +487,7 @@ class DispatcherLoop:
 
     def _dispatch_explore(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
         account = None
-        if project.project.auth_mode == "authenticated":
+        if intent.auth_scope == "authenticated":
             if not project.accounts:
                 self._log_changed(
                     f"project:{project.project.id}:accounts:missing",
@@ -673,7 +685,12 @@ class DispatcherLoop:
         }
 
     def _project_uses_account_pool(self, project: ProjectDetail) -> bool:
-        return project.project.auth_mode == "authenticated"
+        return any(
+            intent.to is None
+            and intent.intent_kind == "explore"
+            and intent.auth_scope == "authenticated"
+            for intent in project.intents
+        )
 
     def _enqueue_current_authenticated_waiters(self, project: ProjectDetail) -> None:
         if not self._project_uses_account_pool(project):
@@ -690,6 +707,7 @@ class DispatcherLoop:
             and intent.worker is None
             and intent.id not in running_intent_ids
             and intent.intent_kind == "explore"
+            and intent.auth_scope == "authenticated"
         ]
         self._enqueue_authenticated_waiting_intents(project.project.id, blocked)
 
@@ -722,6 +740,7 @@ class DispatcherLoop:
                 and intent.to is None
                 and intent.worker is None
                 and intent.intent_kind == "explore"
+                and intent.auth_scope == "authenticated"
             ):
                 return intent
             queue.popleft()
@@ -737,16 +756,16 @@ class DispatcherLoop:
             self.authenticated_wait_queues.pop(project_id, None)
 
     def _cleanup_authenticated_wait_queues(self, summaries: list[ProjectSummary]) -> None:
-        active_authenticated_ids = {
+        active_project_ids = {
             summary.id
             for summary in summaries
-            if summary.status == "active" and summary.auth_mode == "authenticated"
+            if summary.status == "active" and summary.auth_mode != "anonymous"
         }
         for project_id in list(self.authenticated_wait_queues):
-            if project_id not in active_authenticated_ids:
+            if project_id not in active_project_ids:
                 self.authenticated_wait_queues.pop(project_id, None)
         for project_id in list(self.account_leases):
-            if project_id not in active_authenticated_ids:
+            if project_id not in active_project_ids:
                 self.account_leases.pop(project_id, None)
 
     def _lease_account(self, project: ProjectDetail, intent: Intent):

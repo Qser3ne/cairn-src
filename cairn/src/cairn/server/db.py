@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS intents (
     concluded_at TEXT,
     intent_kind TEXT NOT NULL DEFAULT 'explore',
     finding_id TEXT,
+    auth_scope TEXT,
     PRIMARY KEY (id, project_id)
 );
 
@@ -250,6 +251,7 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
     if "judged_at" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN judged_at TEXT")
         columns.add("judged_at")
+    conn.execute("UPDATE projects SET auth_mode = 'dual' WHERE project_kind = 'recon'")
     if "session_lock_enabled" not in columns:
         return
 
@@ -335,6 +337,22 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
     if "finding_id" not in columns:
         conn.execute("ALTER TABLE intents ADD COLUMN finding_id TEXT")
         columns.add("finding_id")
+    if "auth_scope" not in columns:
+        conn.execute("ALTER TABLE intents ADD COLUMN auth_scope TEXT")
+        columns.add("auth_scope")
+    conn.execute(
+        """
+        UPDATE intents
+        SET auth_scope = CASE
+            WHEN intent_kind = 'report' THEN NULL
+            WHEN project_id IN (
+                SELECT id FROM projects WHERE auth_mode = 'authenticated'
+            ) THEN 'authenticated'
+            ELSE 'anonymous'
+        END
+        WHERE auth_scope IS NULL AND intent_kind != 'report'
+        """
+    )
     if "session_lock" not in columns:
         return
 
@@ -353,6 +371,7 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
             concluded_at TEXT,
             intent_kind TEXT NOT NULL DEFAULT 'explore',
             finding_id TEXT,
+            auth_scope TEXT,
             PRIMARY KEY (id, project_id)
         )
         """
@@ -370,7 +389,8 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
             created_at,
             concluded_at,
             intent_kind,
-            finding_id
+            finding_id,
+            auth_scope
         )
         SELECT
             id,
@@ -383,7 +403,8 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
             created_at,
             concluded_at,
             intent_kind,
-            finding_id
+            finding_id,
+            auth_scope
         FROM intents
         """
     )

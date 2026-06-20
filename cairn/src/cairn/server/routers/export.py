@@ -153,6 +153,7 @@ def _export_yaml(conn, project_id: str) -> str:
             "concluded_at": format_export_timestamp(i["concluded_at"]),
             "intent_kind": i["intent_kind"],
             "finding_id": i["finding_id"],
+            "auth_scope": i["auth_scope"],
         }
         intent_list.append(entry)
 
@@ -208,6 +209,8 @@ def _export_timeline(conn, project_id: str) -> str:
         ts = format_export_timestamp(i["created_at"]) or ""
         meta = f"  from: {from_str}"
         meta += f"\n  kind: {i['intent_kind']}"
+        if i["auth_scope"]:
+            meta += f"\n  auth_scope: {i['auth_scope']}"
         if i["worker"] and not i["concluded_at"]:
             meta += f"\n  worker: {i['worker']} (in progress)"
         block = f"[{ts}] INTENT DECLARED {i['id']} by {i['creator']}\n{meta}\n  {i['description']}"
@@ -221,7 +224,10 @@ def _export_timeline(conn, project_id: str) -> str:
         actor = i["worker"] or i["creator"]
 
         fact_desc = facts_by_id.get(i["to_fact_id"], "")
-        block = f"[{ts}] INTENT CONCLUDED {i['id']} by {actor}\n  from: {from_str}\n  produced: {i['to_fact_id']}\n  {fact_desc}"
+        meta = f"  from: {from_str}"
+        if i["auth_scope"]:
+            meta += f"\n  auth_scope: {i['auth_scope']}"
+        block = f"[{ts}] INTENT CONCLUDED {i['id']} by {actor}\n{meta}\n  produced: {i['to_fact_id']}\n  {fact_desc}"
 
         events.append((i["concluded_at"] or "", order, block))
         order += 1

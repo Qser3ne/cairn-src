@@ -96,11 +96,19 @@ def run_reason_task(
                 "from": intent.from_,
                 "description": intent.description,
                 "worker": intent.worker,
+                "auth_scope": intent.auth_scope,
             }
             for intent in project.intents
             if intent.to is None
         ]
         allowed_fact_ids = [fact.id for fact in project.facts]
+        is_initial_recon = (
+            project.project.project_kind == "recon"
+            and len(project.facts) == 1
+            and project.facts[0].id == "origin"
+            and not open_intents
+        )
+        max_intents = max(config.tasks.reason.max_intents, 2) if is_initial_recon else config.tasks.reason.max_intents
         LOG.debug(
             "reason context prepared project=%s worker=%s facts=%s allowed_fact_ids=%s hints=%s open_intents=%s",
             project.project.id,
@@ -121,7 +129,8 @@ def run_reason_task(
                 ),
                 "fact_ids": format_fact_ids(allowed_fact_ids),
                 "open_intents": format_open_intents(open_intents),
-                "max_intents": str(config.tasks.reason.max_intents),
+                "max_intents": str(max_intents),
+                "project_kind": project.project.project_kind,
             },
         )
 
@@ -187,8 +196,19 @@ def run_reason_task(
             model_output = driver.extract_response_text(result.stdout, result.stderr)
             payload = parse_json_output(model_output)
             kind, data = validate_reason_payload(
-                payload, open_intents_empty=not open_intents, max_intents=config.tasks.reason.max_intents,
+                payload,
+                open_intents_empty=not open_intents,
+                max_intents=max_intents,
+                require_auth_scope=project.project.project_kind == "recon",
             )
+            if is_initial_recon:
+                scopes = {
+                    intent.get("auth_scope")
+                    for intent in data
+                    if isinstance(intent, dict)
+                } if kind == "intents" and isinstance(data, list) else set()
+                if scopes != {"anonymous", "authenticated"}:
+                    raise ValueError("initial recon requires anonymous and authenticated baseline intents")
         except Exception as exc:
             LOG.warning(
                 "reason parse failed project=%s worker=%s error=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -219,16 +239,18 @@ def run_reason_task(
                     intent_data["from"],
                     intent_data["description"],
                     worker.name,
+                    auth_scope=intent_data.get("auth_scope"),
                 )
                 if response.status_code == 403:
                     LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)
                     return "success"
                 if response.status_code == 409:
                     LOG.info(
-                        "duplicate intent skipped project=%s worker=%s from=%s description=%s",
+                        "duplicate intent skipped project=%s worker=%s from=%s auth_scope=%s description=%s",
                         project.project.id,
                         worker.name,
                         intent_data["from"],
+                        intent_data.get("auth_scope"),
                         intent_data["description"],
                     )
                     continue
@@ -243,10 +265,11 @@ def run_reason_task(
                     continue
                 created += 1
                 LOG.info(
-                    "reason created intent project=%s worker=%s from=%s description=%s",
+                    "reason created intent project=%s worker=%s from=%s auth_scope=%s description=%s",
                     project.project.id,
                     worker.name,
                     intent_data["from"],
+                    intent_data.get("auth_scope"),
                     intent_data["description"],
                 )
             LOG.info(

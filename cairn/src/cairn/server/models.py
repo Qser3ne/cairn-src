@@ -6,13 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 ProjectKind = Literal["recon", "vuln"]
-AuthMode = Literal["anonymous", "authenticated"]
+AuthMode = Literal["anonymous", "authenticated", "dual"]
 ProjectStatus = Literal["active", "stopped", "completed"]
 JudgeStatus = Literal["not_judged", "ready", "not_ready", "blocked"]
 ResearchValue = Literal["unknown", "high", "medium", "low", "none"]
 FindingNextAction = Literal["triage", "follow_up", "report", "close"]
 ReportStatus = Literal["not_started", "queued", "drafted", "submitted", "closed"]
 IntentKind = Literal["explore", "report"]
+AuthScope = Literal["anonymous", "authenticated"]
 EphemeralJobStatus = Literal["queued", "running", "succeeded", "failed", "expired"]
 
 
@@ -105,6 +106,7 @@ class Intent(BaseModel):
     concluded_at: str | None = None
     intent_kind: IntentKind = "explore"
     finding_id: str | None = None
+    auth_scope: AuthScope | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -209,7 +211,7 @@ class CreateProjectRequest(BaseModel):
     title: str
     origin: str
     project_kind: ProjectKind = "recon"
-    auth_mode: AuthMode = "anonymous"
+    auth_mode: AuthMode | None = None
     parent_project_id: str | None = None
     parent_snapshot_id: str | None = None
     recon_max_reason_rounds: int | None = 8
@@ -226,17 +228,27 @@ class CreateProjectRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_project_kind_and_accounts(self) -> "CreateProjectRequest":
+        accounts = self.accounts or []
         if self.project_kind == "recon":
             if self.parent_project_id is not None or self.parent_snapshot_id is not None:
                 raise ValueError("recon project cannot have parent_project_id or parent_snapshot_id")
+            if self.auth_mode in ("anonymous", "authenticated"):
+                raise ValueError("recon project auth_mode is fixed to dual")
+            self.auth_mode = "dual"
+            if not accounts:
+                raise ValueError("recon project requires at least one account")
         if self.project_kind == "vuln":
+            if self.auth_mode is None:
+                self.auth_mode = "anonymous"
+            if self.auth_mode == "dual":
+                raise ValueError("vuln project auth_mode must be anonymous or authenticated")
             if not self.parent_project_id:
                 raise ValueError("vuln project requires parent_project_id")
             if not self.parent_snapshot_id:
                 raise ValueError("vuln project requires parent_snapshot_id")
-        accounts = self.accounts or []
         if self.auth_mode != "authenticated" and accounts:
-            raise ValueError("accounts are only supported for authenticated projects")
+            if self.project_kind != "recon":
+                raise ValueError("accounts are only supported for authenticated projects")
         if self.auth_mode == "authenticated" and not accounts:
             raise ValueError("authenticated projects require at least one account")
         return self
@@ -262,6 +274,7 @@ class CreateIntentRequest(BaseModel):
     worker: str | None = None
     intent_kind: IntentKind = "explore"
     finding_id: str | None = None
+    auth_scope: AuthScope | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -393,6 +406,8 @@ class ForkVulnRequest(BaseModel):
     @model_validator(mode="after")
     def validate_accounts(self) -> "ForkVulnRequest":
         accounts = self.accounts or []
+        if self.auth_mode == "dual":
+            raise ValueError("vuln project auth_mode must be anonymous or authenticated")
         if self.auth_mode != "authenticated" and accounts:
             raise ValueError("accounts are only supported for authenticated projects")
         if self.auth_mode == "authenticated" and not accounts:

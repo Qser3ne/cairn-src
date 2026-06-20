@@ -108,7 +108,7 @@ def run_explore_task(
                 ),
                 "intent_id": intent.id,
                 "intent_description": intent.description,
-                "auth_context": format_auth_context(project, account),
+                "auth_context": format_auth_context(project, intent, account),
             },
         )
 
@@ -318,7 +318,7 @@ def _try_conclude_fallback(
             ),
             "intent_id": intent.id,
             "intent_description": intent.description,
-            "auth_context": format_auth_context(project, account),
+            "auth_context": format_auth_context(project, intent, account),
         },
     )
     conclude_argv = driver.build_conclude(worker, prompt, session)
@@ -415,20 +415,20 @@ def _payload_findings(payload: dict) -> list[dict] | None:
     return [finding for finding in findings if isinstance(finding, dict)]
 
 
-def format_auth_context(project: ProjectDetail, account: ProjectAccount | None) -> str:
-    if project.project.auth_mode != "authenticated":
+def format_auth_context(project: ProjectDetail, intent: Intent, account: ProjectAccount | None) -> str:
+    if intent.auth_scope != "authenticated":
         return (
-            "Project auth_mode is anonymous. Explore only the unauthenticated surface. "
+            "Current intent auth_scope is anonymous. Explore only the unauthenticated surface. "
             "Do not log in or use account credentials."
         )
     if account is None:
         return (
-            "Project auth_mode is authenticated, but no account lease was attached. "
+            "Current intent auth_scope is authenticated, but no account lease was attached. "
             "Report that authenticated exploration could not start without credentials."
         )
     profile_dir = f"/home/kali/workspace/auth/{project.project.id}/{account.id}"
     return (
-        "Project auth_mode is authenticated. Use only the leased account below for this task.\n\n"
+        "Current intent auth_scope is authenticated. Use only the leased account below for this task.\n\n"
         f"- account_id: {account.id}\n"
         f"- label: {account.label}\n"
         f"- username: {account.username}\n"

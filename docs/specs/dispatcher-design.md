@@ -197,7 +197,7 @@ Explore writeback:
 - success calls `/intents/{intent_id}/conclude`.
 - parse failure or timeout may run `explore_conclude` fallback when cancellation state allows it.
 - recon conclude increments explore rounds on the server.
-- authenticated explore leases one project account before claim and releases it in `_reap_futures`.
+- explore leases one project account only when `intent.auth_scope == "authenticated"` and releases it in `_reap_futures`.
 
 ### Judge
 
@@ -289,8 +289,8 @@ Project dispatch rules:
 - initial active project dispatches reason directly.
 - there is no bootstrap branch.
 - if authenticated explore wait queue has dispatchable item, dispatch it first.
-- if reason trigger exists and no reason lease is held, dispatch reason.
 - otherwise dispatch newest unclaimed intent.
+- if no unclaimed intent is dispatchable and reason trigger exists with no reason lease held, dispatch reason.
 - `intent_kind="report"` dispatches report; all other intents dispatch explore.
 
 Reason trigger rules:
@@ -314,7 +314,7 @@ Candidates are ordered by priority, then current running count, then the existin
 
 ## Account Pool Scheduling
 
-Authenticated projects use account leases for explore only:
+Authenticated-scope explore intents use account leases:
 
 ```text
 account_leases: project_id -> account_id -> intent_id
@@ -323,8 +323,8 @@ authenticated_wait_queues: project_id -> deque[intent_id]
 
 Rules:
 
-- reason, judge, and report do not lease accounts.
-- authenticated explore requires at least one account.
+- reason, judge, report, and anonymous explore do not lease accounts.
+- authenticated explore requires at least one project account.
 - if no account is free, the intent enters FIFO wait queue and is not claimed.
 - leases are released when futures finish, fail, cancel, or crash.
 - inactive or anonymous projects have queues and leases cleared.

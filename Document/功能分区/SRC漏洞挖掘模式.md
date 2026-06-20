@@ -11,7 +11,7 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 
 ## 用户场景
 
-- 用户创建 recon 项目，输入 title、origin、hints，可选择 `auth_mode=anonymous|authenticated`；项目目的由 `project_kind` 固化，recon 用于信息收集，vuln 用于漏洞挖掘。
+- 用户创建 recon 项目，输入 title、origin、hints 和至少一个账号；recon 固定为 `auth_mode="dual"`，由 intent 级 `auth_scope` 分成未登录和已登录两条信息收集线路。
 - recon 项目通过 reason 规划 recon intents，通过 explore 产出资产、入口、边界和候选攻击面 facts。
 - 用户可触发 Evaluate Recon，系统创建 ephemeral judge job，评估当前 recon 是否足够 fork vuln；judge 只更新 `judge_status` 和 judgement result，不写 facts/intents/findings。
 - Evaluate Recon 的最新结果会在项目 Detail 面板展示 verdict、score、recommended action、checklist、blocking gaps 和 non-blocking gaps，并保留最近历史结果，避免只看到 `judge_status` 而丢失具体判断理由。
@@ -32,17 +32,17 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 
 ## 输入输出
 
-- recon 输入：title、origin、hints、`auth_mode`、可选 accounts、`recon_max_reason_rounds`。
+- recon 输入：title、origin、hints、必填 accounts、`recon_max_reason_rounds`；服务端固定写入 `auth_mode="dual"`。
 - recon 输出：recon facts/intents、round counters、snapshot、judge job/result、children 列表。
 - vuln 输入：父 recon、snapshot、title、`auth_mode`、authenticated 账号。
 - vuln 输出：facts/intents、findings、follow-up intents、report intents、finding reports。
-- export YAML 不再包含 `project.mode` 或 `project.bootstrap_enabled`，改为输出 `project_kind`、`auth_mode`、parent/snapshot、recon budget、finding lifecycle 和 report records。
+- export YAML 不再包含 `project.mode` 或 `project.bootstrap_enabled`，改为输出 `project_kind`、`auth_mode`、parent/snapshot、recon budget、intent `auth_scope`、finding lifecycle 和 report records。
 
 ## 验收方式
 
 - 新建项目默认是 recon。
 - UI 不再出现 Standard、SRC mode 按钮、bootstrap checkbox、Complete/Reopen modal。
-- 可创建 anonymous/authenticated recon；authenticated 无 accounts 返回 422。
+- 创建 recon 不带 accounts 返回 422；创建 recon 显式传 `auth_mode=anonymous|authenticated` 返回 422；创建成功的 recon 返回 `auth_mode="dual"`。
 - 可从 recon 创建 snapshot 并 fork vuln；authenticated vuln 必须提供 accounts。
 - recon 能展示 rounds、judge status、Evaluate Recon、Evaluate result、Stop Recon、Create Vulnerability Project。
 - vuln 能展示 finding lifecycle、follow-up/report 状态。

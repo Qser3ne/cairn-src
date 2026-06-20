@@ -43,7 +43,7 @@ DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
 
 PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
     "mock": {
-        "reason.md": ("{fact_ids}", "{open_intents}", "{max_intents}"),
+        "reason.md": ("{project_kind}", "{fact_ids}", "{open_intents}", "{max_intents}"),
         "explore.md": ("{intent_id}",),
         "explore_conclude.md": ("{intent_id}",),
         "judge.md": (),
@@ -59,6 +59,8 @@ PROMPT_REQUIRED_TOKENS_BY_KIND: dict[str, dict[str, dict[str, tuple[str, ...]]]]
             "report.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
         },
         "recon": {
+            "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
+            "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
             "judge.md": ("{graph_yaml}",),
         }
     }

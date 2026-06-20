@@ -19,6 +19,7 @@ def _create_recon(client: TestClient, **overrides) -> dict:
     body = {
         "title": "recon",
         "origin": "https://target.test",
+        "accounts": [{"label": "alice", "username": "alice@example.test", "password": "secret-1"}],
         "hints": [{"content": "initial clue", "creator": "human"}],
     }
     body.update(overrides)
@@ -40,7 +41,7 @@ def test_create_project_defaults_to_recon_and_forbids_old_fields(client: TestCli
     payload = _create_recon(client)
 
     assert payload["project"]["project_kind"] == "recon"
-    assert payload["project"]["auth_mode"] == "anonymous"
+    assert payload["project"]["auth_mode"] == "dual"
     assert payload["project"]["recon_max_reason_rounds"] == 8
     assert "mode" not in payload["project"]
     assert "bootstrap_enabled" not in payload["project"]
@@ -61,16 +62,26 @@ def test_authenticated_projects_require_accounts_and_persist_account_pool(client
     response = client.post(
         "/projects",
         json={
-            "title": "auth recon",
+            "title": "recon without accounts",
             "origin": "start",
-            "auth_mode": "authenticated",
         },
     )
     assert response.status_code == 422
 
+    for auth_mode in ("anonymous", "authenticated"):
+        response = client.post(
+            "/projects",
+            json={
+                "title": "recon explicit mode",
+                "origin": "start",
+                "auth_mode": auth_mode,
+                "accounts": [{"username": "alice@example.test", "password": "secret-1"}],
+            },
+        )
+        assert response.status_code == 422
+
     payload = _create_recon(
         client,
-        auth_mode="authenticated",
         accounts=[
             {"label": "alice", "username": "alice@example.test", "password": "secret-1"},
             {"username": "bob@example.test", "password": "secret-2"},
@@ -84,8 +95,56 @@ def test_authenticated_projects_require_accounts_and_persist_account_pool(client
     detail = client.get(f"/projects/{project_id}").json()
     assert detail["accounts"][1]["label"] == "account-2"
     exported = client.get(f"/projects/{project_id}/export?format=yaml").text
-    assert "auth_mode: authenticated" in exported
+    assert "auth_mode: dual" in exported
     assert "username: alice@example.test" in exported
+
+
+def test_vuln_authenticated_projects_require_accounts(client: TestClient) -> None:
+    parent = _create_recon(client)["project"]["id"]
+    snapshot = _create_snapshot(client, parent)
+
+    anonymous = client.post(
+        "/projects",
+        json={
+            "title": "vuln anon",
+            "origin": "start",
+            "project_kind": "vuln",
+            "auth_mode": "anonymous",
+            "parent_project_id": parent,
+            "parent_snapshot_id": snapshot["id"],
+        },
+    )
+    assert anonymous.status_code == 201
+    assert anonymous.json()["accounts"] == []
+
+    missing = client.post(
+        "/projects",
+        json={
+            "title": "vuln auth",
+            "origin": "start",
+            "project_kind": "vuln",
+            "auth_mode": "authenticated",
+            "parent_project_id": parent,
+            "parent_snapshot_id": snapshot["id"],
+        },
+    )
+    assert missing.status_code == 422
+
+    authenticated = client.post(
+        "/projects",
+        json={
+            "title": "vuln auth",
+            "origin": "start",
+            "project_kind": "vuln",
+            "auth_mode": "authenticated",
+            "parent_project_id": parent,
+            "parent_snapshot_id": snapshot["id"],
+            "accounts": [{"username": "alice@example.test", "password": "secret-1"}],
+        },
+    )
+    assert authenticated.status_code == 201
+    assert authenticated.json()["project"]["auth_mode"] == "authenticated"
+    assert authenticated.json()["accounts"][0]["id"] == "a001"
 
 
 def test_new_vuln_project_requires_parent_snapshot(client: TestClient) -> None:
@@ -160,7 +219,7 @@ def test_snapshot_fork_children_and_delete_guard(client: TestClient) -> None:
     parent_id = parent["project"]["id"]
     client.post(
         f"/projects/{parent_id}/intents",
-        json={"from": ["origin"], "description": "map upload", "creator": "reasoner", "worker": None},
+        json={"from": ["origin"], "description": "map upload", "creator": "reasoner", "worker": None, "auth_scope": "anonymous"},
     )
     client.post(
         f"/projects/{parent_id}/intents/i001/conclude",
@@ -239,7 +298,7 @@ def test_conclude_finding_lifecycle_creates_followup_and_report_intents(client: 
     project_id = _create_recon(client)["project"]["id"]
     client.post(
         f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "verify idor", "creator": "reasoner", "worker": None},
+        json={"from": ["origin"], "description": "verify idor", "creator": "reasoner", "worker": None, "auth_scope": "authenticated"},
     )
     response = client.post(
         f"/projects/{project_id}/intents/i001/conclude",
@@ -269,6 +328,10 @@ def test_conclude_finding_lifecycle_creates_followup_and_report_intents(client: 
     intent_kinds = {intent["id"]: intent["intent_kind"] for intent in detail["intents"]}
     assert intent_kinds["i002"] == "explore"
     assert intent_kinds["i003"] == "report"
+    intent_scopes = {intent["id"]: intent["auth_scope"] for intent in detail["intents"]}
+    assert intent_scopes["i001"] == "authenticated"
+    assert intent_scopes["i002"] == "authenticated"
+    assert intent_scopes["i003"] is None
 
     report = client.post(
         f"/projects/{project_id}/intents/i003/report",
