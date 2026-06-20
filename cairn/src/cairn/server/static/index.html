@@ -701,6 +701,11 @@
               <div class="flex items-center gap-2">
                 <span class="px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-[10px] font-mono font-bold" x-text="selectedIntentId()"></span>
                 <span class="text-[11px] font-medium" :class="intentStatusClass(selectedIntentRecord())" x-text="intentStatusLabel(selectedIntentRecord())"></span>
+                <template x-if="selectedIntentRecord().auth_scope">
+                  <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.12em]"
+                    :class="intentAuthScopeBadgeClass(selectedIntentRecord().auth_scope)"
+                    x-text="intentAuthScopeLabel(selectedIntentRecord().auth_scope)"></span>
+                </template>
               </div>
             </div>
             <div class="p-4 space-y-4">
@@ -708,6 +713,9 @@
               <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().from.join(', ')"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().to || '—'"></span></div>
+                <template x-if="selectedIntentRecord().auth_scope">
+                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Auth Scope</span><span class="text-slate-600 text-right break-all" x-text="intentAuthScopeLabel(selectedIntentRecord().auth_scope)"></span></div>
+                </template>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().creator"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().worker || '—'"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Heartbeat</span><span class="text-slate-600 text-right break-words" x-text="selectedIntentRecord().last_heartbeat_at ? formatTime(selectedIntentRecord().last_heartbeat_at) : '—'"></span></div>
@@ -894,7 +902,11 @@
         <p x-show="newProject.parent_project_id && !newProjectSnapshotsLoading && newProjectSnapshots.length === 0" class="text-[11px] text-rose-500">Create a recon snapshot before forking a vulnerability project.</p>
       </div>
       <div class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-        <div>
+        <div x-show="newProject.project_kind === 'recon'" class="space-y-1">
+          <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Recon auth model</span>
+          <div class="mt-2 inline-flex rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-indigo-700">Dual</div>
+        </div>
+        <div x-show="newProject.project_kind === 'vuln'">
           <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Auth mode</span>
           <div class="grid grid-cols-2 gap-2 mt-2">
             <button type="button" @click="setNewProjectAuthMode('anonymous')"
@@ -911,7 +923,7 @@
             </button>
           </div>
         </div>
-        <div x-show="newProject.auth_mode === 'authenticated'" class="space-y-2">
+        <div x-show="newProjectNeedsAccounts()" class="space-y-2">
           <div class="flex items-center justify-between">
             <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Accounts</span>
             <button type="button" @click="addNewProjectAccount()" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium">+ Add account</button>
@@ -924,7 +936,7 @@
               <button type="button" @click="removeNewProjectAccount(idx)" :disabled="newProject.accounts.length <= 1" class="h-8 w-8 rounded-lg text-slate-300 hover:text-red-400 hover:bg-white transition disabled:opacity-30">&times;</button>
             </div>
           </template>
-          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500">Authenticated projects require at least one username and password.</p>
+          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500" x-text="newProject.project_kind === 'recon' ? 'Recon projects require at least one username and password.' : 'Authenticated projects require at least one username and password.'"></p>
         </div>
       </div>
 
@@ -964,6 +976,21 @@
     </div>
     <div class="space-y-3">
       <textarea x-model="intentForm.description" placeholder="What will you explore?" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      <div x-show="project?.project?.project_kind === 'recon'" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Auth scope</span>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          <button type="button" @click="intentForm.auth_scope = 'anonymous'"
+            class="rounded-lg border px-3 py-2 text-left transition"
+            :class="intentForm.auth_scope === 'anonymous' ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'">
+            <span class="block text-sm font-medium">Anonymous</span>
+          </button>
+          <button type="button" @click="intentForm.auth_scope = 'authenticated'"
+            class="rounded-lg border px-3 py-2 text-left transition"
+            :class="intentForm.auth_scope === 'authenticated' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'">
+            <span class="block text-sm font-medium">Authenticated</span>
+          </button>
+        </div>
+      </div>
       <div class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
         Actor: <span class="font-medium text-slate-700" x-text="actorName()"></span>
       </div>
@@ -1189,7 +1216,7 @@ function cairnApp() {
     },
     newProjectSnapshots: [],
     newProjectSnapshotsLoading: false,
-    intentForm: { description: '' },
+    intentForm: { description: '', auth_scope: 'anonymous' },
     concludeForm: { description: '', intentId: '', findingsJson: '' },
     hintForm: { content: '' },
     renameForm: { projectId: '', originalTitle: '', title: '' },
@@ -1367,16 +1394,19 @@ function cairnApp() {
     },
 
     projectAuthModeLabel(mode) {
+      if (mode === 'dual') return 'Dual';
       return mode === 'authenticated' ? 'Authenticated' : 'Anonymous';
     },
 
     projectAuthModeBadgeClass(mode) {
+      if (mode === 'dual') return 'bg-indigo-50 text-indigo-700';
       return mode === 'authenticated'
         ? 'bg-emerald-50 text-emerald-700'
         : 'bg-sky-50 text-sky-700';
     },
 
     projectAuthModeCompactBadgeClass(mode) {
+      if (mode === 'dual') return 'bg-indigo-50 text-indigo-700 border border-indigo-100';
       return mode === 'authenticated'
         ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
         : 'bg-sky-50 text-sky-700 border border-sky-100';
@@ -1412,6 +1442,9 @@ function cairnApp() {
         this.newProject.parent_project_id = '';
         this.newProject.parent_snapshot_id = '';
         this.newProjectSnapshots = [];
+        if (this.newProject.accounts.length === 0) {
+          this.newProject.accounts.push(this.blankNewProjectAccount());
+        }
       }
     },
 
@@ -1442,9 +1475,13 @@ function cairnApp() {
     },
 
     newProjectAccountsValid() {
-      if (this.newProject.auth_mode !== 'authenticated') return true;
+      if (!this.newProjectNeedsAccounts()) return true;
       const accounts = this.cleanedNewProjectAccounts();
       return accounts.length > 0 && accounts.every(account => account.username && account.password);
+    },
+
+    newProjectNeedsAccounts() {
+      return this.newProject.project_kind === 'recon' || this.newProject.auth_mode === 'authenticated';
     },
 
     newProjectCanCreate() {
@@ -1506,6 +1543,29 @@ function cairnApp() {
 
     openIntentNodeLabel(intent) {
       return intent.intent_kind === 'report' ? 'R' : '?';
+    },
+
+    intentAuthScopeLabel(scope) {
+      if (scope === 'authenticated') return 'Authenticated';
+      if (scope === 'anonymous') return 'Anonymous';
+      return 'Unscoped';
+    },
+
+    intentAuthScopeShortLabel(scope) {
+      if (scope === 'authenticated') return 'auth';
+      if (scope === 'anonymous') return 'anon';
+      return '';
+    },
+
+    intentAuthScopeBadgeClass(scope) {
+      return scope === 'authenticated'
+        ? 'bg-emerald-50 text-emerald-700'
+        : 'bg-sky-50 text-sky-700';
+    },
+
+    intentGraphLabel(intent) {
+      const scope = this.intentAuthScopeShortLabel(intent.auth_scope);
+      return scope ? `[${scope}] ${intent.description}` : intent.description;
     },
 
     openIntentNodeSize(intent) {
@@ -1979,8 +2039,9 @@ function cairnApp() {
           title: sourceIntent?.description || event.title,
           meta: [
             sourceIntent?.id || event.intentId,
+            sourceIntent?.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null,
             `from ${(sourceIntent?.from || event.sourceFactIds || []).join(', ')}`,
-          ],
+          ].filter(Boolean),
           targetType: 'reason',
           targetId: sourceIntent?.id || event.intentId,
           order: `${event.order}.reason`,
@@ -1996,7 +2057,7 @@ function cairnApp() {
           timestamp: sourceIntent.last_heartbeat_at || sourceIntent.created_at,
           actor: sourceIntent.worker,
           title: sourceIntent.description,
-          meta: [sourceIntent.id, `worker ${sourceIntent.worker}`],
+          meta: [sourceIntent.id, sourceIntent.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null, `worker ${sourceIntent.worker}`].filter(Boolean),
           targetType: 'intent',
           targetId: sourceIntent.id,
           order: `${event.order}.run`,
@@ -2067,6 +2128,7 @@ function cairnApp() {
             last_heartbeat_at: null,
             created_at: sourceIntent.created_at,
             concluded_at: null,
+            auth_scope: sourceIntent.auth_scope || null,
           });
         }
         return;
@@ -2326,10 +2388,10 @@ function cairnApp() {
         }});
       }
       for (const intent of this.project.intents) {
-        const lbl = intent.description;
+        const lbl = this.intentGraphLabel(intent);
         if (intent.to) {
           for (const src of intent.from) {
-            edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: intent.to, intentId: intent.id, label: lbl, status: 'concluded' }});
+            edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: intent.to, intentId: intent.id, label: lbl, authScope: intent.auth_scope || '', status: 'concluded' }});
           }
         } else {
           const phId = `_ph_${intent.id}`;
@@ -2341,11 +2403,12 @@ function cairnApp() {
             description: intent.description,
             nodeType,
             intentId: intent.id,
+            authScope: intent.auth_scope || '',
             width: nodeSize.width,
             height: nodeSize.height,
           }});
           for (const src of intent.from) {
-            edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: phId, intentId: intent.id, label: lbl, status: nodeType }});
+            edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: phId, intentId: intent.id, label: lbl, authScope: intent.auth_scope || '', status: nodeType }});
           }
         }
       }
@@ -3086,7 +3149,7 @@ function cairnApp() {
           timestamp: intent.created_at,
           actor: intent.creator,
           title: intent.description,
-          meta: [intent.id, `from ${intent.from.join(', ')}`],
+          meta: [intent.id, intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `from ${intent.from.join(', ')}`].filter(Boolean),
           targetType: 'intent',
           targetId: intent.id,
           order: order++,
@@ -3104,7 +3167,7 @@ function cairnApp() {
           timestamp: intent.concluded_at,
           actor: intent.worker || intent.creator,
           title: fact ? fact.description : intent.description,
-          meta: [intent.id, `produced ${intent.to}`, `from ${intent.from.join(', ')}`],
+          meta: [intent.id, intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `produced ${intent.to}`, `from ${intent.from.join(', ')}`].filter(Boolean),
           targetType: 'fact',
           targetId: intent.to,
           order: order++,
@@ -3426,17 +3489,18 @@ function cairnApp() {
           title: this.newProject.title.trim(),
           origin: this.newProject.origin.trim(),
           project_kind: this.newProject.project_kind,
-          auth_mode: this.newProject.auth_mode,
         };
         if (this.newProject.project_kind === 'recon') {
           body.recon_max_reason_rounds = Number(this.newProject.recon_max_reason_rounds) || 8;
+          body.accounts = this.cleanedNewProjectAccounts();
         }
         if (this.newProject.project_kind === 'vuln') {
           body.parent_project_id = this.newProject.parent_project_id;
           body.parent_snapshot_id = this.newProject.parent_snapshot_id;
-        }
-        if (body.auth_mode === 'authenticated') {
-          body.accounts = this.cleanedNewProjectAccounts();
+          body.auth_mode = this.newProject.auth_mode;
+          if (body.auth_mode === 'authenticated') {
+            body.accounts = this.cleanedNewProjectAccounts();
+          }
         }
         const hints = hintContents.map(h => ({ content: h.content.trim(), creator: actor }));
         if (hints.length > 0) body.hints = hints;
@@ -3477,19 +3541,23 @@ function cairnApp() {
 
     openCreateIntent() {
       if (!this.canActOnSelectedFacts()) return;
-      this.intentForm = { description:'' };
+      this.intentForm = { description:'', auth_scope:'anonymous' };
       this.showIntentModal = true;
     },
 
     async createIntent(claim = false) {
       try {
         const actor = this.actorName();
-        await this.api('POST', `/projects/${this.selectedProjectId}/intents`, {
+        const body = {
           from: this.selectedFacts,
           description: this.intentForm.description,
           creator: actor,
           worker: claim ? actor : null,
-        });
+        };
+        if (this.project?.project?.project_kind === 'recon') {
+          body.auth_scope = this.intentForm.auth_scope === 'authenticated' ? 'authenticated' : 'anonymous';
+        }
+        await this.api('POST', `/projects/${this.selectedProjectId}/intents`, body);
         this.showIntentModal = false;
         await this.loadProject(this.selectedProjectId);
         this.updateGraph();

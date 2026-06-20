@@ -25,7 +25,7 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert "bootstrap_enabled" not in project_columns
     assert "session_lock_enabled" not in project_columns
     assert {"project_kind", "auth_mode", "parent_project_id", "parent_snapshot_id"} <= project_columns
-    assert {"intent_kind", "finding_id"} <= intent_columns
+    assert {"intent_kind", "finding_id", "auth_scope"} <= intent_columns
     assert "session_lock" not in intent_columns
     assert {"research_value", "next_action", "report_status", "report_intent_id"} <= finding_columns
     assert {"project_accounts", "project_snapshots", "ephemeral_jobs", "finding_reports"} <= tables
@@ -146,11 +146,40 @@ def test_legacy_intent_session_lock_column_is_removed_and_new_columns_added(tmp_
 
     with db.get_conn() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(intents)")}
-        row = conn.execute("SELECT id, description, intent_kind, finding_id FROM intents WHERE id = 'i001'").fetchone()
+        row = conn.execute("SELECT id, description, intent_kind, finding_id, auth_scope FROM intents WHERE id = 'i001'").fetchone()
     assert "session_lock" not in columns
     assert row["description"] == "old work"
     assert row["intent_kind"] == "explore"
     assert row["finding_id"] is None
+    assert row["auth_scope"] == "anonymous"
+
+
+def test_legacy_recon_project_migrates_to_dual_auth_mode(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "legacy-recon.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                project_kind TEXT NOT NULL DEFAULT 'recon',
+                auth_mode TEXT NOT NULL DEFAULT 'anonymous',
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO projects (id, title, project_kind, auth_mode, created_at)
+            VALUES ('proj_001', 'legacy recon', 'recon', 'anonymous', '2026-01-01T00:00:00Z');
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        project = conn.execute("SELECT project_kind, auth_mode FROM projects WHERE id = 'proj_001'").fetchone()
+
+    assert project["project_kind"] == "recon"
+    assert project["auth_mode"] == "dual"
 
 
 def test_legacy_goal_facts_are_removed_on_startup(tmp_path, monkeypatch) -> None:

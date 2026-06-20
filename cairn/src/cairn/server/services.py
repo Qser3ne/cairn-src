@@ -134,14 +134,17 @@ def check_duplicate_intent(
     project_id: str,
     fact_ids: list[str],
     description: str,
+    auth_scope: str | None,
 ) -> None:
     normalized_sources = sorted(fact_ids)
     normalized_description = normalize_intent_description(description)
     rows = conn.execute(
-        "SELECT id, description FROM intents WHERE project_id = ?",
+        "SELECT id, description, auth_scope FROM intents WHERE project_id = ?",
         (project_id,),
     ).fetchall()
     for row in rows:
+        if row["auth_scope"] != auth_scope:
+            continue
         if normalize_intent_description(row["description"]) != normalized_description:
             continue
         sources = conn.execute(
@@ -219,6 +222,7 @@ def intent_to_model(conn: sqlite3.Connection, row: sqlite3.Row, project_id: str)
         concluded_at=row["concluded_at"],
         intent_kind=row["intent_kind"],
         finding_id=row["finding_id"],
+        auth_scope=row["auth_scope"],
     )
 
 

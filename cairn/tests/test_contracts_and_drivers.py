@@ -39,6 +39,33 @@ def test_reason_payload_limits_number_of_intents() -> None:
     assert intents == [{"from": ["f001"], "description": "one"}]
 
 
+def test_recon_reason_payload_requires_auth_scope() -> None:
+    with pytest.raises(ValueError, match="auth_scope is required"):
+        validate_reason_payload(
+            {
+                "accepted": True,
+                "data": {"intents": [{"from": ["origin"], "description": "baseline"}]},
+            },
+            open_intents_empty=True,
+            max_intents=2,
+            require_auth_scope=True,
+        )
+
+
+def test_vuln_reason_payload_allows_missing_auth_scope() -> None:
+    kind, intents = validate_reason_payload(
+        {
+            "accepted": True,
+            "data": {"intents": [{"from": ["f001"], "description": "verify upload"}]},
+        },
+        open_intents_empty=True,
+        max_intents=2,
+    )
+
+    assert kind == "intents"
+    assert intents == [{"from": ["f001"], "description": "verify upload"}]
+
+
 def test_reason_payload_requires_intent_when_none_are_open() -> None:
     with pytest.raises(ValueError, match="intents is required"):
         validate_reason_payload(

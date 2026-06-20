@@ -26,6 +26,12 @@ If rejected:
 {graph_yaml}
 ```
 
+## Auth Context
+
+```
+{auth_context}
+```
+
 ## Current Intent
 
 ```

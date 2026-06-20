@@ -15,7 +15,7 @@
 - Standard/bootstrap 自动完成流已从 dispatcher、prompt、配置和 UI 中移除。
 - `/complete` 和 `/reopen` 路由只保留兼容入口并返回 410。
 - `completed` 是人工归档状态；归档后不可恢复，只能读、导出和改标题。
-- `session_lock_enabled` 和 `session_lock` 不重新引入；账号并发由项目级 `auth_mode` 和 account lease 管理。
+- `session_lock_enabled` 和 `session_lock` 不重新引入；账号并发由 intent 级 `auth_scope` 和 account lease 管理。
 
 ## 当前功能上下文
 
@@ -26,7 +26,9 @@
 - snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` fact，可复制 selected facts。
 - vuln explore 可写 findings；finding lifecycle 可自动创建 follow-up explore intent 或 report intent。
 - report task 写入 `finding_reports` 并更新 finding `report_status="drafted"`。
-- authenticated recon/vuln 必须有 `project_accounts`，账号字段为 `label`、`username`、`password`。
+- recon 固定 `auth_mode="dual"`，新建时必须有 `project_accounts`，reason 首轮必须创建 anonymous/authenticated 两条 baseline intent。
+- vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts`。
+- explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租账号，anonymous explore 不被账号池阻塞。
 
 ## 续接验证
 

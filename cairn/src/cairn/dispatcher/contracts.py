@@ -37,9 +37,14 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
     return False
 
 
-def _validate_reason_intent(intent: Any, index: int) -> None:
+def _validate_reason_intent(intent: Any, index: int, *, require_auth_scope: bool = False) -> None:
     if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
         raise ValueError(f"invalid intent at index {index}")
+    auth_scope = intent.get("auth_scope")
+    if require_auth_scope and auth_scope not in ("anonymous", "authenticated"):
+        raise ValueError(f"auth_scope is required at index {index}")
+    if auth_scope is not None and auth_scope not in ("anonymous", "authenticated"):
+        raise ValueError(f"invalid auth_scope at index {index}")
 
 
 def _looks_like_explore_data(payload: dict[str, Any]) -> bool:
@@ -47,7 +52,10 @@ def _looks_like_explore_data(payload: dict[str, Any]) -> bool:
 
 
 def validate_reason_payload(
-    payload: dict[str, Any], open_intents_empty: bool, max_intents: int,
+    payload: dict[str, Any],
+    open_intents_empty: bool,
+    max_intents: int,
+    require_auth_scope: bool = False,
 ) -> tuple[str, dict[str, Any] | list[dict[str, Any]] | None]:
     accepted, data = _unwrap_wrapped_payload(payload)
     if accepted is False:
@@ -71,7 +79,7 @@ def validate_reason_payload(
         if not isinstance(intents, list):
             raise ValueError("intents must be an array")
         for i, intent in enumerate(intents):
-            _validate_reason_intent(intent, i)
+            _validate_reason_intent(intent, i, require_auth_scope=require_auth_scope)
         if not intents and open_intents_empty and decision not in ("noop", "no_new_high_value"):
             raise ValueError("intents must not be empty when open_intents is empty")
         intents = intents[:max_intents]

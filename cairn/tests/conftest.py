@@ -89,6 +89,7 @@ def make_intent(intent_id: str = "i001") -> Intent:
         creator="reasoner",
         worker="test-worker",
         created_at="2026-01-01T00:00:02Z",
+        auth_scope="anonymous",
     )
 
 
@@ -123,7 +124,7 @@ class FakeContainerManager:
 class FakeClient:
     project: ProjectDetail
     concluded: list[tuple[str, str, str, str]] = field(default_factory=list)
-    created_intents: list[tuple[str, list[str], str, str]] = field(default_factory=list)
+    created_intents: list[tuple[str, list[str], str, str, str | None]] = field(default_factory=list)
     released: list[tuple[str, str, str]] = field(default_factory=list)
     released_reasons: list[tuple[str, str]] = field(default_factory=list)
     recon_reason_rounds: list[tuple[str, bool]] = field(default_factory=list)
@@ -155,8 +156,9 @@ class FakeClient:
         *,
         intent_kind: str = "explore",
         finding_id: str | None = None,
+        auth_scope: str | None = None,
     ) -> ApiResult:
-        self.created_intents.append((project_id, from_ids, description, creator))
+        self.created_intents.append((project_id, from_ids, description, creator, auth_scope))
         return ApiResult(201, {})
 
     def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:

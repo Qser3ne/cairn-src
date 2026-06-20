@@ -25,7 +25,7 @@ id
 title
 status                 # active | stopped | completed
 project_kind           # recon | vuln
-auth_mode              # anonymous | authenticated
+auth_mode              # anonymous | authenticated | dual
 parent_project_id      # only for vuln; legacy migrated vuln may be null
 parent_snapshot_id     # only for vuln; legacy migrated vuln may be null
 created_at
@@ -68,9 +68,10 @@ created_at
 concluded_at
 intent_kind           # explore | report
 finding_id            # required for report intents
+auth_scope            # anonymous | authenticated for explore intents; null for report intents
 ```
 
-Service-side duplicate protection is intentionally narrow: same project, same normalized `description`, and same exact `from` set returns `409`.
+Service-side duplicate protection is intentionally narrow: same project, same normalized `description`, same `auth_scope`, and same exact `from` set returns `409`.
 
 ### Hint
 
@@ -113,6 +114,8 @@ Startup migration order:
 4. Legacy migrated vuln projects may have null parent/snapshot. New vuln projects may not.
 5. Remove old `session_lock_enabled` and `session_lock` columns during table rebuild migrations.
 6. Preserve `project_accounts`.
+7. Migrate legacy recon projects to `auth_mode='dual'`.
+8. Backfill legacy explore intent `auth_scope` from project auth mode, defaulting to `anonymous`.
 
 ## Project APIs
 
@@ -129,10 +132,9 @@ Creates a project. Body:
   "title": "Recon target",
   "origin": "https://target.example",
   "project_kind": "recon",
-  "auth_mode": "anonymous",
   "recon_max_reason_rounds": 8,
   "hints": [{"content": "stay in scope", "creator": "human"}],
-  "accounts": null
+  "accounts": [{"label": "alice", "username": "alice", "password": "secret"}]
 }
 ```
 
@@ -140,12 +142,13 @@ Rules:
 
 - `project_kind` defaults to `recon`.
 - `mode`, `bootstrap_enabled`, and legacy `goal` are forbidden extra fields and return 422.
-- recon projects cannot have parent fields.
+- recon projects cannot have parent fields, cannot explicitly choose `auth_mode`, and are stored as `auth_mode="dual"`.
+- new recon projects require at least one account.
 - new vuln projects require `parent_project_id` and `parent_snapshot_id`.
 - vuln parent must be recon.
 - vuln snapshot must belong to that parent.
-- authenticated projects require at least one account.
-- anonymous projects cannot include accounts.
+- authenticated vuln projects require at least one account.
+- anonymous vuln projects cannot include accounts.
 
 ### GET /projects/{project_id}
 
@@ -350,7 +353,8 @@ Body:
   "creator": "reason-worker",
   "worker": null,
   "intent_kind": "explore",
-  "finding_id": null
+  "finding_id": null,
+  "auth_scope": "anonymous"
 }
 ```
 
@@ -359,7 +363,10 @@ Rules:
 - only `active` projects allow creation.
 - `from` must reference existing facts.
 - `worker` must be null or equal to `creator`.
+- recon explore intents should include `auth_scope`; reason payloads without it are rejected by the dispatcher.
+- vuln explore intents inherit project `auth_mode` when `auth_scope` is omitted; an explicit value must match project `auth_mode`.
 - `intent_kind="report"` requires `finding_id`.
+- report intents ignore `auth_scope` and store null.
 
 ### POST /projects/{project_id}/intents/{intent_id}/heartbeat
 
@@ -445,7 +452,7 @@ YAML includes:
 - facts
 - findings with lifecycle fields
 - accounts
-- intents with `intent_kind` and `finding_id`
+- intents with `intent_kind`, `finding_id`, and `auth_scope`
 - reports
 
 It does not include `project.mode`, `project.bootstrap_enabled`, `session_lock_enabled`, or `session_lock`.

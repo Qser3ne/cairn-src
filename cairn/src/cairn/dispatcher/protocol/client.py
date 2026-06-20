@@ -147,19 +147,19 @@ class CairnClient:
         *,
         intent_kind: str = "explore",
         finding_id: str | None = None,
+        auth_scope: str | None = None,
     ) -> ApiResult:
-        return self._request_json(
-            "POST",
-            f"/projects/{project_id}/intents",
-            json={
-                "from": from_ids,
-                "description": description,
-                "creator": creator,
-                "worker": None,
-                "intent_kind": intent_kind,
-                "finding_id": finding_id,
-            },
-        )
+        body: dict[str, Any] = {
+            "from": from_ids,
+            "description": description,
+            "creator": creator,
+            "worker": None,
+            "intent_kind": intent_kind,
+            "finding_id": finding_id,
+        }
+        if auth_scope is not None:
+            body["auth_scope"] = auth_scope
+        return self._request_json("POST", f"/projects/{project_id}/intents", json=body)
 
     def conclude_report(
         self,

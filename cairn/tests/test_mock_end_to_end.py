@@ -86,18 +86,19 @@ class InProcessClient:
         *,
         intent_kind: str = "explore",
         finding_id: str | None = None,
+        auth_scope: str | None = None,
     ) -> ApiResult:
-        return self._post(
-            f"/projects/{project_id}/intents",
-            {
-                "from": from_ids,
-                "description": description,
-                "creator": creator,
-                "worker": None,
-                "intent_kind": intent_kind,
-                "finding_id": finding_id,
-            },
-        )
+        body = {
+            "from": from_ids,
+            "description": description,
+            "creator": creator,
+            "worker": None,
+            "intent_kind": intent_kind,
+            "finding_id": finding_id,
+        }
+        if auth_scope is not None:
+            body["auth_scope"] = auth_scope
+        return self._post(f"/projects/{project_id}/intents", body)
 
     def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:
         return self._post(f"/projects/{project_id}/recon/reason-round", {"stable": stable})
@@ -251,14 +252,14 @@ def _config(
             "server": "in-process",
             "runtime": {
                 "interval": 1,
-                "max_workers": 1,
+                "max_workers": 2,
                 "max_running_projects": 1,
-                "max_project_workers": 1,
+                "max_project_workers": 2,
                 "healthcheck_timeout": 2,
                 "prompt_group": "mock",
             },
             "tasks": {
-                "reason": {"timeout": 2, "max_intents": 1},
+                "reason": {"timeout": 2, "max_intents": 2},
                 "explore": {"timeout": 2, "conclude_timeout": 2},
                 "judge": {"timeout": 2},
                 "report": {"timeout": 2},
@@ -321,7 +322,11 @@ def _dispatch_and_wait(loop: DispatcherLoop) -> None:
 
 
 def _create_project(http: TestClient, **overrides) -> str:
-    body = {"title": "integration", "origin": "start"}
+    body = {
+        "title": "integration",
+        "origin": "start",
+        "accounts": [{"label": "alice", "username": "alice@example.test", "password": "secret"}],
+    }
     body.update(overrides)
     response = http.post("/projects", json=body)
     assert response.status_code == 201, response.text
@@ -338,15 +343,19 @@ def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client
         _dispatch_and_wait(loop)
         assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(1, 0, 0)
         _dispatch_and_wait(loop)
+        _dispatch_and_wait(loop)
         project = client.get_project(project_id)
     finally:
         loop.close()
 
     assert project.project.status == "active"
     assert project.project.recon_reason_rounds == 1
-    assert project.project.recon_explore_rounds == 1
-    assert [fact.id for fact in project.facts] == ["origin", "f001"]
-    assert [(intent.id, intent.to) for intent in project.intents] == [("i001", "f001")]
+    assert project.project.recon_explore_rounds == 2
+    assert [fact.id for fact in project.facts] == ["origin", "f001", "f002"]
+    assert [(intent.id, intent.auth_scope, intent.to) for intent in project.intents] == [
+        ("i001", "anonymous", "f001"),
+        ("i002", "authenticated", "f002"),
+    ]
     assert any("/reason_execute-" in path for _, path, _ in containers.writes)
     assert any("/explore_execute-" in path for _, path, _ in containers.writes)
 
@@ -355,20 +364,30 @@ def test_mock_scheduler_recon_stable_can_stop_at_reason_limit(http_client: TestC
     client = InProcessClient(http_client)
     containers = LocalContainerManager()
     loop = _loop(
-            _config(reason=_phase("stable", zero_outcomes=["intent"])),
+        _config(
+            reason=_phase(
+                "intent",
+                rules=[
+                    {"fact_ids_gte": 3, "open_intents_empty": True, "force": "stable"},
+                ],
+            )
+        ),
         client,
         containers,
     )
-    project_id = _create_project(http_client, recon_max_reason_rounds=1)
+    project_id = _create_project(http_client, recon_max_reason_rounds=2)
 
     try:
+        _dispatch_and_wait(loop)
+        _dispatch_and_wait(loop)
+        _dispatch_and_wait(loop)
         _dispatch_and_wait(loop)
         project = client.get_project(project_id)
     finally:
         loop.close()
 
     assert project.project.status == "stopped"
-    assert project.project.recon_reason_rounds == 1
+    assert project.project.recon_reason_rounds == 2
     assert project.project.recon_stable_rounds == 1
 
 

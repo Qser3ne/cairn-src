@@ -63,7 +63,7 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker")]
+    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker", None)]
     assert client.recon_reason_rounds == []
     assert client.released_reasons == [("proj_001", "test-worker")]
     assert lease.started and lease.stopped
@@ -109,6 +109,42 @@ def test_recon_reason_stable_records_stable_round(monkeypatch) -> None:
 
     assert outcome == "success"
     assert client.recon_reason_rounds == [("proj_001", True)]
+
+
+def test_initial_recon_reason_requires_dual_baseline_intents(monkeypatch) -> None:
+    config = make_config()
+    project = make_project()
+    project.project.project_kind = "recon"
+    project.facts = project.facts[:1]
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"intents":[{"from":["origin"],"auth_scope":"anonymous","description":"public baseline"}]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "failed"
+    assert client.created_intents == []
 
 
 def test_reason_complete_payload_is_invalid(monkeypatch) -> None:
@@ -289,12 +325,13 @@ def test_reason_startup_only_mode_skips_task_healthcheck(monkeypatch) -> None:
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker")]
+    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker", None)]
 
 
 def test_authenticated_explore_prompt_includes_leased_account(monkeypatch) -> None:
     config = make_config()
     intent = make_intent()
+    intent.auth_scope = "authenticated"
     account = make_account("a001")
     project = make_project(intents=[intent])
     project.project.auth_mode = "authenticated"
@@ -331,7 +368,7 @@ def test_authenticated_explore_prompt_includes_leased_account(monkeypatch) -> No
 
     assert outcome == "success"
     prompt = driver.execute_prompts[0]
-    assert "auth_mode is authenticated" in prompt
+    assert "auth_scope is authenticated" in prompt
     assert "account_id: a001" in prompt
     assert "username: user-a001" in prompt
     assert "password: pass-a001" in prompt
