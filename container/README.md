@@ -1,15 +1,63 @@
-```bash
-KALI_MIRROR=${KALI_MIRROR:-http://kali.download/kali}
+# Cairn SRC Worker Container
 
+本目录用于构筑 Cairn 项目 worker 镜像。该镜像面向 Codex 驱动的授权 SRC 漏洞挖掘：黑盒工具优先，少量白盒和依赖审计工具用于辅助确认线索。
+
+## 构建
+
+```bash
+docker build -t cairn-worker-container:latest ./container
+```
+
+如需固定 `osv-scanner` 版本：
+
+```bash
 docker build \
-  --build-arg KALI_MIRROR="${KALI_MIRROR}" \
+  --build-arg OSV_SCANNER_VERSION=v2.4.0 \
   -t cairn-worker-container:latest \
   ./container
 ```
 
-说明：
+## 镜像内容
 
-- 这是从 `kalilinux/kali-last-release:latest` 开始的本地构筑，不依赖上游预构筑 worker 镜像。
-- Dockerfile 不再安装 `kali-linux-headless`，改为显式安装 SRC worker 常用包列表，避免 Kali headless 元包拉取大量不常用工具。
-- 默认 apt 镜像源为 `http://kali.download/kali`；如果下载不稳定，用 `KALI_MIRROR` 覆盖为更近的 Kali 镜像。
-- 首次构筑仍然需要下载安全工具、Playwright 浏览器和知识库；中途中断后再次执行同一命令，会复用已完成层。
+- 基础镜像：`kalilinux/kali-rolling:latest`，固定 `linux/amd64`。
+- 不安装 Kali headless 元包，改用显式 apt 包列表控制工具范围和镜像体积。
+- 黑盒 SRC 工具包括 `nuclei`、`katana`、`dalfox`、`ffuf`、`feroxbuster`、`gobuster`、`dirsearch`、`nikto`、`sqlmap`、`naabu`、`whatweb`、`wafw00f`、`netexec`、`impacket-*` 等。
+- 白盒和依赖审计工具包括 `semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner`。
+- 保留轻量手工工具和辅助材料：`jwt_tool`、`ysoserial.jar`、`jdwp-shellifier`、`cloudfox`、`kerbrute`、Playwright Chromium。
+- 不再内置大型知识库和 POC 仓库；如任务需要，建议运行时以只读卷挂载。
+
+## 目录约定
+
+- `/home/kali/workspace`：任务过程文件、临时脚本和简短命令记录。
+- `/home/kali/reports`：最终报告、复现步骤草稿和可交付摘要。
+- `/home/kali/evidence`：扫描日志、请求响应摘要、截图、PoC 输出。
+- `/home/kali/targets`：只读挂载的源码、样本、安装包或其他审计材料。
+- `/home/kali/cache`：浏览器、包管理器或工具缓存。
+
+推荐运行时挂载：
+
+```bash
+docker run --rm -it \
+  -v "$PWD/workspace:/home/kali/workspace" \
+  -v "$PWD/reports:/home/kali/reports" \
+  -v "$PWD/evidence:/home/kali/evidence" \
+  -v "$PWD/targets:/home/kali/targets:ro" \
+  cairn-worker-container:latest
+```
+
+## Smoke Test
+
+```bash
+docker run --rm cairn-worker-container:latest bash -lc '
+  codex --version &&
+  nuclei -version &&
+  semgrep --version &&
+  pip-audit --version &&
+  retire --version &&
+  osv-scanner --version &&
+  test -d /home/kali/reports &&
+  test -d /home/kali/evidence &&
+  test -d /home/kali/targets &&
+  test -d /home/kali/cache
+'
+```

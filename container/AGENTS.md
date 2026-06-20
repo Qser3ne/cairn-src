@@ -3,7 +3,11 @@
 ## 环境定位
 
 - 你运行在 Cairn worker 的 Kali 容器中，默认工作目录是 `/home/kali/workspace`。
-- 当前目录可以保存命令日志、枚举结果、截图、PoC 输出和较大的扫描结果。
+- `/home/kali/workspace` 用于保存当前任务过程文件、临时脚本和简短命令记录。
+- `/home/kali/reports` 用于保存最终报告、复现步骤草稿和可交付摘要。
+- `/home/kali/evidence` 用于保存原始请求响应摘要、扫描日志、截图、PoC 输出和其他证据文件。
+- `/home/kali/targets` 用于挂载只读源码、样本、安装包或其他待审计材料。
+- `/home/kali/cache` 用于保存浏览器、包管理器或工具缓存，不应作为证据目录。
 - Cairn 会额外给出任务图、Goal 和 Current Intent。你必须围绕当前任务上下文工作，并把已确认的客观事实作为增量结果返回。
 - 不要把本文件当作最终输出格式说明；最终输出格式以当前任务 prompt 为准，通常要求返回合法 JSON。
 
@@ -26,14 +30,17 @@
 
 ## 工具使用
 
-- 容器内已预装常见安全工具，可直接尝试，例如 `nuclei`、`ffuf`、`dirsearch`、`katana`、`dalfox`、`naabu`、`nikto`、`netexec`、`impacket-*`、`proxychains`、`chisel-common-binaries`。
-- 常用本地资源：
+- 容器内已预装常见黑盒 SRC 工具，可直接尝试，例如 `nuclei`、`ffuf`、`feroxbuster`、`gobuster`、`dirsearch`、`katana`、`dalfox`、`naabu`、`nikto`、`sqlmap`、`whatweb`、`wafw00f`、`netexec`、`impacket-*`、`proxychains4`、`chisel-common-binaries`。
+- 容器内也预装少量白盒和依赖审计工具，例如 `semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner`。这些工具用于辅助发现线索；白盒或依赖审计结果必须能落到真实外部入口、实际部署场景和可复现攻击链，不能单独作为 SRC finding。
+- 常用本地资源和目录：
   - `/home/kali/.local/nuclei-templates`
   - `/home/kali/tools`
-  - `/home/kali/knowledges`
+  - `/home/kali/targets`
+  - `/home/kali/evidence`
+  - `/home/kali/reports`
   - `/usr/share/chisel-common-binaries`
 - 如果任务需要额外工具，可以自行安装。安装前先判断是否已有等价工具，避免浪费时间和污染环境。
-- 必要时可以使用 Playwright 无头浏览器；先用 `playwright-cli --help` 确认用法，非必要不要启动浏览器。
+- 必要时可以使用 Playwright 无头浏览器；先用 `playwright --help` 确认用法，非必要不要启动浏览器。
 - 需要持续运行或供后续阶段复用的命令，放入 `tmux` 会话；最终结论中必须说明会话名、用途和关键监听端口。
 
 ## 公网 OOB 与反连资源
@@ -120,5 +127,6 @@
 - 结论必须区分已确认事实、失败验证、推断和待确认事项。
 - 漏洞证据应包含目标、入口、请求/响应摘要、影响说明、复现步骤和修复建议；普通扫描信息不要伪装成漏洞。
 - 不要在最终输出中包含大段日志、完整数据库内容、完整 Cookie、完整 Token 或大批量个人信息。
-- 如果需要保留命令输出，保存到 `/home/kali/workspace` 下的清晰路径，并在结论里引用。
+- 扫描原始日志、截图、PoC 输出和请求响应摘要保存到 `/home/kali/evidence` 下的清晰路径；最终报告草稿保存到 `/home/kali/reports`。
+- 最终结论只摘关键证据，并引用 `/home/kali/evidence` 或 `/home/kali/reports` 中的文件路径。
 - 如果使用了 `tmux`、公网 OOB 服务、监听端口或后台进程，最终必须说明当前状态和清理建议。

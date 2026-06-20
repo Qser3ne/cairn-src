@@ -13,9 +13,11 @@
 - `ContainerManager.create_startup_container()` 创建启动健康检查容器时也传入同一配置。
 - 默认启用 init reaper 是为了让 worker 容器内 PID 1 回收 Playwright/Chrome 等子进程，避免长期运行时累积 zombie 进程。
 - 如遇到不支持 Docker init 的特殊环境，可以在调度配置中设置 `container.init: false` 临时关闭。
-- Worker 镜像通过 `container/Dockerfile` 从 `kalilinux/kali-last-release:latest` 本地构筑，而不是复用预构筑 worker 基镜像。
-- Worker 镜像不再安装 `kali-linux-headless`；基础系统、SRC 常用工具和 Playwright Chromium 运行库由 Dockerfile 显式 apt 包列表控制。
-- Worker 镜像构筑支持 `KALI_MIRROR` build arg，用于切换 Kali apt 镜像源；默认入口在项目根 `start.sh` 中。
+- Worker 镜像通过 `container/Dockerfile` 从 `kalilinux/kali-rolling:latest` 本地构筑，而不是复用预构筑 worker 基镜像。
+- Worker 镜像不再安装 `kali-linux-headless`；基础系统、黑盒 SRC 常用工具、少量白盒/依赖审计工具和 Playwright Chromium 运行库由 Dockerfile 显式包列表控制。
+- Worker 镜像不再内置大型知识库和重型 POC 仓库；如任务需要，应通过运行时只读挂载提供源码、样本或外部资料。
+- Worker 镜像固定创建 `/home/kali/workspace`、`/home/kali/reports`、`/home/kali/evidence`、`/home/kali/targets`、`/home/kali/cache`，并统一归属 `kali:kali`。
+- Worker 镜像构筑支持 `OSV_SCANNER_VERSION` build arg，用于固定 `osv-scanner` 版本；默认入口在项目根 `start.sh` 中。
 - `start.sh` 当前对 worker 镜像使用 `--pull --progress=plain` 重建，优先获取最新基镜像并输出完整构筑日志。
 - Worker 构筑默认保留 Docker 层缓存；如需完全重建，可在手动构筑时额外追加 `--no-cache`。
 - Dockerfile 中的 apt 层保留 BuildKit cache mount 和 apt 网络重试配置，用于降低中途失败后的重复下载成本。
@@ -31,14 +33,14 @@
 
 - 项目目录有 `uv` 时运行：`uv run pytest cairn/tests/test_runtime_logic.py cairn/tests/test_config_and_adapters.py`
 - 当前环境若缺少 `uv`，可在临时虚拟环境中安装本地包后从 `cairn/` 目录运行：`pytest -s tests/test_runtime_logic.py tests/test_config_and_adapters.py`
-- Worker 镜像构筑可用以下命令验证 `KALI_MIRROR` 是否进入构筑上下文：
+- Worker 镜像构筑可用以下命令验证 `OSV_SCANNER_VERSION` 是否进入构筑上下文：
 
   ```bash
   docker build \
-    --build-arg KALI_MIRROR="${KALI_MIRROR:-http://kali.download/kali}" \
+    --build-arg OSV_SCANNER_VERSION="${OSV_SCANNER_VERSION:-v2.4.0}" \
     -f- /tmp <<'EOF'
-  FROM kalilinux/kali-last-release:latest
-  ARG KALI_MIRROR
-  RUN printf 'KALI_MIRROR=%s\n' "$KALI_MIRROR"
+  FROM kalilinux/kali-rolling:latest
+  ARG OSV_SCANNER_VERSION
+  RUN printf 'OSV_SCANNER_VERSION=%s\n' "$OSV_SCANNER_VERSION"
   EOF
   ```
