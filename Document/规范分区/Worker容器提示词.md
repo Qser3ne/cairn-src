@@ -37,4 +37,5 @@
 - `container/Dockerfile` 应提供 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`，并预置 `/home/kali/.gf` 常用 patterns。
 - 全量构筑命令应支持 `OSV_SCANNER_VERSION` 构筑参数，用于固定 `osv-scanner` 版本。
 - 修改 `cairn/src/cairn/dispatcher/prompts/default/*/*.md` 时，需要确认 `{...}` 模板变量在修改前后保持一致，且所有 `json` 代码块仍能被解析为合法 JSON。
-- 这是提示词和文档变更，不需要运行 Python 单元测试。
+- `cairn/tests/test_prompt_contracts.py` 覆盖默认 recon prompt 契约：`validate_prompt_resources("default")` 不得失败，`reason.md` 必须保留 `auth_scope`、`anonymous`、`authenticated` 和禁止 `complete` 输出说明，`explore.md` 必须禁止 `findings` 字段，`judge.md` 必须声明 ephemeral judgement 且不得写入 facts、intents、findings、reports。
+- 单纯修改提示词和文档时，可优先做模板变量与 JSON 契约检查；修改 prompt contract 测试时运行 `pytest tests/test_prompt_contracts.py` 和相关 dispatcher 测试。
