@@ -187,9 +187,9 @@ Main dispatcher configuration lives in `dispatch.yaml`.
 See:
 
 - [`dispatch.example.yaml`](./dispatch.example.yaml)
-- [`docs/specs/recon-workflow.md`](./docs/specs/recon-workflow.md)
-- [`docs/specs/dispatcher-design.md`](./docs/specs/dispatcher-design.md)
-- [`docs/specs/server-protocol.md`](./docs/specs/server-protocol.md)
+- [`Document/规范分区/Recon工作流架构.md`](./Document/规范分区/Recon工作流架构.md)
+- [`Document/规范分区/Dispatcher调度设计.md`](./Document/规范分区/Dispatcher调度设计.md)
+- [`Document/规范分区/Server协议规范.md`](./Document/规范分区/Server协议规范.md)
 - [`container/README.md`](./container/README.md)
 
 ## Tests
