@@ -15,9 +15,12 @@ class RunningTask:
     cancellation: TaskCancellation
     intent_id: str | None = None
     account: ProjectAccount | None = None
-    fact_count: int | None = None
-    hint_count: int | None = None
-    open_intent_count: int | None = None
+    reason_trigger: str | None = None
+    # Reason tasks keep submit-time counts only as a fallback. The durable
+    # checkpoint should describe the graph baseline after a successful task.
+    reason_start_fact_count: int | None = None
+    reason_start_hint_count: int | None = None
+    reason_start_open_intent_count: int | None = None
 
 
 @dataclass(slots=True)

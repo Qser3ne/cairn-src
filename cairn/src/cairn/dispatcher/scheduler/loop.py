@@ -413,9 +413,10 @@ class DispatcherLoop:
             worker_name=worker.name,
             cancellation=cancellation,
             intent_id=None,
-            fact_count=len(project.facts),
-            hint_count=len(project.hints),
-            open_intent_count=self._project_open_intent_count(project),
+            reason_trigger=trigger,
+            reason_start_fact_count=len(project.facts),
+            reason_start_hint_count=len(project.hints),
+            reason_start_open_intent_count=self._project_open_intent_count(project),
         )
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
@@ -853,6 +854,8 @@ class DispatcherLoop:
         return fact_ids == {"origin"} and len(project.facts) == 1 and not project.intents
 
     def _reason_trigger(self, project: ProjectDetail) -> str | None:
+        # Reason checkpoint is the last successful reason baseline. Trigger on
+        # new facts, new hints, or the transition from some open intents to none.
         open_intent_count = self._project_open_intent_count(project)
         checkpoint = self.reason_checkpoints.get(project.project.id)
         if checkpoint is None:
@@ -924,23 +927,52 @@ class DispatcherLoop:
                 else:
                     self.worker_rejected_until.pop(rejection_key, None)
                 if outcome == "success" and task.task_type == "reason":
-                    assert task.fact_count is not None
-                    assert task.hint_count is not None
-                    assert task.open_intent_count is not None
-                    self.reason_checkpoints[task.project_id] = ReasonCheckpoint(
-                        fact_count=task.fact_count,
-                        hint_count=task.hint_count,
-                        open_intent_count=task.open_intent_count,
-                    )
-                    LOG.debug(
-                        "reason checkpoint updated project=%s facts=%s hints=%s open_intents=%s",
-                        task.project_id,
-                        task.fact_count,
-                        task.hint_count,
-                        task.open_intent_count,
-                    )
+                    self._update_reason_checkpoint_after_success(task)
             except Exception:
                 LOG.exception("task crashed project=%s task=%s worker=%s", task.project_id, task.task_type, task.worker_name)
+
+    def _update_reason_checkpoint_after_success(self, task: RunningTask) -> None:
+        try:
+            project = self.client.get_project(task.project_id)
+        except requests.RequestException as exc:
+            checkpoint = self._reason_start_checkpoint(task)
+            self.reason_checkpoints[task.project_id] = checkpoint
+            LOG.warning(
+                "reason checkpoint refresh failed project=%s worker=%s trigger=%s error=%s fallback_facts=%s fallback_hints=%s fallback_open_intents=%s",
+                task.project_id,
+                task.worker_name,
+                task.reason_trigger,
+                exc,
+                checkpoint.fact_count,
+                checkpoint.hint_count,
+                checkpoint.open_intent_count,
+            )
+            return
+        checkpoint = ReasonCheckpoint(
+            fact_count=len(project.facts),
+            hint_count=len(project.hints),
+            open_intent_count=self._project_open_intent_count(project),
+        )
+        self.reason_checkpoints[task.project_id] = checkpoint
+        LOG.debug(
+            "reason checkpoint updated project=%s worker=%s trigger=%s facts=%s hints=%s open_intents=%s source=latest",
+            task.project_id,
+            task.worker_name,
+            task.reason_trigger,
+            checkpoint.fact_count,
+            checkpoint.hint_count,
+            checkpoint.open_intent_count,
+        )
+
+    def _reason_start_checkpoint(self, task: RunningTask) -> ReasonCheckpoint:
+        assert task.reason_start_fact_count is not None
+        assert task.reason_start_hint_count is not None
+        assert task.reason_start_open_intent_count is not None
+        return ReasonCheckpoint(
+            fact_count=task.reason_start_fact_count,
+            hint_count=task.reason_start_hint_count,
+            open_intent_count=task.reason_start_open_intent_count,
+        )
 
     def _cleanup_completed_containers(self, summaries: list[ProjectSummary]) -> None:
         for summary in summaries:

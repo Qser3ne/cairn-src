@@ -4,6 +4,8 @@ import logging
 from collections import deque
 from concurrent.futures import Future
 
+import requests
+
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
@@ -120,6 +122,74 @@ def test_reason_trigger_detects_new_facts_and_open_intent_completion() -> None:
     project.intents = []
 
     assert loop._reason_trigger(project) == "facts:2->3,open_intents:1->0"
+
+
+def test_reason_success_checkpoint_uses_latest_project_detail() -> None:
+    loop = _loop()
+    started_project = make_project(intents=[make_intent()])
+    latest_project = make_project(intents=[])
+    latest_project.facts.append(Fact(id="f002", description="created while reason ran"))
+    latest_project.hints.append(latest_project.hints[0].model_copy(update={"id": "h002"}))
+    done: Future[str] = Future()
+    done.set_result("success")
+    loop.futures = {
+        done: RunningTask(
+            "proj_001",
+            "reason",
+            "worker",
+            TaskCancellation(),
+            reason_trigger="facts:1->2",
+            reason_start_fact_count=len(started_project.facts),
+            reason_start_hint_count=len(started_project.hints),
+            reason_start_open_intent_count=1,
+        )
+    }
+    loop.client = type("Client", (), {"get_project": lambda _self, _project_id: latest_project})()
+
+    loop._reap_futures()
+
+    assert loop.reason_checkpoints["proj_001"] == ReasonCheckpoint(
+        fact_count=3,
+        hint_count=2,
+        open_intent_count=0,
+    )
+
+
+def test_reason_success_checkpoint_falls_back_to_start_counts_when_refresh_fails(caplog) -> None:
+    loop = _loop()
+    done: Future[str] = Future()
+    done.set_result("success")
+    loop.futures = {
+        done: RunningTask(
+            "proj_001",
+            "reason",
+            "worker",
+            TaskCancellation(),
+            reason_trigger="open_intents:1->0",
+            reason_start_fact_count=2,
+            reason_start_hint_count=1,
+            reason_start_open_intent_count=1,
+        )
+    }
+
+    class Client:
+        def get_project(self, _project_id: str):
+            raise requests.ConnectionError("offline")
+
+    loop.client = Client()
+
+    with caplog.at_level(logging.WARNING, logger="cairn.dispatcher.scheduler.loop"):
+        loop._reap_futures()
+
+    assert loop.reason_checkpoints["proj_001"] == ReasonCheckpoint(
+        fact_count=2,
+        hint_count=1,
+        open_intent_count=1,
+    )
+    assert any(
+        "reason checkpoint refresh failed project=proj_001 worker=worker trigger=open_intents:1->0" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_refresh_runtime_projects_discards_active_and_changed_cleanup_markers() -> None:

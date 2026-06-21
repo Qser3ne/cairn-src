@@ -341,7 +341,11 @@ def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client
 
     try:
         _dispatch_and_wait(loop)
-        assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(1, 0, 0)
+        assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(
+            fact_count=1,
+            hint_count=0,
+            open_intent_count=2,
+        )
         _dispatch_and_wait(loop)
         _dispatch_and_wait(loop)
         project = client.get_project(project_id)

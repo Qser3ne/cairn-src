@@ -144,6 +144,7 @@ Reason 写回规则：
 - Recon `no_new_high_value`：记录 reason round，`stable=true`。
 - Vuln reason 不影响 recon counters。
 - Reason 任务结束时尽量释放 project reason lease。
+- Dispatcher 的本地 reason checkpoint 表示“上一次 reason 成功后的 graph baseline”，用于判断后续是否需要重新触发 reason；`RunningTask` 只保存 reason 启动时的 facts/hints/open intents 计数作为刷新失败 fallback。Reason 成功后 dispatcher 会重新读取 project detail 更新 checkpoint；如果读取失败，则回退到启动快照并记录 warning，不把任务改成失败。触发规则保持：facts 增加、hints 增加、或 open intent count 从非零变为零。
 
 ### Explore
 
