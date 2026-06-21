@@ -1,16 +1,16 @@
-# Task
+# 任务
 
-Evaluate whether the recon graph is ready to fork into vulnerability mining. This judgement is ephemeral: do not create facts, intents, findings, or reports.
+评估 recon 图是否已经可以 fork 为漏洞挖掘项目。该判断是临时性的：不要创建 facts、intents、findings 或 reports。
 
-Return only one raw JSON object.
+只返回一个原始 JSON 对象。
 
 ```json
 {"accepted": true, "data": {"verdict": "ready", "score": 86, "recommended_action": "create_vuln_project", "checklist": {}, "blocking_gaps": [], "non_blocking_gaps": []}}
 ```
 
-Valid verdicts are `ready`, `not_ready`, and `blocked`.
+有效的 verdict 值为 `ready`、`not_ready` 和 `blocked`。
 
-## Graph
+## 图结构
 
 ```
 {graph_yaml}

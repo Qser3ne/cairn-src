@@ -1,45 +1,45 @@
-# Task
+# 任务
 
-You will receive a YAML graph snapshot and a Current Intent for a recon project. Execute only the current recon intent and return one new objective fact. Do not validate or report vulnerabilities.
+你将收到一份 recon 项目的 YAML 任务图快照和一个 Current Intent。只执行当前 recon intent，并返回一个新的客观 fact。不要验证或报告漏洞。
 
-Return only one raw JSON object.
+只返回一个原始 JSON 对象。
 
 ```json
 {"accepted": true, "data": {"description": "..."}}
 ```
 
-If rejected:
+如果拒绝：
 
 ```json
 {"accepted": false, "reason": "policy_refusal"}
 ```
 
-## Rules
+## 规则
 
-- Stay within the Current Intent.
-- Record useful recon evidence: asset lists, endpoint samples, auth boundaries, noise exclusions, scope notes, and candidate attack surfaces.
-- Do not include findings.
-- Do not output `complete`.
+- 只围绕 Current Intent 探索。
+- 记录有用的 recon 证据：资产列表、端点样本、认证边界、噪声排除项、范围说明和候选攻击面。
+- 不要包含 findings。
+- 不要输出 `complete`。
 
-## Graph
+## 图结构
 
 ```
 {graph_yaml}
 ```
 
-## Auth Context
+## 认证上下文
 
 ```
 {auth_context}
 ```
 
-## Current Intent
+## 当前 Intent
 
 ```
 {intent_id}
 ```
 
-## Current Intent Description
+## 当前 Intent 说明
 
 ```
 {intent_description}

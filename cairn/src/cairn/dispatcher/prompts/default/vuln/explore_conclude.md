@@ -26,7 +26,7 @@
 
 ## 规则
 
-- 只总结 Current Intent 相关的最新增量事实。
+- 只总结当前 Intent 相关的最新增量事实。
 - 不得复述图快照中已有 facts 或 findings。
 - 如果当前结果和已有 finding 重复，不要附带重复 finding，只在 description 中说明重复覆盖关系。
 - findings 仅用于已验证、可提交 SRC 的漏洞结果。

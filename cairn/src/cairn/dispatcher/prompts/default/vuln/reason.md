@@ -33,7 +33,7 @@
   - `anonymous` 只规划未登录状态可达的攻击面，不要创建需要账号登录的 intent。
   - `authenticated` 只规划登录状态下的攻击面，可围绕账号态、越权、认证后接口和用户数据边界创建 intent。
 - 创建任何 intent 前，必须基于图快照完成覆盖分析：
-  - Open Intents 正在探索哪些目标、入口、漏洞类型和验证方式。
+  - 待处理 Intents 正在探索哪些目标、入口、漏洞类型和验证方式。
   - Concluded Intents 已经探索过哪些方向，结论是否有效或无效。
   - Facts 和 findings 已经覆盖哪些漏洞结果、攻击面和证据。
   - 新 intent 是否和已有 intent/finding 在目标、入口、漏洞假设、验证方式上重复。
@@ -43,23 +43,23 @@
 - 如果没有明显的新方向，返回 decision=noop 且 intents=[]；不要为了推进而硬造宽泛 intent。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。
 - 每个 intent 的 description 必须包含清晰的去重语义：目标或入口、漏洞假设、验证重点。避免“继续测试”“深入挖掘”等泛泛描述。
-- `data.intents[*].from` 必须来自 `Valid facts`。
+- `data.intents[*].from` 必须来自有效 facts。
 
 ## 上下文
 
-### Graph
+### 图结构
 
 ```
 {graph_yaml}
 ```
 
-### Valid facts
+### 有效 facts
 
 ```
 {fact_ids}
 ```
 
-### Open Intents
+### 待处理 Intents
 
 ```
 {open_intents}

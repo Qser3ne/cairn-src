@@ -1,32 +1,32 @@
-# Task
+# 任务
 
-Draft an SRC submission report for the Current Report Intent. Use the graph snapshot and the referenced finding context. Return a concise Markdown report and optional structured metadata.
+为 Current Report Intent 起草一份 SRC 提交报告。使用图快照和被引用的 finding 上下文，返回一份简洁的 Markdown 报告和可选的结构化 metadata。
 
-Return only one raw JSON object.
+只返回一个原始 JSON 对象。
 
 ```json
 {"accepted": true, "data": {"report_markdown": "# Title\n\n...", "report_json": {}}}
 ```
 
-If rejected:
+如果拒绝：
 
 ```json
 {"accepted": false, "reason": "policy_refusal"}
 ```
 
-## Graph
+## 图结构
 
 ```
 {graph_yaml}
 ```
 
-## Current Intent
+## 当前 Intent
 
 ```
 {intent_id}
 ```
 
-## Current Intent Description
+## 当前 Intent 说明
 
 ```
 {intent_description}

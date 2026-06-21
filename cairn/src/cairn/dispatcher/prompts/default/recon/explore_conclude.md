@@ -1,44 +1,44 @@
-# Task
+# 任务
 
-You are in conclude fallback for a recon project. Stop exploring and summarize only the confirmed incremental recon result for the Current Intent.
+你现在处于 recon 项目的 conclude fallback 阶段。停止探索，只总结 Current Intent 已确认的增量 recon 结果。
 
-Return only one raw JSON object.
+只返回一个原始 JSON 对象。
 
 ```json
 {"accepted": true, "data": {"description": "..."}}
 ```
 
-If rejected:
+如果拒绝：
 
 ```json
 {"accepted": false, "reason": "policy_refusal"}
 ```
 
-## Rules
+## 规则
 
-- Do not include findings.
-- Do not output `complete`.
-- Do not invent unverified assets or endpoints.
+- 不要包含 findings。
+- 不要输出 `complete`。
+- 不要编造未验证的资产或端点。
 
-## Graph
+## 图结构
 
 ```
 {graph_yaml}
 ```
 
-## Auth Context
+## 认证上下文
 
 ```
 {auth_context}
 ```
 
-## Current Intent
+## 当前 Intent
 
 ```
 {intent_id}
 ```
 
-## Current Intent Description
+## 当前 Intent 说明
 
 ```
 {intent_description}

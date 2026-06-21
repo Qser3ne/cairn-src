@@ -5,6 +5,7 @@
 - `container/AGENTS.md` 是 Cairn worker 容器内代理的通用运行指令。
 - `container/Dockerfile` 会把该文件复制为 `/home/kali/workspace/AGENTS.md` 和 `/home/kali/workspace/CLAUDE.md`，分别供 Codex/Claude 类 worker 读取。
 - 任务级 JSON 输出契约仍由 `cairn/src/cairn/dispatcher/prompts/default/*/*.md` 控制，`container/AGENTS.md` 只提供环境、工具、安全边界、OOB 和授权凭据使用规则。
+- 默认任务提示词的自然语言说明已本地化为中文；JSON 字段名、枚举值、模板变量和 fenced code 结构仍保持英文/原样，避免破坏 dispatcher 解析。
 
 ## 当前状态
 
@@ -35,4 +36,5 @@
 - `container/Dockerfile` 应创建 `/home/kali/workspace`、`/home/kali/reports`、`/home/kali/evidence`、`/home/kali/targets`、`/home/kali/cache`，并归属 `kali:kali`。
 - `container/Dockerfile` 应提供 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`，并预置 `/home/kali/.gf` 常用 patterns。
 - 全量构筑命令应支持 `OSV_SCANNER_VERSION` 构筑参数，用于固定 `osv-scanner` 版本。
+- 修改 `cairn/src/cairn/dispatcher/prompts/default/*/*.md` 时，需要确认 `{...}` 模板变量在修改前后保持一致，且所有 `json` 代码块仍能被解析为合法 JSON。
 - 这是提示词和文档变更，不需要运行 Python 单元测试。
