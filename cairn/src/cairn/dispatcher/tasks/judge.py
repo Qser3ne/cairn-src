@@ -24,6 +24,18 @@ from cairn.server.models import EphemeralJob
 LOG = logging.getLogger(__name__)
 
 
+def _fail_cancelled_job(client: CairnClient, job: EphemeralJob, worker: WorkerConfig, reason: str) -> None:
+    response = client.fail_ephemeral_job(job.id, worker.name, f"judge cancelled: {reason}")
+    if not response.ok and response.status_code != 409:
+        LOG.warning(
+            "judge cancel fail update failed job=%s worker=%s status=%s body=%s",
+            job.id,
+            worker.name,
+            response.status_code,
+            response.text,
+        )
+
+
 def run_judge_task(
     config: DispatchConfig,
     client: CairnClient,
@@ -52,6 +64,7 @@ def run_judge_task(
             )
             cancelled = cancel_reason(healthcheck.result, cancellation)
             if cancelled is not None:
+                _fail_cancelled_job(client, job, worker, cancelled)
                 return "cancelled"
             if healthcheck.result.returncode != 0:
                 client.fail_ephemeral_job(job.id, worker.name, "worker healthcheck failed")
@@ -79,7 +92,9 @@ def run_judge_task(
             timeout_seconds=config.tasks.judge.timeout,
             cancellation=cancellation,
         )
-        if cancel_reason(result, cancellation) is not None:
+        cancelled = cancel_reason(result, cancellation)
+        if cancelled is not None:
+            _fail_cancelled_job(client, job, worker, cancelled)
             return "cancelled"
         if did_timeout(result) or result.returncode != 0:
             client.fail_ephemeral_job(job.id, worker.name, preview(result.stderr or result.stdout))

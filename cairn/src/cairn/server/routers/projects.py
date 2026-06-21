@@ -620,10 +620,10 @@ def finish_ephemeral_job(job_id: str, body: EphemeralJobFinishRequest):
 def fail_ephemeral_job(job_id: str, body: EphemeralJobFailRequest):
     with get_conn() as conn:
         row = get_ephemeral_job_or_404(conn, job_id)
-        if row["status"] != "running" or row["worker"] != body.worker:
+        if row["status"] not in ("queued", "running") or (row["worker"] is not None and row["worker"] != body.worker):
             raise HTTPException(409, "Ephemeral job is not claimed by this worker")
         conn.execute(
-            "UPDATE ephemeral_jobs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?",
-            (body.error, utcnow(), job_id),
+            "UPDATE ephemeral_jobs SET status = 'failed', worker = ?, error = ?, finished_at = ? WHERE id = ?",
+            (body.worker, body.error, utcnow(), job_id),
         )
         return ephemeral_job_to_model(get_ephemeral_job_or_404(conn, job_id))

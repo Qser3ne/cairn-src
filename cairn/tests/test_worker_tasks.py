@@ -429,6 +429,36 @@ def test_judge_task_finishes_ephemeral_job_without_graph_writes(monkeypatch) -> 
     assert containers.writes[0][1].startswith("/tmp/cairn-prompts/judge_execute-")
 
 
+def test_judge_task_marks_cancelled_ephemeral_job_failed(monkeypatch) -> None:
+    config = make_config()
+    client = FakeEphemeralClient()
+    containers = FakeContainerManager()
+    job = EphemeralJob(
+        id="job_001",
+        project_id="proj_001",
+        job_type="judge",
+        status="queued",
+        input_snapshot_yaml="project:\n  project_kind: recon\n",
+        created_at="2026-01-01T00:00:00Z",
+        expires_at="2026-01-02T00:00:00Z",
+    )
+
+    monkeypatch.setattr(judge, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(judge, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        judge,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(1, "", "", cancelled=True, cancel_reason="stopped"),
+    )
+
+    outcome = judge.run_judge_task(config, client, containers, job, config.workers[0], TaskCancellation())
+
+    assert outcome == "cancelled"
+    assert client.claimed == [("job_001", "test-worker")]
+    assert client.failed == [("job_001", "test-worker", "judge cancelled: stopped")]
+    assert client.finished == []
+
+
 def test_report_task_writes_report_artifact(monkeypatch) -> None:
     config = make_config()
     intent = make_intent()

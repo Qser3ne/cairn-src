@@ -267,6 +267,26 @@ def test_recon_judgement_job_lifecycle_updates_project_judge_status(client: Test
     ]
 
 
+def test_recon_judgement_fail_marks_running_job_failed(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    response = client.post(f"/projects/{project_id}/recon/judgements")
+    assert response.status_code == 201
+    job_id = response.json()["job_id"]
+    assert client.post(f"/ephemeral-jobs/{job_id}/claim", json={"worker": "judge"}).status_code == 200
+
+    failed = client.post(
+        f"/ephemeral-jobs/{job_id}/fail",
+        json={"worker": "judge", "error": "judge cancelled: stopped"},
+    )
+
+    assert failed.status_code == 200, failed.text
+    payload = failed.json()
+    assert payload["status"] == "failed"
+    assert payload["error"] == "judge cancelled: stopped"
+    assert payload["finished_at"] is not None
+    assert client.get(f"/projects/{project_id}").json()["project"]["judge_status"] == "not_judged"
+
+
 def test_recon_judgement_results_are_listed_without_snapshot_payload(client: TestClient) -> None:
     project_id = _create_recon(client)["project"]["id"]
     other_project_id = _create_recon(client, title="other")["project"]["id"]
