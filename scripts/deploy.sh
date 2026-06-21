@@ -98,7 +98,7 @@ git -C "$DEV_DIR" fetch origin
 
 if ((RUN_TESTS)); then
   log "running dev test suite"
-  (cd "$DEV_DIR" && uv run --project cairn --group dev pytest)
+  (cd "$DEV_DIR/cairn" && uv run --group dev pytest -s)
 else
   log "skipping dev test suite"
 fi

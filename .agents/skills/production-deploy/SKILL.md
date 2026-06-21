@@ -20,7 +20,7 @@ description: Use when the user explicitly invokes $production-deploy or asks how
 1. 校验开发目录 `/home/qser3ne/Application/carin-dev` 和生产目录 `/home/qser3ne/Application/carin` 都是 Git 仓库。
 2. 校验两个目录的 `origin` 一致，且都在 `main` 分支。
 3. 拒绝 dev 或 prod 中未提交的 tracked 文件改动；未跟踪的 `.venv-test/` 不阻塞部署。
-4. 在 dev 目录运行 `uv run --project cairn --group dev pytest`。
+4. 在 dev 目录的 `cairn/` 子项目运行 `uv run --group dev pytest -s`。
 5. 将 dev 的 `main` 推送到 `origin`。
 6. 在 prod 目录执行 `git fetch origin` 和 `git pull --ff-only origin main`。
 7. 默认备份生产 `datas/` 到 `datas.backup/<timestamp>/`。
