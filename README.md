@@ -197,7 +197,8 @@ See:
 Run the fast regression suite without Docker or live model endpoints:
 
 ```bash
-uv run --project cairn --group dev pytest
+cd cairn
+uv run --group dev pytest -s
 ```
 
 In this local workspace, a temporary test virtual environment may also be used:
