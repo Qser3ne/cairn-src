@@ -27,7 +27,10 @@
 ## 去重约定
 
 - 语义去重由 `default/vuln/reason.md` 驱动，要求 AI 在创建 intent 前分析已有 facts、open intents、concluded intents 和 findings。
-- recon reason 只规划资产发现、入口采样、认证边界、攻击面候选和噪声过滤；不得验证漏洞。
+- recon reason 只规划 `asset_discovery`、`endpoint_sampling`、`auth_boundary_mapping`、`parameter_inventory`、`role_boundary_mapping`、`candidate_surface_collection`、`scope_clarification` 和 `noise_filtering` 八类工作；不得验证漏洞。
+- recon reason 创建 intent 前必须分析 facts 覆盖的资产、端点、认证边界、参数、角色和用户数据入口，也要分析 open/concluded intents 已覆盖的目标、入口、`auth_scope`、任务类型和产生事实。
+- recon reason 的 description 需要以分类标签开头并包含可去重语义，避免“继续探索”“深入分析”“进一步测试”等泛化表述。
+- recon reason 需要维护 anonymous/authenticated 双线推进：初始 `origin` 图必须同时创建两条 baseline intent，后续不要求每轮都双线创建，但应避免长期只推进单条线路。
 - vuln reason 只规划漏洞验证方向；一个方向已被 open/concluded intent 或 finding 覆盖时不得重复创建。
 - 服务端兜底检查完全相同 `from` 集合、规范化 `description` 和 `auth_scope`，允许两条线路中存在同一来源和相似描述的分别探索。
 - `from` 只要求引用现有 facts；Goal 已删除，不再有特殊禁止来源节点。
