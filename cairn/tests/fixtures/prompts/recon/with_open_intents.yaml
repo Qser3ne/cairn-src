@@ -1,0 +1,40 @@
+project:
+  title: Example recon with open intents
+  origin: https://app.example.test/
+  project_kind: recon
+  auth_mode: dual
+  parent_project_id: null
+  parent_snapshot_id: null
+recon:
+  max_reason_rounds: 5
+  reason_rounds: 1
+  explore_rounds: 0
+  stable_rounds: 0
+  judge_status: not_judged
+  judged_at: null
+facts:
+  - id: origin
+    description: "Origin target is https://app.example.test/ for an authorized synthetic recon fixture."
+intents:
+  - from:
+      - origin
+    to: null
+    description: "[asset_discovery] Establish anonymous baseline for public pages, static assets, redirects, and unauthenticated API samples on app.example.test; auth_scope=anonymous; dedupe boundary is the root host public surface."
+    creator: reasoner
+    worker: null
+    created_at: 2026-01-01 00:00:01
+    concluded_at: null
+    intent_kind: explore
+    finding_id: null
+    auth_scope: anonymous
+  - from:
+      - origin
+    to: null
+    description: "[endpoint_sampling] Establish authenticated baseline for dashboard pages, account settings, and login-only API samples on app.example.test; auth_scope=authenticated; dedupe boundary is the default demo account session."
+    creator: reasoner
+    worker: null
+    created_at: 2026-01-01 00:00:02
+    concluded_at: null
+    intent_kind: explore
+    finding_id: null
+    auth_scope: authenticated
