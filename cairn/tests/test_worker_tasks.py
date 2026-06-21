@@ -256,6 +256,130 @@ def test_recon_explore_success_does_not_record_round_in_worker(monkeypatch) -> N
     assert client.recon_explore_rounds == []
 
 
+def test_recon_explore_ignores_findings_from_model(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    project = make_project(intents=[intent])
+    project.project.project_kind = "recon"
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(explore, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(explore.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(explore, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        explore,
+        "_run_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            (
+                '{"accepted":true,"data":{"description":"recon fact",'
+                '"findings":[{"title":"should not be written"}]}}'
+            ),
+            "",
+        ),
+    )
+
+    outcome = explore.run_explore_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.concluded == [("proj_001", "i001", "test-worker", "recon fact")]
+    assert client.concluded_findings == [None]
+
+
+def test_recon_explore_conclude_fallback_ignores_findings_from_model(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    project = make_project(intents=[intent])
+    project.project.project_kind = "recon"
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    driver = FakeDriver()
+    lease = FakeLease()
+    results: Iterator[ProcessResult] = iter(
+        [
+            ProcessResult(0, "Need summarize current recon observations.", ""),
+            ProcessResult(
+                0,
+                (
+                    '{"accepted":true,"data":{"description":"fallback recon fact",'
+                    '"findings":[{"title":"fallback should not be written"}]}}'
+                ),
+                "",
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(explore, "get_driver", lambda _name: driver)
+    monkeypatch.setattr(explore.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(explore, "run_healthcheck", _healthy)
+    monkeypatch.setattr(explore, "_run_process", lambda *_args, **_kwargs: next(results))
+
+    outcome = explore.run_explore_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.concluded == [("proj_001", "i001", "test-worker", "fallback recon fact")]
+    assert client.concluded_findings == [None]
+    assert len(driver.conclude_prompts) == 1
+
+
+def test_vuln_explore_passes_findings_from_model(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    finding = {"title": "confirmed issue"}
+    project = make_project(intents=[intent])
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(explore, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(explore.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(explore, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        explore,
+        "_run_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"description":"vuln fact","findings":[{"title":"confirmed issue"}]}}',
+            "",
+        ),
+    )
+
+    outcome = explore.run_explore_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.concluded == [("proj_001", "i001", "test-worker", "vuln fact")]
+    assert client.concluded_findings == [[finding]]
+
+
 def test_explore_healthcheck_failure_releases_claim(monkeypatch) -> None:
     config = make_config()
     config.runtime.worker_healthcheck = "startup_and_task"

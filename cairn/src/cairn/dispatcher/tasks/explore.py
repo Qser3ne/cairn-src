@@ -201,7 +201,7 @@ def run_explore_task(
                 intent.id,
                 worker.name,
                 description,
-                findings=_payload_findings(payload),
+                findings=_payload_findings_for_project(payload, project.project.project_kind),
                 source="explore_execute",
                 phase_ms=execute_ms,
                 total_ms=int((time.perf_counter() - task_started) * 1000),
@@ -398,11 +398,20 @@ def _try_conclude_fallback(
         intent.id,
         worker.name,
         description,
-        findings=_payload_findings(payload),
+        findings=_payload_findings_for_project(payload, project.project.project_kind),
         source="explore_conclude",
         phase_ms=conclude_ms,
     )
     return outcome
+
+
+def _payload_findings_for_project(payload: dict, project_kind: str) -> list[dict] | None:
+    findings = _payload_findings(payload)
+    if project_kind == "recon":
+        if findings:
+            LOG.warning("dropping findings from recon explore payload count=%s", len(findings))
+        return None
+    return findings
 
 
 def _payload_findings(payload: dict) -> list[dict] | None:

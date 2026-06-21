@@ -124,6 +124,7 @@ class FakeContainerManager:
 class FakeClient:
     project: ProjectDetail
     concluded: list[tuple[str, str, str, str]] = field(default_factory=list)
+    concluded_findings: list[list[dict] | None] = field(default_factory=list)
     created_intents: list[tuple[str, list[str], str, str, str | None]] = field(default_factory=list)
     released: list[tuple[str, str, str]] = field(default_factory=list)
     released_reasons: list[tuple[str, str]] = field(default_factory=list)
@@ -142,6 +143,7 @@ class FakeClient:
         findings: list[dict] | None = None,
     ) -> ApiResult:
         self.concluded.append((project_id, intent_id, worker, description))
+        self.concluded_findings.append(findings)
         data = {"fact": {"id": "f002"}}
         if findings:
             data["findings"] = findings

@@ -194,6 +194,7 @@ Explore 写回规则：
 - 启动 worker process 前先通过 heartbeat claim intent。
 - 成功后调用 `/intents/{intent_id}/conclude`。
 - 解析失败或超时时，如果取消状态允许，可以运行 `explore_conclude` fallback。
+- Recon explore 即使模型越界返回 `findings`，dispatcher 也会在写回前丢弃，只保留 `description` 写成 fact；vuln explore 仍允许把合法 findings 传给 server。
 - Recon conclude 会在 server 上增加 explore rounds。
 - 只有当 `intent.auth_scope == "authenticated"` 时，explore 才领取一个项目账号；账号租约在 `_reap_futures` 中释放。
 
