@@ -37,6 +37,7 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 - vuln 输入：父 recon、snapshot、title、`auth_mode`、authenticated 账号。
 - vuln 输出：facts/intents、findings、follow-up intents、report intents、finding reports。
 - export YAML 不再包含 `project.mode` 或 `project.bootstrap_enabled`，改为输出 `project_kind`、`auth_mode`、parent/snapshot、recon budget、intent `auth_scope`、finding lifecycle 和 report records。
+- Worker 写入 graph 的人类可读内容采用中文优先建议：intent 说明、fact 说明和 finding 描述建议优先使用简体中文，便于国内 SRC 场景阅读；字段名、枚举值、URL、路径、参数名和技术缩写保持原样，不因英文内容判失败。
 
 ## 验收方式
 
@@ -47,3 +48,4 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 - recon 能展示 rounds、judge status、Evaluate Recon、Evaluate result、Stop Recon、Create Vulnerability Project。
 - vuln 能展示 finding lifecycle、follow-up/report 状态。
 - reason 输出 `complete` 被判为非法；recon stable/noop 会递增 recon round，达到上限后自动 stopped。
+- 默认 prompt 中应保留“建议优先使用简体中文”的软约束，但不应把中文输出描述成强制条件。

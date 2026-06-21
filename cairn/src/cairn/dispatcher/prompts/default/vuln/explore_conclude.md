@@ -24,6 +24,11 @@
 {"accepted": true, "data": {"description": "...", "findings": [{"title": "...", "vulnerability_type": "...", "severity": "medium", "target": "...", "location": "...", "impact": "...", "evidence": "...", "reproduction": "...", "remediation": "...", "status": "open", "research_value": "unknown", "next_action": "triage", "followup_reason": "", "followup_intent_description": ""}]}}
 ```
 
+## 语言建议
+
+- JSON 字段名、枚举值和模板变量保持英文；不要把 `accepted`、`data`、`description`、`findings`、`severity`、`next_action` 等协议字段改成中文。
+- `data.description` 和 findings 中的 `title`、`target` 说明、`location` 说明、`impact`、`evidence`、`reproduction`、`remediation`、`followup_reason`、`followup_intent_description` 建议优先使用简体中文；资产名、URL、端点、路径、参数名、命令、payload、PoC、CVE/CWE 和 `vulnerability_type` 分类可以保留英文。
+
 ## 规则
 
 - 只总结当前 Intent 相关的最新增量事实。

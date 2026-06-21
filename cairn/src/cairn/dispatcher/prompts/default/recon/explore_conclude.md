@@ -16,6 +16,11 @@
 {"accepted": false, "reason": "policy_refusal"}
 ```
 
+## 语言建议
+
+- JSON 字段名、枚举值、模板变量和 `description` 内的小结构键保持英文；不要把 `accepted`、`data`、`description`、`fallback_reason`、`evidence_refs` 等协议或结构字段改成中文。
+- `data.description` 中的已确认增量事实、证据引用、丢弃原因和安全后续建议，建议优先使用简体中文；资产名、URL、端点、路径、参数名、命令、状态码和技术缩写可以保留英文。
+
 ## fallback 阶段边界
 
 你必须停止探索，只能基于当前上下文总结已确认信息：

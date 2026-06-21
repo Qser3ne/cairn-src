@@ -26,6 +26,11 @@
 {"accepted": true, "data": {"decision": "noop", "intents": []}}
 ```
 
+## 语言建议
+
+- JSON 字段名、枚举值和模板变量保持英文；不要把 `accepted`、`data`、`intents`、`description`、`decision` 等协议字段改成中文。
+- 人类可读内容建议优先使用简体中文，包括 `data.intents[*].description` 中的目标、入口、漏洞假设、验证重点和去重边界；资产名、URL、端点、路径、参数名、命令、漏洞缩写和 `vulnerability_type` 分类可以保留英文。
+
 ## 规则
 
 - 不要输出 `complete`。SRC 模式由人工决定何时停止或完成，不能因为发现一个漏洞就结束项目。

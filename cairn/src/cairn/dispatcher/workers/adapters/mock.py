@@ -81,7 +81,7 @@ if phase=="reason":
             fi=[random.choice(fact_ids)] if fact_ids else []
             intent={
                 "from":fi,
-                "description":f"mock intent {idx+1} from {fi[0] if fi else 'none'}",
+                "description":f"模拟意图 {idx+1}：基于 {fi[0] if fi else 'none'} 收集新的高价值线索",
             }
             if project_kind=="recon":
                 intent["auth_scope"]="anonymous" if idx % 2 == 0 else "authenticated"
@@ -108,7 +108,7 @@ if phase=="judge":
 
 if phase=="report":
     if outcome=="draft":
-        print(json.dumps({"accepted":True,"data":{"report_markdown":"# Mock report\\n\\nGenerated report.","report_json":{}}}, ensure_ascii=False))
+        print(json.dumps({"accepted":True,"data":{"report_markdown":"# 模拟报告\\n\\n已生成报告草稿。","report_json":{}}}, ensure_ascii=False))
     elif outcome=="rejected":
         print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
     else:
@@ -117,7 +117,7 @@ if phase=="report":
 
 if outcome=="fact":
     label = prompt.get("intent_id") or phase
-    print(json.dumps({"accepted":True,"data":{"description":f"mock fact for {label}"}} , ensure_ascii=False))
+    print(json.dumps({"accepted":True,"data":{"description":f"模拟事实：{label} 已产生一条增量观察。"}} , ensure_ascii=False))
 elif outcome=="rejected":
     print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
 else:

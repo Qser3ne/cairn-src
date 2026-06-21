@@ -100,6 +100,12 @@ cairn/src/cairn/dispatcher/prompts/default/
 
 ## 任务契约
 
+### 输出语言策略
+
+- Dispatcher 解析和写回仍只依赖英文 JSON 字段名、枚举值和模板变量；不得把 `accepted`、`data`、`intents`、`description`、`findings`、`auth_scope`、`next_action` 等协议字段改成中文。
+- 默认任务提示词仅软性建议 worker 将 `intent.description`、`fact.description` 和 vuln `findings` 的人类可读内容优先写成简体中文。
+- 当前没有运行时中文比例校验或自动翻译；英文技术术语、URL、端点、路径、参数名、命令、payload、PoC、CVE/CWE 和漏洞缩写可以保留英文。
+
 ### Reason
 
 输入占位符：

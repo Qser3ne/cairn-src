@@ -16,6 +16,11 @@
 {"accepted": false, "reason": "policy_refusal"}
 ```
 
+## 语言建议
+
+- JSON 字段名、枚举值、模板变量和 `description` 内的小结构键保持英文；不要把 `accepted`、`data`、`description`、`intent_summary`、`auth_scope` 等协议或结构字段改成中文。
+- `data.description` 中的事实、证据说明、限制说明和下一步 recon 建议，建议优先使用简体中文；资产名、URL、端点、路径、参数名、命令、状态码和技术缩写可以保留英文。
+
 ## 规则
 
 - 只围绕 Current Intent 探索，不要切换到其他资产、入口、漏洞假设或任务方向。

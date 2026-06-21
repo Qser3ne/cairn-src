@@ -30,6 +30,7 @@
 - recon 固定 `auth_mode="dual"`，新建时必须有 `project_accounts`，reason 首轮必须创建 anonymous/authenticated 两条 baseline intent。
 - vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts`。
 - explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租账号，anonymous explore 不被账号池阻塞。
+- 默认 prompt 对 graph 写入文本采用中文优先软建议：`intent.description`、`fact.description` 和 vuln `findings` 的人类可读字段建议优先简体中文；协议字段、枚举值和导出结构保持英文，不做运行时中文校验。
 
 ## 公开仓库文档状态
 

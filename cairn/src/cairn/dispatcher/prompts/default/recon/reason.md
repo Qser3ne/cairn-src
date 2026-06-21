@@ -17,6 +17,11 @@
 
 不要输出 `complete`。Reason validator 会拒绝任何 `complete` payload。
 
+# 语言建议
+
+- JSON 字段名、枚举值、模板变量和分类标签保持英文；不要把 `accepted`、`data`、`intents`、`description`、`auth_scope` 等协议字段改成中文。
+- 人类可读内容建议优先使用简体中文，包括 `data.intents[*].description` 中的目标、入口、认证范围和去重边界；资产名、URL、路径、参数名、命令、漏洞缩写和 `[asset_discovery]` 等分类标签可以保留英文。
+
 # 覆盖分析要求
 
 创建任何 intent 前，必须基于图快照完成覆盖分析：
