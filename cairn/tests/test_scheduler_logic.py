@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import deque
 from concurrent.futures import Future
 
@@ -246,6 +247,48 @@ def test_anonymous_intent_dispatches_without_account_lease() -> None:
     assert loop.futures[executor.futures[0]].account is None
 
 
+def test_authenticated_intent_logs_missing_accounts(caplog) -> None:
+    loop = _loop()
+    project = _authenticated_project(intent_count=1, account_count=0)
+    executor = _prepare_real_dispatch(loop, project)
+
+    with caplog.at_level(logging.INFO, logger="cairn.dispatcher.scheduler.loop"):
+        assert not loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert executor.submissions == []
+    assert loop.account_leases == {}
+    assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "authenticated explore cannot dispatch because project has no accounts project=proj_001 intent=i001 queued_authenticated_intents=1 busy_accounts=0 total_accounts=0"
+        in message
+        for message in messages
+    )
+
+
+def test_authenticated_intent_releases_account_when_worker_unavailable(caplog) -> None:
+    loop = _loop()
+    project = _authenticated_project(intent_count=1, account_count=1)
+    _prepare_real_dispatch(loop, project)
+    loop.config = loop.config.model_copy(
+        update={"workers": [loop.config.workers[0].model_copy(update={"max_running": 1})]}
+    )
+    loop.futures = {Future(): RunningTask("other", "explore", "test-worker", TaskCancellation(), intent_id="busy")}
+
+    with caplog.at_level(logging.INFO, logger="cairn.dispatcher.scheduler.loop"):
+        assert not loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert loop.account_leases == {}
+    assert loop.authenticated_wait_queues == {}
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "no worker available for explore project=proj_001 intent=i001 queued_authenticated_intents=0 busy_accounts=0 total_accounts=1"
+        in message
+        and "blocked_busy=['test-worker(1/1)']" in message
+        for message in messages
+    )
+
+
 def test_authenticated_intent_queues_when_all_accounts_are_busy() -> None:
     loop = _loop()
     project = _authenticated_project(intent_count=4, account_count=3)
@@ -263,7 +306,28 @@ def test_authenticated_intent_queues_when_all_accounts_are_busy() -> None:
     assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
 
 
-def test_released_account_dispatches_queued_authenticated_intent_before_reason() -> None:
+def test_second_authenticated_intent_queues_when_single_account_is_busy(caplog) -> None:
+    loop = _loop()
+    project = _authenticated_project(intent_count=2, account_count=1)
+    executor = _prepare_real_dispatch(loop, project)
+
+    with caplog.at_level(logging.INFO, logger="cairn.dispatcher.scheduler.loop"):
+        assert loop._try_dispatch_project(_summary("proj_001", "active"))
+        assert not loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert len(executor.submissions) == 1
+    assert loop.account_leases["proj_001"] == {"a001": "i002"}
+    assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("queued authenticated intent project=proj_001 intent=i001 queue_length=1" in message for message in messages)
+    assert any(
+        "authenticated explore waiting for account project=proj_001 intent=i001 queued_authenticated_intents=1 busy_accounts=1 total_accounts=1"
+        in message
+        for message in messages
+    )
+
+
+def test_released_account_dispatches_queued_authenticated_intent_before_reason(caplog) -> None:
     loop = _loop()
     project = _authenticated_project(intent_count=4, account_count=3)
     project.facts.append(Fact(id="f002", description="new"))
@@ -280,16 +344,28 @@ def test_released_account_dispatches_queued_authenticated_intent_before_reason()
     loop.authenticated_wait_queues = {"proj_001": deque(["i001"])}
     done.set_result("success")
 
-    loop._reap_futures()
-    loop._try_dispatch_project(_summary("proj_001", "active"))
+    with caplog.at_level(logging.DEBUG, logger="cairn.dispatcher.scheduler.loop"):
+        loop._reap_futures()
+        loop._try_dispatch_project(_summary("proj_001", "active"))
 
     assert loop.account_leases["proj_001"]["a001"] == "i001"
     assert loop.authenticated_wait_queues == {}
     assert [task.intent_id for task in loop.futures.values()].count("i001") == 1
     assert executor.submissions[-1][1][5].id == "i001"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "released authenticated account project=proj_001 intent=i004 released_account=a001 queued_authenticated_intents=1 busy_accounts=2"
+        in message
+        for message in messages
+    )
+    assert any(
+        "selected authenticated waiting intent project=proj_001 intent=i001 queue_length=1 busy_accounts=2 total_accounts=3"
+        in message
+        for message in messages
+    )
 
 
-def test_authenticated_wait_queue_discards_invalid_or_inactive_projects() -> None:
+def test_authenticated_wait_queue_discards_invalid_or_inactive_projects(caplog) -> None:
     loop = _loop()
     valid = make_intent("i001")
     valid.worker = None
@@ -304,19 +380,45 @@ def test_authenticated_wait_queue_discards_invalid_or_inactive_projects() -> Non
         "stopped": deque(["i001"]),
         "anonymous": deque(["i001"]),
     }
+    loop.account_leases = {
+        "proj_001": {"a001": "i999"},
+        "stopped": {"a001": "i001"},
+        "anonymous": {"a001": "i001"},
+    }
 
-    assert loop._next_authenticated_waiting_intent(project) == valid
-    assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
+    with caplog.at_level(logging.DEBUG, logger="cairn.dispatcher.scheduler.loop"):
+        assert loop._next_authenticated_waiting_intent(project) == valid
+        assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
 
-    loop._cleanup_authenticated_wait_queues(
-        [
-            _summary("proj_001", "active").model_copy(update={"auth_mode": "authenticated"}),
-            _summary("stopped", "stopped").model_copy(update={"auth_mode": "authenticated"}),
-            _summary("anonymous", "active"),
-        ]
-    )
+        loop._cleanup_authenticated_wait_queues(
+            [
+                _summary("proj_001", "active").model_copy(update={"auth_mode": "authenticated"}),
+                _summary("stopped", "stopped").model_copy(update={"auth_mode": "authenticated"}),
+                _summary("anonymous", "active"),
+            ]
+        )
 
     assert set(loop.authenticated_wait_queues) == {"proj_001"}
+    assert set(loop.account_leases) == {"proj_001"}
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "discarding stale authenticated waiting intent project=proj_001 intent=missing reason=missing" in message
+        for message in messages
+    )
+    assert any(
+        "discarding stale authenticated waiting intent project=proj_001 intent=i002 reason=claimed" in message
+        for message in messages
+    )
+    assert any(
+        "cleared authenticated wait queue project=stopped queued_authenticated_intents=1 reason=inactive_or_anonymous"
+        in message
+        for message in messages
+    )
+    assert any(
+        "cleared authenticated account leases project=anonymous busy_accounts=1 reason=inactive_or_anonymous"
+        in message
+        for message in messages
+    )
 
 
 def test_report_intent_dispatches_report_task() -> None:

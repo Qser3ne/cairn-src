@@ -492,9 +492,12 @@ class DispatcherLoop:
                 self._log_changed(
                     f"project:{project.project.id}:accounts:missing",
                     logging.WARNING,
-                    "authenticated explore cannot dispatch because project has no accounts project=%s intent=%s",
+                    "authenticated explore cannot dispatch because project has no accounts project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s",
                     project.project.id,
                     intent.id,
+                    self._authenticated_queue_length(project.project.id),
+                    self._busy_account_count(project.project.id),
+                    len(project.accounts),
                 )
                 return False
             account = self._lease_account(project, intent)
@@ -503,10 +506,11 @@ class DispatcherLoop:
                 self._log_changed(
                     f"project:{project.project.id}:accounts:busy",
                     logging.INFO,
-                    "authenticated explore waiting for account project=%s intent=%s busy_accounts=%s total_accounts=%s",
+                    "authenticated explore waiting for account project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s",
                     project.project.id,
                     intent.id,
-                    len(self.account_leases.get(project.project.id, {})),
+                    self._authenticated_queue_length(project.project.id),
+                    self._busy_account_count(project.project.id),
                     len(project.accounts),
                 )
                 return False
@@ -518,9 +522,12 @@ class DispatcherLoop:
             self._log_changed(
                 f"project:{project.project.id}:worker:explore",
                 logging.INFO,
-                "no worker available for explore project=%s intent=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                "no worker available for explore project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
                 project.project.id,
                 intent.id,
+                self._authenticated_queue_length(project.project.id),
+                self._busy_account_count(project.project.id),
+                len(project.accounts),
                 selection.blocked_busy,
                 selection.blocked_unhealthy,
                 selection.blocked_rejected,
@@ -721,6 +728,12 @@ class DispatcherLoop:
                 continue
             queue.append(intent.id)
             queued.add(intent.id)
+            LOG.info(
+                "queued authenticated intent project=%s intent=%s queue_length=%s",
+                project_id,
+                intent.id,
+                len(queue),
+            )
 
     def _next_authenticated_waiting_intent(self, project: ProjectDetail) -> Intent | None:
         if not self._project_uses_account_pool(project):
@@ -734,7 +747,8 @@ class DispatcherLoop:
             return None
         intents_by_id = {intent.id: intent for intent in project.intents}
         while queue:
-            intent = intents_by_id.get(queue[0])
+            intent_id = queue[0]
+            intent = intents_by_id.get(intent_id)
             if (
                 intent is not None
                 and intent.to is None
@@ -742,7 +756,22 @@ class DispatcherLoop:
                 and intent.intent_kind == "explore"
                 and intent.auth_scope == "authenticated"
             ):
+                LOG.debug(
+                    "selected authenticated waiting intent project=%s intent=%s queue_length=%s busy_accounts=%s total_accounts=%s",
+                    project.project.id,
+                    intent.id,
+                    len(queue),
+                    self._busy_account_count(project.project.id),
+                    len(project.accounts),
+                )
                 return intent
+            LOG.debug(
+                "discarding stale authenticated waiting intent project=%s intent=%s reason=%s queue_length=%s",
+                project.project.id,
+                intent_id,
+                self._stale_authenticated_wait_reason(intent),
+                len(queue),
+            )
             queue.popleft()
         self.authenticated_wait_queues.pop(project.project.id, None)
         return None
@@ -763,9 +792,19 @@ class DispatcherLoop:
         }
         for project_id in list(self.authenticated_wait_queues):
             if project_id not in active_project_ids:
+                LOG.info(
+                    "cleared authenticated wait queue project=%s queued_authenticated_intents=%s reason=inactive_or_anonymous",
+                    project_id,
+                    self._authenticated_queue_length(project_id),
+                )
                 self.authenticated_wait_queues.pop(project_id, None)
         for project_id in list(self.account_leases):
             if project_id not in active_project_ids:
+                LOG.info(
+                    "cleared authenticated account leases project=%s busy_accounts=%s reason=inactive_or_anonymous",
+                    project_id,
+                    self._busy_account_count(project_id),
+                )
                 self.account_leases.pop(project_id, None)
 
     def _lease_account(self, project: ProjectDetail, intent: Intent):
@@ -784,6 +823,23 @@ class DispatcherLoop:
         leases.pop(account_id, None)
         if not leases:
             self.account_leases.pop(project_id, None)
+
+    def _authenticated_queue_length(self, project_id: str) -> int:
+        return len(self.authenticated_wait_queues.get(project_id, ()))
+
+    def _busy_account_count(self, project_id: str) -> int:
+        return len(self.account_leases.get(project_id, {}))
+
+    def _stale_authenticated_wait_reason(self, intent: Intent | None) -> str:
+        if intent is None:
+            return "missing"
+        if intent.to is not None:
+            return "concluded"
+        if intent.worker is not None:
+            return "claimed"
+        if intent.intent_kind != "explore" or intent.auth_scope != "authenticated":
+            return "non-authenticated"
+        return "unknown"
 
     def _running_project_count(self, summaries: list[ProjectSummary]) -> int:
         active_ids = {summary.id for summary in summaries if summary.status == "active"}
@@ -819,10 +875,12 @@ class DispatcherLoop:
             if task.account is not None:
                 self._release_account(task.project_id, task.account.id)
                 LOG.info(
-                    "released authenticated account project=%s intent=%s account=%s",
+                    "released authenticated account project=%s intent=%s released_account=%s queued_authenticated_intents=%s busy_accounts=%s",
                     task.project_id,
                     task.intent_id,
                     task.account.id,
+                    self._authenticated_queue_length(task.project_id),
+                    self._busy_account_count(task.project_id),
                 )
             try:
                 outcome = future.result()

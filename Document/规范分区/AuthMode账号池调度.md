@@ -31,6 +31,7 @@
 - `_reap_futures()` 对成功、失败、取消、异常完成的任务统一释放账号租约。
 - 每轮调度会先清理非 active 或 anonymous 项目的队列和租约，再优先检查 waiting queue。
 - 实际 authenticated explore 并发上限为 `min(账号数, max_project_workers, max_workers, worker 可用量)`。
+- 账号池调度日志需要保留可诊断字段：`queued_authenticated_intents`、`queue_length`、`busy_accounts`、`total_accounts`、`released_account`、selected waiting intent id，以及 stale waiting intent 的原因（`missing|concluded|claimed|non-authenticated`）。账号不足、账号全忙、worker 不可用和 inactive/anonymous 清理都应能从日志中区分。
 
 ## Prompt 约定
 
