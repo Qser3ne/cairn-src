@@ -1,6 +1,6 @@
 [project]
 name = "cairn"
-version = "1.6"
+version = "1.7"
 description = "Fact-graph based collaborative exploration protocol"
 authors = [
     { name = "leixiao", email = "1729888211@qq.com" }
