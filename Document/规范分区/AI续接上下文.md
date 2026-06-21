@@ -50,5 +50,6 @@
 ## 项目级 Skill 约束
 
 - 项目修改后同步维护 `Document/功能分区` 和 `Document/规范分区`。
+- `.agent/skills/production-deploy` 是项目级主动触发 skill，用于指导使用 `scripts/deploy.sh` 将 `/home/qser3ne/Application/carin-dev` 发布到 `/home/qser3ne/Application/carin`，并强调不覆盖生产 `dispatch.yaml`、`datas/` 等本地状态。
 - 每次完成项目修改后，需要提交本地 Git。
 - 最终回复说明测试结果、文档路径和本地提交结果。

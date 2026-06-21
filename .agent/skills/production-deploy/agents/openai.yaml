@@ -1,0 +1,7 @@
+interface:
+  display_name: "Production Deploy"
+  short_description: "Publish carin-dev to local production safely."
+  default_prompt: "Use $production-deploy to publish the current carin-dev work to the local production checkout safely."
+
+policy:
+  allow_implicit_invocation: false
