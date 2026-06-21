@@ -21,7 +21,7 @@
 - Worker 镜像不再内置大型知识库和重型 POC 仓库；如任务需要，应通过运行时只读挂载提供源码、样本或外部资料。
 - Worker 镜像固定创建 `/home/kali/workspace`、`/home/kali/reports`、`/home/kali/evidence`、`/home/kali/targets`、`/home/kali/cache`，并统一归属 `kali:kali`。
 - Worker 镜像构筑支持 `OSV_SCANNER_VERSION` 等 build arg，用于固定 `osv-scanner`、Web SRC release 工具和源码 commit；默认入口在项目根 `start.sh` 中。
-- `start.sh` 当前对 worker 镜像使用 `--pull --progress=plain` 重建，优先获取最新基镜像并输出完整构筑日志。
+- `start.sh` 当前对 worker 镜像使用 `--progress=plain` 重建，依赖 Docker 层缓存并输出完整构筑日志。
 - Worker 构筑默认保留 Docker 层缓存；如需完全重建，可在手动构筑时额外追加 `--no-cache`。
 - Dockerfile 中的 apt 层保留 BuildKit cache mount 和 apt 网络重试配置，用于降低中途失败后的重复下载成本。
 

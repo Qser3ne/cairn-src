@@ -7,9 +7,7 @@ docker compose up --build -d
 
 # 2. 重建 worker 镜像
 docker build \
-  --pull \
   --progress=plain \
-  --build-arg KALI_MIRROR="${KALI_MIRROR}" \
   -t cairn-worker-container:latest \
   ./container
 
