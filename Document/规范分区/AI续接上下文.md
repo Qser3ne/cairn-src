@@ -31,6 +31,13 @@
 - vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts`。
 - explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租账号，anonymous explore 不被账号池阻塞。
 
+## 公开仓库文档状态
+
+- 顶层 `README.md` 已按 `Qser3ne/cairn-src` 公开仓库重写，明确声明本仓库是 `oritera/Cairn` 的 modified version，由 `Qser3ne` 维护并聚焦授权 SRC 工作流。
+- README 当前覆盖 recon/vuln 流程、fact-intent graph、dispatcher、worker container、账号池、report 流程、配置、测试和安全免责声明。
+- README 已删除上游商业授权、PR 双授权、`personal and educational use`、上游 star history 等不适合下游公开仓库的表述。
+- `LICENSE` 保持标准 GNU AGPLv3 正文，不直接写入 fork 说明；版权和 attribution 说明集中放在 README。
+
 ## 续接验证
 
 - 查看状态：`git status --short --branch`

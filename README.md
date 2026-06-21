@@ -2,186 +2,206 @@
 
 <img src="./README/banner.png" alt="Cairn Banner"/>
 
-# Cairn
-### More Than Just AI Penetration Testing — Towards General State-Space Search
+# Cairn SRC
+### Authorized SRC recon and vulnerability workflow engine
 
-<p>
-  <a href="https://zc.tencent.com/hackathon" target="_blank" rel="noopener noreferrer">
-    <img src="./README/tencent.png" alt="Tencent" height="55" />
-  </a>
-  <a href="https://zc.tencent.com/hackathon" target="_blank" rel="noopener noreferrer">
-    <img src="./README/tch.png" alt="TCH" height="55" />
-  </a>
-</p>
-
-Cairn is a graph-driven SRC security workflow engine. <br/>Given an origin and a project kind, it grows a fact-intent graph through unknown attack-surface and vulnerability state space. <br/>AI Penetration Testing is one such problem — and a proven one.
-
-<p>
-  <a href="https://discord.gg/nDSy4NZVP" target="_blank" rel="noopener noreferrer">
-    <img src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" />
-  </a>
-  <a href="https://x.com/le1xia0" target="_blank" rel="noopener noreferrer">
-    <img src="https://img.shields.io/badge/X-000000?style=flat-square&logo=x&logoColor=white" alt="X" />
-  </a>
-</p>
+This repository, `Qser3ne/cairn-src`, is a modified version of
+[oritera/Cairn](https://github.com/oritera/Cairn). It is maintained by
+`Qser3ne` and currently focuses on authorized Security Response Center (SRC)
+vulnerability research workflows.
 
 </div>
 
 <p align="center">
-  <a href="https://www.bilibili.com/video/BV1a8R5BhEVi/" target="_blank" rel="noopener noreferrer">
-    <img src="./README/cairn.png" alt="Cairn runtime screenshot" width="900" />
-  </a>
+  <img src="./README/cairn.png" alt="Cairn runtime screenshot" width="900" />
 </p>
 
-## What is Cairn?
+## What is this fork?
 
-SRC security testing is fundamentally a **directed search through a near-infinite state space**:
+Cairn is a fact-graph based collaborative exploration protocol. This fork keeps
+the blackboard-style fact/intent graph and narrows the current product surface
+to an SRC-only workflow:
 
-- **Origin**: known (target IP, target system)
-- **Project kind**: fixed (`recon` collects information; `vuln` mines vulnerabilities)
-- **Path**: unknown
+- `recon` projects collect attack-surface facts, authentication boundaries,
+  endpoints, assets, and candidate leads.
+- `vuln` projects are forked from recon snapshots and focus on validating,
+  following up, and reporting vulnerabilities.
+- workers never decide that a project is complete on their own. `completed` is
+  a manual archive state.
 
-This structure is not unique to penetration testing. Vulnerability research, CTF challenges, and security assessment all benefit from a clear starting point, a fixed task mode, and an unknown path in between.
+The generic Standard/bootstrap flow from upstream has been removed in this
+fork. New projects start from an `origin` fact and grow through model-generated
+intents, confirmed facts, human hints, findings, snapshots, and report drafts.
 
-Cairn is built for this class of problems. Penetration testing is the first domain it has been validated on.
+## Current workflow
 
-The engine is built on a **Blackboard Architecture** with an explicit fact-intent graph. Three primitives are all it needs:
+1. Create a `recon` project with a title, origin, hints, and at least one
+   account. Recon always uses `auth_mode="dual"` so the system can explore both
+   anonymous and authenticated attack surface.
+2. The dispatcher schedules `reason` tasks to propose non-duplicate intents and
+   `explore` tasks to execute one claimed intent at a time.
+3. Recon `explore` tasks write confirmed facts. Recon can be evaluated by a
+   `judge` task, which records an ephemeral readiness judgement without writing
+   to the graph.
+4. Create a recon snapshot, then fork a `vuln` project from that snapshot.
+   Selected recon facts can be copied into the child project.
+5. Vuln `explore` tasks can write facts and findings. Findings can create
+   follow-up explore intents or report intents.
+6. `report` tasks draft SRC submission reports and update finding report state.
+
+The account pool is intent-scoped. Anonymous explore intents do not lease an
+account. Authenticated explore intents lease one account, isolate browser and
+session state for that account, and release the account when the task ends.
+
+## Core concepts
 
 | Concept | Meaning |
-|---------|---------|
-| **Fact** | A confirmed, objective finding written to the board |
-| **Intent** | A declared direction of exploration, not yet executed |
-| **Hint** | Human judgment injected at any time; absorbed by agents on the next read |
+| --- | --- |
+| Fact | A confirmed observation written to the project graph |
+| Intent | A declared direction of exploration that has not been executed yet |
+| Hint | Human guidance injected into the graph for future worker reads |
+| Finding | A vuln-project vulnerability candidate with lifecycle state |
+| Snapshot | A recon graph capture used to fork a vuln project |
+| Report | A drafted SRC report generated from a finding |
 
-The graph grows from `origin` according to the project's mode. Every new Fact is a stepping stone; every Intent is a step into the unknown.
+## Architecture
 
-Agent Workers run an OODA loop — Observe the full graph, Orient to the current state, Decide on next intents, Act to explore — and write their findings back as new Facts. Workers have no fixed roles. Tasks are generated at runtime from the graph's current state, not from predefined job descriptions.
-
-Agents coordinate exclusively through the shared board (Stigmergy). No direct communication. No information silos.
-
-## Cairn in Action
-
-https://github.com/user-attachments/assets/e557b1ac-dda4-41cb-87dd-9d56dbf05133
-
-
-## How It Works
-
-Cairn now runs an SRC-only flow with two project kinds:
-
-- **Recon** projects collect attack-surface facts and candidate leads.
-- **Vuln** projects are forked from recon snapshots to validate and report vulnerabilities.
-
-Four task types are scheduled by the dispatcher:
-
-| Task | What it does | Output |
-|------|-------------|--------|
-| **Reason** | Reads the graph and proposes the next non-duplicate intents | New Intents / no-op |
-| **Explore** | Claims one Intent and executes it | One Fact, plus optional Findings in vuln projects |
-| **Judge** | Evaluates whether recon is ready to fork | Ephemeral judgement result |
-| **Report** | Drafts an SRC report for a finding | Report artifact |
-
-System architecture:
-
-```
-          ┌──────────────────────────────────┐
-          │           Cairn Server           │
-          │    Facts + Intents + Hints       │
-          └─────────────────┬────────────────┘
-                            │
-                     Read / Write API
-                            │
-          ┌─────────────────┴────────────────┐
-          │             Dispatcher           │
-          │   Schedules tasks, manages       │
-          │   containers, writes protocol    │
-          └──────────┬───────────────┬───────┘
-                     │               │
-     ┌───────────────┴──┐     ┌──────┴──────────────┐
-     │  Worker Container│     │  Worker Container   │
-     │   (Project A)    │     │   (Project B)       │
-     │  ┌────┐  ┌────┐  │     │  ┌────┐  ┌────┐     │
-     │  │ W. │  │ W. │  │     │  │ W. │  │ W. │     │
-     │  └────┘  └────┘  │     │  └────┘  └────┘     │
-     └──────────────────┘     └─────────────────────┘
+```text
+Browser / API client
+        |
+        v
+Cairn Server
+  FastAPI + SQLite + static UI
+  Projects / Facts / Intents / Hints / Findings / Snapshots / Jobs
+        ^
+        | HTTP protocol
+        v
+Cairn Dispatcher
+  scheduling, leases, worker selection, container lifecycle, writeback
+        |
+        v
+Project worker containers
+  Claude Code / Codex / Pi adapters
+  task prompts in, structured JSON out
 ```
 
-**Cairn Server** maintains graph consistency only.
+The server owns graph consistency and exposes the UI/API. The dispatcher is the
+only protocol writer for model workers. Workers receive prompts, run inside
+project-scoped Docker containers, and return structured output for the
+dispatcher to validate and write back.
 
-**Cairn Dispatcher** reads the graph, schedules tasks, spins up and tears down worker containers, and is the sole writer to the protocol. Each project gets its own Worker Container; multiple Agent Workers run concurrently inside it. Agent Workers only receive a prompt and return structured output.
+## Task types
 
-Projects are archived manually with `completed`; workers no longer auto-complete projects.
+| Task | Project kind | Purpose | Writes |
+| --- | --- | --- | --- |
+| `reason` | `recon`, `vuln` | Read graph state and propose useful next intents | Intents or no-op round state |
+| `explore` | `recon`, `vuln` | Claim and execute one intent | Facts, optional vuln findings |
+| `judge` | `recon` | Evaluate recon readiness for vuln fork | Ephemeral job result |
+| `report` | `vuln` | Draft an SRC report from a finding | Finding report draft |
 
-Supported worker backends: **Claude Code**, **Codex**, and **Pi**.
+Supported worker backends are Claude Code, Codex, Pi, and the mock adapter used
+by tests.
 
-## Results
+## Getting started
 
-**Tencent Cloud Hackathon · AI Penetration Testing Challenge · 2nd Edition**
+### Prerequisites
 
-610 teams · 1,345 participants · top universities and security firms across China
-
-| Metric | Value |
-|--------|-------|
-| Problems solved | **54 / 54 — only team to AK** |
-| Final ranking | 3rd |
-
-> The system had never been tested before the competition. The full pipeline came online for the first time at 4 AM on race day. No training, no tuning, no domain-specific tooling. Zero MCP tools, zero RAG, zero predefined agent roles.
-
-## Further Reading
-
-- <a href="https://mp.weixin.qq.com/s/DlpEH7bVr0xi0VawPJs3XA" target="_blank" rel="noopener noreferrer">The Strongest AI Penetration Testing Agent: Postmortem of the Only Team to Achieve AK at the TCH Tencent Cloud Hackathon Intelligent Penetration Testing Challenge (2nd Edition)</a>
-- <a href="https://mp.weixin.qq.com/s/2rEqFLvkxvYWM3gW170C2w" target="_blank" rel="noopener noreferrer">The Pathless Path: Cairn AI from Penetration Testing to General Problem Solving</a>
-
-## Getting Started
-
-**Prerequisites**
- 
 - macOS or Linux
-- Python ≥ 3.12
+- Python >= 3.12
+- [uv](https://docs.astral.sh/uv/)
 - Docker
+- API access for at least one configured worker backend
 
-
-### Pull required images
- 
-Both setup methods require the worker container image:
- 
-```bash
-docker pull --platform=linux/amd64 ghcr.io/oritera/cairn-worker-container:latest
-```
-
-Create your local dispatcher configuration and fill in your LLM endpoints and API keys:
+### Configure the dispatcher
 
 ```bash
 cp dispatch.example.yaml dispatch.yaml
 ```
- 
-### Docker Compose (recommended)
- 
-Pull the base image used to build Cairn:
- 
+
+Edit `dispatch.yaml` with your server URL, worker backend settings, model
+endpoints, and API keys.
+
+`dispatch.yaml`, local SQLite data, worker evidence, browser profiles, account
+credentials, exported YAML, and model/API keys can contain sensitive data. Do
+not commit real runtime configuration or task artifacts.
+
+Accounts are stored in the local SQLite database and can appear in project
+detail/export data so workers can use them during authorized testing. Use only
+accounts and targets you are allowed to test.
+
+### Docker Compose
+
+Pull the worker image used by the default dispatcher config:
+
+```bash
+docker pull --platform=linux/amd64 ghcr.io/oritera/cairn-worker-container:latest
+```
+
+Pull the base image used by the compose build:
+
 ```bash
 docker pull ghcr.io/astral-sh/uv:python3.13-trixie
 ```
- 
+
+Start the server and dispatcher:
+
 ```bash
 docker compose up --build
 ```
- 
-This starts `cairn-server` on port `8000` and `cairn-dispatcher` once the server passes its health check. The dispatcher mounts `dispatch.yaml` from the project root and connects to Docker via the host socket. Data is persisted to `./datas/cairn/`.
- 
-### Manual
- 
+
+This starts the Cairn server on port `8000` and starts the dispatcher after the
+server health check passes. The compose setup mounts `dispatch.yaml`, connects
+the dispatcher to the Docker host socket, and persists data under
+`./datas/cairn/`.
+
+Open the UI at:
+
+```text
+http://127.0.0.1:8000
+```
+
+### Manual run
+
+Start the server:
+
 ```bash
-# Start the server
 uv run --project cairn cairn serve
- 
-# Run the dispatcher
+```
+
+Run the dispatcher:
+
+```bash
 uv run --project cairn cairn dispatch --config dispatch.yaml
- 
-# Run startup health checks only
+```
+
+Run startup health checks only:
+
+```bash
 uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthcheck-only
 ```
 
-### Tests
+## Configuration notes
+
+Main dispatcher configuration lives in `dispatch.yaml`.
+
+- `server` points the dispatcher to the Cairn API server.
+- `common_env` is merged into every worker process.
+- `runtime` controls scheduler interval, global concurrency, per-project
+  concurrency, active project limits, worker health checks, and prompt group.
+- `tasks` configures timeouts and reason intent caps.
+- `container` configures the project worker image, Docker network mode, init
+  behavior, and completed-container action.
+- `workers` configures backend type, task support, priority, concurrency, and
+  backend-specific environment variables.
+
+See:
+
+- [`dispatch.example.yaml`](./dispatch.example.yaml)
+- [`docs/specs/dispatcher-design.md`](./docs/specs/dispatcher-design.md)
+- [`docs/specs/server-protocol.md`](./docs/specs/server-protocol.md)
+- [`container/README.md`](./container/README.md)
+
+## Tests
 
 Run the fast regression suite without Docker or live model endpoints:
 
@@ -189,23 +209,38 @@ Run the fast regression suite without Docker or live model endpoints:
 uv run --project cairn --group dev pytest
 ```
 
-## Disclaimer
+In this local workspace, a temporary test virtual environment may also be used:
 
-Cairn is a general-purpose problem-solving engine. Although it supports penetration testing, CTF solving, security assessment, and vulnerability research workflows, it is intended to be used only in environments where you have explicit authorization to operate.
+```bash
+cd cairn
+../.venv-test/bin/python -m pytest -q -s tests
+```
 
-You are solely responsible for how you use this project. Do not use Cairn against systems, networks, applications, or data without clear prior permission from the owner or operator. Unauthorized security testing, exploitation, or data access may be illegal and may cause harm.
+Do not commit `.venv-test/`.
 
-The developers and contributors of this project do not endorse or accept responsibility for any misuse, abuse, damage, loss, or legal consequences arising from its use. By using this project, you agree to ensure that your activities comply with all applicable laws, regulations, contractual obligations, and professional or organizational policies in your jurisdiction.
+## Security disclaimer
 
-## Star History
+This project is intended only for authorized security research, SRC testing,
+vulnerability validation, and related defensive workflows.
 
-<a href="https://www.star-history.com/#oritera/Cairn&Date" target="_blank" rel="noopener noreferrer">
-  <img src="https://api.star-history.com/svg?repos=oritera/Cairn&type=Date" alt="Star History Chart" />
-</a>
+Do not use Cairn against systems, networks, applications, accounts, or data
+without explicit permission from the owner or operator. Unauthorized scanning,
+testing, exploitation, or data access may be illegal and may cause harm.
 
-## ⚖️ License
-This project is licensed under **GNU AGPLv3** for personal and educational use.
+You are responsible for how you configure and run this project, including the
+targets you provide, accounts you use, worker tools you enable, and artifacts
+you store. The developers and contributors do not endorse misuse and do not
+accept responsibility for damage, loss, legal consequences, or policy violations
+arising from unauthorized use.
 
-**Commercial Use**: If you wish to use this project in a commercial or proprietary environment without the AGPL-3.0 open-source obligations, **please contact me to obtain a commercial license.**
+## Upstream and license
 
-**Contributions**: By submitting a Pull Request, you agree that your contributions may be used under both the AGPL-3.0 and the project's commercial license.
+This repository is a modified version of
+[oritera/Cairn](https://github.com/oritera/Cairn).
+
+The original project copyright belongs to the original authors and
+contributors. Modifications in this repository are copyright `Qser3ne`.
+
+The original project and this modified version are distributed under the GNU
+Affero General Public License v3.0. See [`LICENSE`](./LICENSE) for the full
+license text.
