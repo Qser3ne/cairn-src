@@ -1,7 +1,3 @@
-<div align="center">
-
-<img src="./README/banner.png" alt="Cairn Banner"/>
-
 # Cairn SRC
 ### Authorized SRC recon and vulnerability workflow engine
 
@@ -9,12 +5,6 @@ This repository, `Qser3ne/cairn-src`, is a modified version of
 [oritera/Cairn](https://github.com/oritera/Cairn). It is maintained by
 `Qser3ne` and currently focuses on authorized Security Response Center (SRC)
 vulnerability research workflows.
-
-</div>
-
-<p align="center">
-  <img src="./README/cairn.png" alt="Cairn runtime screenshot" width="900" />
-</p>
 
 ## What is this fork?
 

@@ -36,6 +36,7 @@
 - 顶层 `README.md` 已按 `Qser3ne/cairn-src` 公开仓库重写，明确声明本仓库是 `oritera/Cairn` 的 modified version，由 `Qser3ne` 维护并聚焦授权 SRC 工作流。
 - README 当前覆盖 recon/vuln 流程、fact-intent graph、dispatcher、worker container、账号池、report 流程、配置、测试和安全免责声明。
 - README 已删除上游商业授权、PR 双授权、`personal and educational use`、上游 star history 等不适合下游公开仓库的表述。
+- README 不再引用 `README/` 目录下的 banner 或运行截图图片，当前保持纯文本 Markdown 入口。
 - `LICENSE` 保持标准 GNU AGPLv3 正文，不直接写入 fork 说明；版权和 attribution 说明集中放在 README。
 
 ## 续接验证
