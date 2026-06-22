@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS ephemeral_jobs (
     job_type TEXT NOT NULL,
     status TEXT NOT NULL,
     input_snapshot_yaml TEXT NOT NULL,
+    input_json TEXT,
     result_json TEXT,
     error TEXT,
     worker TEXT,
@@ -545,6 +546,8 @@ def _ensure_ephemeral_jobs_table(conn: sqlite3.Connection) -> None:
         """
     )
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(ephemeral_jobs)")}
+    if "input_json" not in columns:
+        conn.execute("ALTER TABLE ephemeral_jobs ADD COLUMN input_json TEXT")
     if "worker" not in columns:
         conn.execute("ALTER TABLE ephemeral_jobs ADD COLUMN worker TEXT")
 

@@ -40,6 +40,11 @@ tasks:
   report:
     # Timeout for drafting SRC submission reports.
     timeout: 180
+  fork_seed:
+    # Timeout for AI seeded recon -> vuln fork planning.
+    timeout: 120
+    # Hard cap on how many seed facts one fork planner may create.
+    max_seed_facts: 8
 
 container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.
@@ -61,7 +66,7 @@ workers:
   # max_running is per-worker concurrency. Slower backends such as Pi usually benefit from lower values.
   - name: "claudecode_deepseek-v4-pro"
     type: "claudecode"
-    task_types: [reason, explore, judge, report]
+    task_types: [reason, explore, judge, report, fork_seed]
     max_running: 2
     priority: 0
     env:
@@ -71,7 +76,7 @@ workers:
 
   - name: "codex_qwen3.6-plus"
     type: "codex"
-    task_types: [reason, explore, judge, report]
+    task_types: [reason, explore, judge, report, fork_seed]
     max_running: 2
     priority: 0
     env:
@@ -81,7 +86,7 @@ workers:
 
   - name: "pi_qwen3.6-plus"
     type: "pi"
-    task_types: [reason, explore, judge, report]
+    task_types: [reason, explore, judge, report, fork_seed]
     max_running: 2
     priority: 0
     env:

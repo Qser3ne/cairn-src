@@ -7,6 +7,7 @@ import pytest
 from cairn.dispatcher.contracts import (
     parse_json_output,
     validate_explore_payload,
+    validate_fork_seed_payload,
     validate_reason_payload,
 )
 from cairn.dispatcher.runtime.process import ManagedProcess
@@ -64,6 +65,69 @@ def test_vuln_reason_payload_allows_missing_auth_scope() -> None:
 
     assert kind == "intents"
     assert intents == [{"from": ["f001"], "description": "verify upload"}]
+
+
+def test_fork_seed_payload_requires_existing_source_fact() -> None:
+    graph_yaml = """
+project:
+  project_kind: recon
+facts:
+- id: origin
+  description: https://target.test
+- id: f001
+  description: upload endpoint
+"""
+    kind, data = validate_fork_seed_payload(
+        {
+            "accepted": True,
+            "data": {
+                "seed_facts": [
+                    {
+                        "title": "Upload surface",
+                        "auth_scope": "anonymous",
+                        "candidate_type": "api_surface",
+                        "derived_from": ["f001"],
+                        "description": "candidate_summary:\n- upload endpoint",
+                    }
+                ]
+            },
+        },
+        graph_yaml,
+    )
+
+    assert kind == "fork_seed"
+    assert data == {
+        "seed_facts": [
+            {
+                "title": "Upload surface",
+                "auth_scope": "anonymous",
+                "candidate_type": "api_surface",
+                "derived_from": ["f001"],
+                "description": "candidate_summary:\n- upload endpoint",
+            }
+        ]
+    }
+
+
+def test_fork_seed_payload_rejects_unknown_source_fact() -> None:
+    with pytest.raises(ValueError, match="unknown source fact missing"):
+        validate_fork_seed_payload(
+            {
+                "accepted": True,
+                "data": {
+                    "seed_facts": [
+                        {
+                            "title": "Missing",
+                            "auth_scope": "anonymous",
+                            "candidate_type": "api_surface",
+                            "derived_from": ["missing"],
+                            "description": "invalid",
+                        }
+                    ]
+                },
+            },
+            "facts:\n- id: f001\n  description: known\n",
+        )
 
 
 def test_reason_payload_requires_intent_when_none_are_open() -> None:

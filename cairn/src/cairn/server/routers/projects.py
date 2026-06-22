@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
+import yaml
 
 from cairn.server.db import get_conn
 from cairn.server.models import (
@@ -11,6 +12,9 @@ from cairn.server.models import (
     EphemeralJobFailRequest,
     EphemeralJobFinishRequest,
     Fact,
+    ForkSeedFinishRequest,
+    ForkSeedJobCreateResponse,
+    ForkVulnSeedJobRequest,
     ForkVulnRequest,
     HeartbeatRequest,
     Hint,
@@ -56,6 +60,126 @@ from cairn.server.services import (
 )
 
 router = APIRouter(tags=["projects"])
+
+
+def _seed_fact_description(seed_fact) -> str:
+    return (
+        f"seed_title: {seed_fact.title}\n"
+        f"seed_type: {seed_fact.candidate_type}\n"
+        f"auth_scope: {seed_fact.auth_scope}\n"
+        f"derived_from: {', '.join(seed_fact.derived_from)}\n\n"
+        f"{seed_fact.description}"
+    )
+
+
+def _insert_project_accounts(conn, project_id: str, accounts, now: str) -> list[dict]:
+    inserted = []
+    for index, account in enumerate(accounts or [], start=1):
+        account_id = next_account_id(conn, project_id)
+        label = account.label or f"account-{index}"
+        cookies_json = json.dumps(
+            [cookie.model_dump() for cookie in account.cookies],
+            ensure_ascii=False,
+        )
+        conn.execute(
+            "INSERT INTO project_accounts (id, project_id, label, cookies_json) VALUES (?, ?, ?, ?)",
+            (account_id, project_id, label, cookies_json),
+        )
+        inserted.append(
+            {
+                "id": account_id,
+                "label": label,
+                "cookies": [cookie.model_dump() for cookie in account.cookies],
+            }
+        )
+    return inserted
+
+
+def _create_seeded_vuln_project(conn, parent_project_id: str, snapshot_id: str, title: str, auth_mode: str, accounts, seed_facts) -> ProjectDetail:
+    parent = check_project_kind(conn, parent_project_id, "recon")
+    snapshot = get_snapshot_or_404(conn, parent_project_id, snapshot_id)
+    try:
+        snapshot_data = yaml.safe_load(snapshot["summary_yaml"]) or {}
+    except yaml.YAMLError as exc:
+        raise HTTPException(422, "Snapshot summary_yaml is invalid") from exc
+    parent_fact_ids = {
+        fact["id"]
+        for fact in snapshot_data.get("facts", [])
+        if isinstance(fact, dict) and isinstance(fact.get("id"), str)
+    }
+    for seed_fact in seed_facts:
+        missing = [fact_id for fact_id in seed_fact.derived_from if fact_id not in parent_fact_ids]
+        if missing:
+            raise HTTPException(422, f"seed fact references unknown parent facts: {', '.join(missing)}")
+
+    pid = next_project_id(conn)
+    now = utcnow()
+    conn.execute(
+        """
+        INSERT INTO projects (
+            id,
+            title,
+            status,
+            project_kind,
+            auth_mode,
+            parent_project_id,
+            parent_snapshot_id,
+            created_at
+        ) VALUES (?, ?, 'active', 'vuln', ?, ?, ?, ?)
+        """,
+        (pid, title, auth_mode, parent_project_id, snapshot_id, now),
+    )
+    origin = conn.execute(
+        "SELECT description FROM facts WHERE id = 'origin' AND project_id = ?",
+        (parent_project_id,),
+    ).fetchone()
+    conn.execute(
+        "INSERT INTO facts (id, project_id, description) VALUES ('origin', ?, ?)",
+        (pid, origin["description"] if origin else parent["title"]),
+    )
+    conn.execute(
+        "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
+        (
+            "f001",
+            pid,
+            (
+                f"recon_snapshot: {snapshot_id}\n"
+                f"parent_project_id: {parent_project_id}\n"
+                "source: ProjectSnapshot.summary_yaml"
+            ),
+        ),
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO scoped_counters (project_id, kind, value)
+        VALUES (?, 'fact', 1)
+        """,
+        (pid,),
+    )
+    conn.execute(
+        """
+        UPDATE scoped_counters
+        SET value = MAX(value, 1)
+        WHERE project_id = ? AND kind = 'fact'
+        """,
+        (pid,),
+    )
+    for seed_fact in seed_facts:
+        child_fact_id = next_fact_id(conn, pid)
+        conn.execute(
+            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
+            (child_fact_id, pid, _seed_fact_description(seed_fact)),
+        )
+    inserted_accounts = _insert_project_accounts(conn, pid, accounts, now)
+    facts = conn.execute("SELECT * FROM facts WHERE project_id = ? ORDER BY id", (pid,)).fetchall()
+    return ProjectDetail(
+        project=project_meta_from_row(get_project_or_404(conn, pid)),
+        facts=[Fact(**dict(f)) for f in facts],
+        intents=[],
+        hints=[],
+        findings=[],
+        accounts=inserted_accounts,
+    )
 
 
 def _summary_from_row(row) -> ProjectSummary:
@@ -500,6 +624,70 @@ def fork_vuln_project(project_id: str, body: ForkVulnRequest):
         )
 
 
+@router.post("/projects/{project_id}/fork-vuln/seed-jobs", response_model=ForkSeedJobCreateResponse, status_code=201)
+def create_fork_seed_job(project_id: str, body: ForkVulnSeedJobRequest):
+    with get_conn() as conn:
+        check_project_kind(conn, project_id, "recon")
+        snapshot = get_snapshot_or_404(conn, project_id, body.snapshot_id)
+        job_id = next_ephemeral_job_id(conn, "fork_")
+        now = utcnow()
+        expires = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        input_data = body.model_dump(mode="json")
+        conn.execute(
+            """
+            INSERT INTO ephemeral_jobs (
+                id,
+                project_id,
+                job_type,
+                status,
+                input_snapshot_yaml,
+                input_json,
+                created_at,
+                expires_at
+            ) VALUES (?, ?, 'fork_seed', 'queued', ?, ?, ?, ?)
+            """,
+            (
+                job_id,
+                project_id,
+                snapshot["summary_yaml"],
+                json.dumps(input_data, ensure_ascii=False),
+                now,
+                expires,
+            ),
+        )
+        return ForkSeedJobCreateResponse(job_id=job_id, status="queued")
+
+
+@router.get("/projects/{project_id}/fork-vuln/seed-jobs", response_model=list[JudgementResult])
+def list_fork_seed_jobs(project_id: str):
+    with get_conn() as conn:
+        check_project_kind(conn, project_id, "recon")
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM ephemeral_jobs
+            WHERE project_id = ? AND job_type = 'fork_seed'
+            ORDER BY created_at DESC, id DESC
+            """,
+            (project_id,),
+        ).fetchall()
+        jobs = [ephemeral_job_to_model(row) for row in rows]
+        return [
+            JudgementResult(
+                id=job.id,
+                status=job.status,
+                result=job.result,
+                error=job.error,
+                worker=job.worker,
+                created_at=job.created_at,
+                started_at=job.started_at,
+                finished_at=job.finished_at,
+                expires_at=job.expires_at,
+            )
+            for job in jobs
+        ]
+
+
 @router.get("/projects/{project_id}/children", response_model=list[ProjectSummary])
 def list_project_children(project_id: str):
     with get_conn() as conn:
@@ -599,10 +787,51 @@ def claim_ephemeral_job(job_id: str, body: EphemeralJobClaimRequest):
         return ephemeral_job_to_model(get_ephemeral_job_or_404(conn, job_id))
 
 
+@router.post("/ephemeral-jobs/{job_id}/finish-fork-seed", response_model=EphemeralJob)
+def finish_fork_seed_job(job_id: str, body: ForkSeedFinishRequest):
+    with get_conn() as conn:
+        row = get_ephemeral_job_or_404(conn, job_id)
+        if row["job_type"] != "fork_seed":
+            raise HTTPException(400, "Ephemeral job is not a fork_seed job")
+        if row["status"] != "running" or row["worker"] != body.worker:
+            raise HTTPException(409, "Ephemeral job is not claimed by this worker")
+        if not row["input_json"]:
+            raise HTTPException(422, "Fork seed job is missing input_json")
+        input_data = ForkVulnSeedJobRequest.model_validate(json.loads(row["input_json"]))
+        child = _create_seeded_vuln_project(
+            conn,
+            row["project_id"],
+            input_data.snapshot_id,
+            input_data.title,
+            input_data.auth_mode,
+            input_data.accounts,
+            body.seed_facts,
+        )
+        result = {
+            "child_project_id": child.project.id,
+            "snapshot_id": input_data.snapshot_id,
+            "seed_fact_ids": [fact.id for fact in child.facts if fact.id not in ("origin", "f001")],
+        }
+        now = utcnow()
+        conn.execute(
+            """
+            UPDATE ephemeral_jobs
+            SET status = 'succeeded',
+                result_json = ?,
+                finished_at = ?
+            WHERE id = ?
+            """,
+            (json.dumps(result, ensure_ascii=False), now, job_id),
+        )
+        return ephemeral_job_to_model(get_ephemeral_job_or_404(conn, job_id))
+
+
 @router.post("/ephemeral-jobs/{job_id}/finish", response_model=EphemeralJob)
 def finish_ephemeral_job(job_id: str, body: EphemeralJobFinishRequest):
     with get_conn() as conn:
         row = get_ephemeral_job_or_404(conn, job_id)
+        if row["job_type"] == "fork_seed":
+            raise HTTPException(400, "Use finish-fork-seed for fork_seed jobs")
         if row["status"] != "running" or row["worker"] != body.worker:
             raise HTTPException(409, "Ephemeral job is not claimed by this worker")
         now = utcnow()

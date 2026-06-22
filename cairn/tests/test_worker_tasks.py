@@ -7,7 +7,7 @@ from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.process import ProcessResult
 from cairn.dispatcher.tasks.common import HealthcheckRun
-from cairn.dispatcher.tasks import explore, judge, reason, report
+from cairn.dispatcher.tasks import explore, fork_seed, judge, reason, report
 from cairn.server.models import EphemeralJob
 
 from conftest import (
@@ -507,6 +507,7 @@ def test_authenticated_explore_prompt_includes_leased_account(monkeypatch) -> No
 class FakeEphemeralClient:
     claimed: list[tuple[str, str]] = field(default_factory=list)
     finished: list[tuple[str, str, dict]] = field(default_factory=list)
+    finished_fork_seed: list[tuple[str, str, list[dict]]] = field(default_factory=list)
     failed: list[tuple[str, str, str]] = field(default_factory=list)
 
     def claim_ephemeral_job(self, job_id: str, worker: str) -> ApiResult:
@@ -515,6 +516,10 @@ class FakeEphemeralClient:
 
     def finish_ephemeral_job(self, job_id: str, worker: str, result: dict) -> ApiResult:
         self.finished.append((job_id, worker, result))
+        return ApiResult(200, {})
+
+    def finish_fork_seed_job(self, job_id: str, worker: str, seed_facts: list[dict]) -> ApiResult:
+        self.finished_fork_seed.append((job_id, worker, seed_facts))
         return ApiResult(200, {})
 
     def fail_ephemeral_job(self, job_id: str, worker: str, error: str) -> ApiResult:
@@ -585,6 +590,55 @@ def test_judge_task_marks_cancelled_ephemeral_job_failed(monkeypatch) -> None:
     assert client.claimed == [("job_001", "test-worker")]
     assert client.failed == [("job_001", "test-worker", "judge cancelled: stopped")]
     assert client.finished == []
+
+
+def test_fork_seed_task_finishes_with_seed_facts(monkeypatch) -> None:
+    config = make_config()
+    client = FakeEphemeralClient()
+    containers = FakeContainerManager()
+    driver = FakeDriver()
+    job = EphemeralJob(
+        id="fork_001",
+        project_id="proj_001",
+        job_type="fork_seed",
+        status="queued",
+        input_snapshot_yaml="project:\n  project_kind: recon\nfacts:\n- id: origin\n  description: https://target.test\n- id: f001\n  description: upload endpoint\n",
+        created_at="2026-01-01T00:00:00Z",
+        expires_at="2026-01-02T00:00:00Z",
+    )
+
+    monkeypatch.setattr(fork_seed, "get_driver", lambda _name: driver)
+    monkeypatch.setattr(fork_seed, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        fork_seed,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"seed_facts":[{"title":"Upload surface","auth_scope":"anonymous","candidate_type":"api_surface","derived_from":["f001"],"description":"candidate_summary:\\n- upload endpoint"}]}}',
+            "",
+        ),
+    )
+
+    outcome = fork_seed.run_fork_seed_task(config, client, containers, job, config.workers[0], TaskCancellation())
+
+    assert outcome == "success"
+    assert client.claimed == [("fork_001", "test-worker")]
+    assert client.finished_fork_seed == [
+        (
+            "fork_001",
+            "test-worker",
+            [
+                {
+                    "title": "Upload surface",
+                    "auth_scope": "anonymous",
+                    "candidate_type": "api_surface",
+                    "derived_from": ["f001"],
+                    "description": "candidate_summary:\n- upload endpoint",
+                }
+            ],
+        )
+    ]
+    assert containers.writes[0][1].startswith("/tmp/cairn-prompts/fork_seed_execute-")
 
 
 def test_report_task_writes_report_artifact(monkeypatch) -> None:

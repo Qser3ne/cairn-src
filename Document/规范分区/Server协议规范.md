@@ -7,7 +7,7 @@ Cairn Server 是 projects、facts、intents、hints、findings、snapshots、rep
 当前协议是 SRC-only：
 
 - `project_kind="recon"` 用于收集攻击面知识。
-- `project_kind="vuln"` 用于基于 recon snapshot 验证漏洞。
+- `project_kind="vuln"` 用于基于 recon snapshot 生成的 AI seed facts 验证漏洞。
 - 新项目默认是 recon。
 - 新 vuln 项目必须引用 parent recon project 和 snapshot。
 - Standard mode 与 bootstrap auto-completion 已移除。
@@ -103,7 +103,7 @@ triaged_at
 
 ### Snapshot
 
-Recon snapshots 存储 YAML export、selected fact IDs 和 stats。它们是新 vuln 项目的唯一支持来源。
+Recon snapshots 存储 YAML export、selected fact IDs 和 stats。默认 AI seeded fork 使用 `summary_yaml` 作为主输入生成 child vuln seed facts；`selected_fact_ids` 仅保留给 legacy/manual copy fork。
 
 ### Ephemeral Job
 
@@ -286,7 +286,58 @@ Body：
 
 列出项目 snapshots。
 
+### POST /projects/{project_id}/fork-vuln/seed-jobs
+
+默认 AI seeded vuln fork 路径。仅 recon 可用。Body：
+
+```json
+{
+  "title": "Validate upload candidates",
+  "snapshot_id": "snap_001",
+  "auth_mode": "anonymous",
+  "candidate_limit": 8,
+  "accounts": null
+}
+```
+
+规则：
+
+- Parent project 必须是 recon。
+- Snapshot 必须属于 parent。
+- Server 创建 `job_type="fork_seed"` ephemeral job，并把 `snapshot.summary_yaml` 捕获为 `input_snapshot_yaml`。
+- Dispatcher 调度 AI fork planner 读取 snapshot graph，输出 `seed_facts`。
+- `finish-fork-seed` 原子创建 child vuln project，并写入 `origin`、`recon_snapshot` reference fact 和 AI seed facts。
+- AI seed facts 必须包含 `derived_from`，引用 parent recon snapshot 中存在的 fact IDs。
+- Authenticated child vuln 需要在 fork request 中提供 accounts；每个 account 表示一个 cookie session。
+
+### GET /projects/{project_id}/fork-vuln/seed-jobs
+
+列出 parent recon 的 AI seeded fork job results，按创建时间倒序排列。成功结果包含 `child_project_id`、`snapshot_id` 和 `seed_fact_ids`。
+
+### POST /ephemeral-jobs/{job_id}/finish-fork-seed
+
+仅 Dispatcher 使用。Body：
+
+```json
+{
+  "worker": "planner-a",
+  "seed_facts": [
+    {
+      "title": "Anonymous auth surface",
+      "auth_scope": "anonymous",
+      "candidate_type": "auth_surface",
+      "derived_from": ["f006", "f008"],
+      "description": "candidate_summary:\n- ..."
+    }
+  ]
+}
+```
+
+成功后 job 变为 `succeeded`，并创建 child vuln project。通用 `/ephemeral-jobs/{job_id}/finish` 不接受 `fork_seed` job。
+
 ### POST /projects/{project_id}/fork-vuln
+
+Legacy/manual copy fork 路径。仅 recon 可用。Body：
 
 仅 recon 可用。Body：
 
@@ -307,7 +358,7 @@ Body：
 - Child 创建为 `project_kind="vuln"`。
 - Child 记录 `parent_project_id` 和 `parent_snapshot_id`。
 - Child 获得 `origin` 和包含 `recon_snapshot` 的 `f001`。
-- Selected parent facts 可以复制到 child。
+- Selected parent facts 可以复制到 child。默认 UI 不再使用该路径，避免用户手动 selected facts 成为 recon/vuln 主交接机制。
 - Authenticated child vuln 需要在 fork request 中提供 accounts；每个 account 表示一个 cookie session。
 
 ### GET /projects/{project_id}/children

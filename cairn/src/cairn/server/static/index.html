@@ -723,9 +723,42 @@
                 </div>
               </section>
             </template>
+            <template x-if="forkSeedJobs.length > 0">
+              <section class="rounded-2xl border border-rose-100 bg-white shadow-sm overflow-hidden">
+                <div class="px-4 py-3 border-b border-rose-50 bg-rose-50/70">
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
+                      <p class="text-xs font-semibold uppercase tracking-widest text-rose-400">AI Seeded Fork</p>
+                      <p class="mt-1 text-sm font-medium text-slate-700" x-text="latestForkSeedJob() ? `Latest ${latestForkSeedJob().id}` : 'No fork job yet'"></p>
+                    </div>
+                    <span class="rounded-md border px-2 py-1 text-[11px] font-semibold uppercase"
+                      :class="forkSeedStatusClass(latestForkSeedJob())"
+                      x-text="latestForkSeedJob()?.status || 'unknown'"></span>
+                  </div>
+                </div>
+                <div class="p-4 space-y-3 text-xs">
+                  <template x-if="latestForkSeedJob()?.worker">
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="latestForkSeedJob().worker"></span></div>
+                  </template>
+                  <template x-if="latestForkSeedJob()?.result?.child_project_id">
+                    <button type="button" @click="openProject(latestForkSeedJob().result.child_project_id)" class="w-full rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-left text-rose-700 hover:bg-rose-100 transition">
+                      <span class="block text-[10px] uppercase tracking-widest opacity-70">Child Vuln Project</span>
+                      <span class="mt-1 block font-mono" x-text="latestForkSeedJob().result.child_project_id"></span>
+                    </button>
+                  </template>
+                  <template x-if="latestForkSeedJob()?.error">
+                    <div class="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-rose-700 whitespace-pre-wrap break-words" x-text="latestForkSeedJob().error"></div>
+                  </template>
+                  <div class="flex items-center justify-between gap-3 text-slate-400">
+                    <span x-text="formatTime(latestForkSeedJob().finished_at || latestForkSeedJob().started_at || latestForkSeedJob().created_at)"></span>
+                    <span x-show="latestForkSeedJob()?.result?.seed_fact_ids" x-text="`${latestForkSeedJob().result.seed_fact_ids.length} seed facts`"></span>
+                  </div>
+                </div>
+              </section>
+            </template>
             <div class="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-5 py-8 text-center shadow-sm">
               <p class="text-sm text-slate-400">Click a node or edge</p>
-              <p class="text-xs text-slate-300 mt-1">Shift+click for multi-select</p>
+              <p class="text-xs text-slate-300 mt-1">Fork Vuln uses AI seeded facts from snapshots</p>
             </div>
           </div>
         </template>
@@ -1290,6 +1323,7 @@ function cairnApp() {
     projects: [],
     project: null,
     reconJudgements: [],
+    forkSeedJobs: [],
     selectedProjectId: '',
     polling: true,
     pollTimer: null,
@@ -1627,7 +1661,8 @@ function cairnApp() {
     },
 
     newProjectCanCreate() {
-      if (!this.newProject.title?.trim() || !this.newProject.origin?.trim()) return false;
+      if (!this.newProject.title?.trim()) return false;
+      if (this.newProject.project_kind === 'recon' && !this.newProject.origin?.trim()) return false;
       if (!this.newProjectAccountsValid()) return false;
       if (this.newProject.project_kind === 'vuln') {
         return Boolean(this.newProject.parent_project_id && this.newProject.parent_snapshot_id);
@@ -1994,6 +2029,7 @@ function cairnApp() {
       try {
         this.project = await this.api('GET', `/projects/${id}`);
         await this.loadReconJudgements(id);
+        await this.loadForkSeedJobs(id);
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
@@ -2007,6 +2043,19 @@ function cairnApp() {
       } catch(e) {
         console.error(e);
         this.reconJudgements = [];
+      }
+    },
+
+    async loadForkSeedJobs(id) {
+      if (!id || this.project?.project?.project_kind !== 'recon') {
+        this.forkSeedJobs = [];
+        return;
+      }
+      try {
+        this.forkSeedJobs = await this.api('GET', `/projects/${id}/fork-vuln/seed-jobs`);
+      } catch(e) {
+        console.error(e);
+        this.forkSeedJobs = [];
       }
     },
 
@@ -3263,6 +3312,18 @@ function cairnApp() {
       return this.reconJudgements?.[0] || null;
     },
 
+    latestForkSeedJob() {
+      return this.forkSeedJobs?.[0] || null;
+    },
+
+    forkSeedStatusClass(job) {
+      const status = job?.status;
+      if (status === 'succeeded') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      if (status === 'failed' || status === 'expired') return 'bg-rose-50 text-rose-700 border-rose-200';
+      if (status === 'running') return 'bg-amber-50 text-amber-700 border-amber-200';
+      return 'bg-slate-50 text-slate-600 border-slate-200';
+    },
+
     judgementResult(job) {
       return job?.result || {};
     },
@@ -3686,6 +3747,27 @@ function cairnApp() {
       try {
         const actor = this.actorName();
         const hintContents = this.newProject.hints.filter(h => h.content?.trim());
+        if (this.newProject.project_kind === 'vuln') {
+          const body = {
+            title: this.newProject.title.trim(),
+            snapshot_id: this.newProject.parent_snapshot_id,
+            auth_mode: this.newProject.auth_mode,
+          };
+          if (body.auth_mode === 'authenticated') {
+            body.accounts = this.cleanedNewProjectAccounts();
+          }
+          const data = await this.api('POST', `/projects/${this.newProject.parent_project_id}/fork-vuln/seed-jobs`, body);
+          const parentId = this.newProject.parent_project_id;
+          this.showNewProject = false;
+          this.resetNewProjectForm();
+          await this.loadProjects();
+          if (this.selectedProjectId === parentId) {
+            await this.loadProject(parentId);
+            this.sideTab = 'detail';
+          }
+          this.showToast(`AI seeded fork queued: ${data.job_id}`);
+          return;
+        }
         const body = {
           title: this.newProject.title.trim(),
           origin: this.newProject.origin.trim(),
@@ -3694,14 +3776,6 @@ function cairnApp() {
         if (this.newProject.project_kind === 'recon') {
           body.recon_max_reason_rounds = Number(this.newProject.recon_max_reason_rounds) || 8;
           body.accounts = this.cleanedNewProjectAccounts();
-        }
-        if (this.newProject.project_kind === 'vuln') {
-          body.parent_project_id = this.newProject.parent_project_id;
-          body.parent_snapshot_id = this.newProject.parent_snapshot_id;
-          body.auth_mode = this.newProject.auth_mode;
-          if (body.auth_mode === 'authenticated') {
-            body.accounts = this.cleanedNewProjectAccounts();
-          }
         }
         const hints = hintContents.map(h => ({ content: h.content.trim(), creator: actor }));
         if (hints.length > 0) body.hints = hints;
@@ -3731,12 +3805,12 @@ function cairnApp() {
     async createReconSnapshot() {
       if (!this.selectedProjectId || this.project?.project?.project_kind !== 'recon') return;
       try {
-        const selected_fact_ids = this.selectedFacts;
         const snapshot = await this.api('POST', `/projects/${this.selectedProjectId}/snapshots`, {
           snapshot_type: 'recon_fork',
-          selected_fact_ids,
+          selected_fact_ids: [],
         });
-        this.showToast(`Snapshot created: ${snapshot.id}`);
+        await this.loadNewProjectSnapshots();
+        this.showToast(`AI fork snapshot created: ${snapshot.id}`);
       } catch (e) {
         this.showToast(e.message, 'error');
       }

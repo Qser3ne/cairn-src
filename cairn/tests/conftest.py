@@ -35,7 +35,7 @@ def make_config() -> DispatchConfig:
                 {
                     "name": "test-worker",
                     "type": "mock",
-                    "task_types": ["reason", "explore", "judge", "report"],
+                    "task_types": ["reason", "explore", "judge", "report", "fork_seed"],
                     "max_running": 1,
                     "priority": 0,
                 }

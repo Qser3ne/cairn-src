@@ -433,6 +433,80 @@ class ForkVulnRequest(BaseModel):
         return self
 
 
+class ForkVulnSeedJobRequest(BaseModel):
+    title: str
+    auth_mode: AuthMode = "anonymous"
+    snapshot_id: str
+    candidate_limit: int | None = Field(default=8, ge=1)
+    accounts: list[ProjectAccountCreate] | None = None
+
+    @field_validator("title", "snapshot_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @model_validator(mode="after")
+    def validate_accounts(self) -> "ForkVulnSeedJobRequest":
+        accounts = self.accounts or []
+        if self.auth_mode == "dual":
+            raise ValueError("vuln project auth_mode must be anonymous or authenticated")
+        if self.auth_mode != "authenticated" and accounts:
+            raise ValueError("accounts are only supported for authenticated projects")
+        if self.auth_mode == "authenticated" and not accounts:
+            raise ValueError("authenticated vuln project requires at least one cookie session")
+        return self
+
+
+class ForkSeedFact(BaseModel):
+    title: str
+    auth_scope: AuthScope
+    candidate_type: str
+    derived_from: list[str] = Field(min_length=1)
+    description: str
+
+    @field_validator("title", "candidate_type", "description")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+    @field_validator("derived_from")
+    @classmethod
+    def validate_derived_from(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for item in value:
+            text = item.strip()
+            if not text:
+                raise ValueError("derived_from fact ids must not be empty")
+            cleaned.append(text)
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("derived_from fact ids must be unique")
+        return cleaned
+
+
+class ForkSeedFinishRequest(BaseModel):
+    worker: str
+    seed_facts: list[ForkSeedFact] = Field(min_length=1, max_length=10)
+
+    @field_validator("worker")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class ForkSeedJobCreateResponse(BaseModel):
+    job_id: str
+    status: str
+
+
 class JudgementCreateResponse(BaseModel):
     job_id: str
     status: str
@@ -456,6 +530,7 @@ class EphemeralJob(BaseModel):
     job_type: str
     status: EphemeralJobStatus
     input_snapshot_yaml: str
+    input: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
     worker: str | None = None

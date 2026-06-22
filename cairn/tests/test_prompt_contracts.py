@@ -52,6 +52,17 @@ def test_recon_judge_prompt_declares_ephemeral_no_graph_write() -> None:
         assert graph_resource in prompt
 
 
+def test_recon_fork_seed_prompt_declares_seed_fact_contract() -> None:
+    prompt = _read_default_recon_prompt("fork_seed.md")
+
+    assert "{graph_yaml}" in prompt
+    assert "{max_seed_facts}" in prompt
+    assert "derived_from" in prompt
+    assert "seed_facts" in prompt
+    assert "不要创建 findings" in prompt
+    assert "不要原样复制 recon fact" in prompt
+
+
 def test_default_prompts_prefer_chinese_readable_output_without_protocol_translation() -> None:
     prompt_names = {
         "recon": ("reason.md", "explore.md", "explore_conclude.md", "judge.md"),

@@ -15,6 +15,8 @@
 - 已加入安全红线：不得爆破、不得修改目标文件或数据、不得影响目标业务可用性。
 - 已加入涂鸦 SRC 漏洞评级与忽略范围，供 worker 判断 finding 严重性和是否应提交。
 - 已要求长输出、扫描日志、截图、PoC 输出和请求响应摘要保存到 `/home/kali/evidence`，最终报告草稿保存到 `/home/kali/reports`，并在结论中引用路径。
+- 默认 vuln reason 提示词已补强 finding 派生策略：已有 finding 不再自动表示同机制收敛，worker 应在 `noop` 前检查全图未覆盖的 token/source/receiver/interface/condition 矩阵；只有目标、入口、来源/接收方、参数矩阵和验证目的均重复时才应视为重复。
+- 默认 vuln explore 提示词已要求 finding 成立时主动判断是否存在非重复后续派生方向，必要时填写 `followup_reason` 和 `followup_intent_description`；无法完成的 intent 需要明确已完成与未完成验证矩阵。
 - 已约定 `/home/kali/workspace` 用于任务过程文件，`/home/kali/targets` 用于只读挂载源码、样本或安装包，`/home/kali/cache` 用于工具缓存。
 - `container/AGENTS.md` 明确 worker 黑盒 SRC 工具优先，`semgrep`、`gitleaks`、`pip-audit`、`retire`、`osv-scanner` 只作为白盒和依赖审计辅助；白盒结果必须落到真实外部入口和可复现攻击链，不能单独作为 SRC finding。
 - Web SRC 轻量工具链包括 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`；这些工具多数用于产生线索，不能把扫描结果直接作为漏洞。
@@ -41,3 +43,4 @@
 - `cairn/tests/test_prompt_contracts.py` 覆盖默认 recon prompt 契约：`validate_prompt_resources("default")` 不得失败，`reason.md` 必须保留 `auth_scope`、`anonymous`、`authenticated` 和禁止 `complete` 输出说明，`explore.md` 必须禁止 `findings` 字段，`judge.md` 必须声明 ephemeral judgement 且不得写入 facts、intents、findings、reports。
 - `cairn/tests/test_prompt_contracts.py` 也覆盖默认 recon/vuln `reason.md`、`explore.md`、`explore_conclude.md` 和 recon `judge.md` 的中文优先软约束：提示词应包含“建议优先使用简体中文”，并明确不要把协议字段改成中文。
 - 单纯修改提示词和文档时，可优先做模板变量与 JSON 契约检查；修改 prompt contract 测试时运行 `pytest tests/test_prompt_contracts.py` 和相关 dispatcher 测试。
+- 修改 vuln prompt 的 finding 派生、follow-up 或矩阵描述规则时，至少运行 `pytest tests/test_prompt_contracts.py`；如涉及 JSON 解析或 finding 字段约束，再运行 `pytest tests/test_contracts_and_drivers.py`。

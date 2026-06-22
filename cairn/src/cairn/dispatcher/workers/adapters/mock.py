@@ -115,6 +115,15 @@ if phase=="report":
         print(json.dumps({"accepted":True,"data":{}}, ensure_ascii=False))
     raise SystemExit(0)
 
+if phase=="fork_seed":
+    if outcome=="seed":
+        print(json.dumps({"accepted":True,"data":{"seed_facts":[{"title":"模拟匿名攻击面","auth_scope":"anonymous","candidate_type":"auth_surface","derived_from":["f001"],"description":"基于 recon f001 生成的模拟 vuln seed fact。"}]}}, ensure_ascii=False))
+    elif outcome=="rejected":
+        print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
+    else:
+        print(json.dumps({"accepted":True,"data":{}}, ensure_ascii=False))
+    raise SystemExit(0)
+
 if outcome=="fact":
     label = prompt.get("intent_id") or phase
     print(json.dumps({"accepted":True,"data":{"description":f"模拟事实：{label} 已产生一条增量观察。"}} , ensure_ascii=False))

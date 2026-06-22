@@ -62,7 +62,7 @@ Recon 生命周期按以下阶段推进：
 3. Dispatcher 调度 recon `explore`。Explore 一次只执行一个 intent，产出已确认的攻击面 facts；不验证漏洞、不创建 findings。
 4. 用户或流程触发 Evaluate Recon。Server 创建 `judge` ephemeral job，Dispatcher 调度 judge worker 评估当前 recon 是否适合 fork vuln。
 5. 用户创建 recon snapshot。Snapshot 捕获 recon graph，用作 fork vuln 的边界。
-6. 用户从 snapshot fork `vuln` 项目，并选择复制哪些 recon facts 到 child project。
+6. 用户从 snapshot 触发 AI seeded fork；AI fork planner 读取 snapshot graph，生成 child vuln 的初始 seed facts。
 7. Vuln 项目继续执行漏洞验证、finding 生命周期和 report 生成。
 
 Recon 可以因为 round budget 到达上限而自动变为 `stopped`，但这只表示 recon 探索预算用尽，不表示漏洞验证完成。
@@ -114,15 +114,16 @@ Judge recommended action 只使用 `create_vuln_project`、`continue_anonymous_r
 
 Snapshot 是 recon 与 vuln 的硬边界。Recon graph 中的 facts 只说明“观察到什么”和“哪些线索值得验证”，不等价于漏洞结论。
 
-Fork vuln 时：
+默认 AI seeded fork vuln 时：
 
 - Parent project 必须是 recon。
 - Child project 必须是 vuln。
 - Child 记录 `parent_project_id` 和 `parent_snapshot_id`。
 - Child 创建自己的 `origin`，并写入一条表示 recon snapshot 来源的 fact。
-- 用户或 API 可以选择复制部分 recon facts 到 child，用作漏洞验证上下文。
+- AI fork planner 基于 recon snapshot 生成多个面向漏洞验证的 seed facts，并在每条 seed fact 中保留 `derived_from` 来源 fact IDs。
+- Legacy/manual fork API 仍可复制 selected recon facts，但默认 UI 不再把 selected facts 作为 recon/vuln 主交接机制。
 
-Fork 后，vuln 的 facts、findings、report records 与 parent recon 分离。Vuln 可以引用 recon snapshot 的上下文，但不能把漏洞验证结果写回 parent recon graph。
+Fork 后，vuln 的 facts、findings、report records 与 parent recon 分离。Vuln 可以引用 recon snapshot 的上下文和 AI seed facts，但不能把漏洞验证结果写回 parent recon graph。
 
 ## 匿名与登录态 recon 线路
 

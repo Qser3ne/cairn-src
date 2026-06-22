@@ -25,8 +25,10 @@
 - judge 是 `ephemeral_jobs`，只写 job result 和 project `judge_status/judged_at`，不写 graph。
 - Project ID 和 judge ephemeral job ID 不再依赖全局 `counters` 单调递增；`next_project_id` 从当前 `projects.id` 最大 `proj_###` 计算，`next_ephemeral_job_id` 从当前 `ephemeral_jobs.id` 最大 `judge_###` 计算。删除当前最大编号后可复用该编号，中间空洞不填补；项目内 scoped IDs 仍使用 `scoped_counters`。
 - stopped recon 仍允许执行 judge；dispatcher 不应因项目 stopped 取消 judge，也不应在 stopped judge 运行中执行 stopped-container cleanup。completed/deleted 等状态仍会取消 judge，并由 dispatcher 调用 ephemeral job fail 接口把 job 从 `running` 写回 `failed`。
-- snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` fact，可复制 selected facts。
+- snapshot 只允许 recon 创建；默认 fork-vuln 走 AI seeded fork job，Dispatcher 读取 snapshot YAML 生成 seed facts，Server 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` reference fact 和 AI seed facts。旧 `/fork-vuln` copy selected facts 路径保留为 legacy/manual API。
 - vuln explore 可写 findings；finding lifecycle 可自动创建 follow-up explore intent 或 report intent。
+- vuln reason prompt 已补强 finding 派生策略：返回 `noop` 前必须检查全图 finding/fact 的未覆盖矩阵；同一漏洞机制下的新 token 来源、接收方、接口族、最小条件矩阵或影响面补强可以创建窄范围派生 intent，但禁止无明确新增维度的泛化 intent。
+- vuln explore prompt 已要求 finding 成立时主动填写可选 follow-up 描述；无法完成的 intent 需要记录已完成矩阵、未完成矩阵和是否建议 fresh 条件复测。
 - report task 写入 `finding_reports` 并更新 finding `report_status="drafted"`。
 - `projects.reason_pending` 是 reason/explore 并发安全信号：reason 运行期间有新 fact/hint 写入时置为 true；当前 reason release 后 Dispatcher 会基于 pending 立即再跑一轮 reason，claim 新 reason 时清除 pending，避免新增事实被 checkpoint 吞掉。
 - recon 固定 `auth_mode="dual"`，新建时必须有 `project_accounts` cookie session，reason 首轮必须创建 anonymous/authenticated 两条 baseline intent。

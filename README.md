@@ -14,7 +14,7 @@ to an SRC-only workflow:
 
 - `recon` projects collect attack-surface facts, authentication boundaries,
   endpoints, assets, and candidate leads.
-- `vuln` projects are forked from recon snapshots and focus on validating,
+- `vuln` projects are AI-seeded from recon snapshots and focus on validating,
   following up, and reporting vulnerabilities.
 - workers never decide that a project is complete on their own. `completed` is
   a manual archive state.
@@ -33,8 +33,8 @@ intents, confirmed facts, human hints, findings, snapshots, and report drafts.
 3. Recon `explore` tasks write confirmed facts. Recon can be evaluated by a
    `judge` task, which records an ephemeral readiness judgement without writing
    to the graph.
-4. Create a recon snapshot, then fork a `vuln` project from that snapshot.
-   Selected recon facts can be copied into the child project.
+4. Create a recon snapshot, then start an AI seeded fork from that snapshot.
+   The fork planner reads the snapshot graph and creates child vuln seed facts.
 5. Vuln `explore` tasks can write facts and findings. Findings can create
    follow-up explore intents or report intents.
 6. `report` tasks draft SRC submission reports and update finding report state.
@@ -88,6 +88,7 @@ dispatcher to validate and write back.
 | `reason` | `recon`, `vuln` | Read graph state and propose useful next intents | Intents or no-op round state |
 | `explore` | `recon`, `vuln` | Claim and execute one intent | Facts, optional vuln findings |
 | `judge` | `recon` | Evaluate recon readiness for vuln fork | Ephemeral job result |
+| `fork_seed` | `recon` | Generate child vuln seed facts from a recon snapshot | Child vuln project |
 | `report` | `vuln` | Draft an SRC report from a finding | Finding report draft |
 
 Supported worker backends are Claude Code, Codex, Pi, and the mock adapter used

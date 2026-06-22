@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-TaskType = Literal["reason", "explore", "judge", "report"]
+TaskType = Literal["reason", "explore", "judge", "report", "fork_seed"]
 WorkerType = Literal["claudecode", "codex", "pi", "mock"]
 CompletedAction = Literal["remove", "stop"]
 WorkerHealthcheckMode = Literal["startup_and_task", "startup_only", "disabled"]
@@ -48,6 +48,7 @@ PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
         "explore_conclude.md": ("{intent_id}",),
         "judge.md": (),
         "report.md": ("{intent_id}", "{intent_description}"),
+        "fork_seed.md": (),
     }
 }
 
@@ -62,6 +63,7 @@ PROMPT_REQUIRED_TOKENS_BY_KIND: dict[str, dict[str, dict[str, tuple[str, ...]]]]
             "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
             "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
             "judge.md": ("{graph_yaml}",),
+            "fork_seed.md": ("{graph_yaml}", "{max_seed_facts}"),
         }
     }
 }
@@ -73,6 +75,7 @@ MOCK_ALLOWED_OUTCOMES: dict[str, frozenset[str]] = {
     "explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "judge": frozenset({"ready", "not_ready", "blocked", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "report": frozenset({"draft", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "fork_seed": frozenset({"seed", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
 }
 
 MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
@@ -134,6 +137,16 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
             "command_fail": "0.0",
         },
     },
+    "fork_seed": {
+        "delay": [0.05, 0.3],
+        "outcomes": {
+            "seed": "1.0",
+            "rejected": "0.0",
+            "invalid_json": "0.0",
+            "invalid_payload": "0.0",
+            "command_fail": "0.0",
+        },
+    },
 }
 
 MOCK_ALLOWED_ENV_KEYS = frozenset(
@@ -159,11 +172,17 @@ class ReportTaskConfig(BaseModel):
     timeout: int = Field(gt=0, default=10)
 
 
+class ForkSeedTaskConfig(BaseModel):
+    timeout: int = Field(gt=0, default=120)
+    max_seed_facts: int = Field(gt=0, default=8)
+
+
 class TasksConfig(BaseModel):
     reason: ReasonTaskConfig
     explore: ExploreTaskConfig
     judge: JudgeTaskConfig = Field(default_factory=lambda: JudgeTaskConfig(timeout=10))
     report: ReportTaskConfig = Field(default_factory=lambda: ReportTaskConfig(timeout=10))
+    fork_seed: ForkSeedTaskConfig = Field(default_factory=lambda: ForkSeedTaskConfig(timeout=120, max_seed_facts=8))
 
 
 class ContainerConfig(BaseModel):

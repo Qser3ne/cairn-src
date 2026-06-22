@@ -359,6 +359,85 @@ def test_snapshot_fork_children_and_delete_guard(client: TestClient) -> None:
     assert client.delete(f"/projects/{parent_id}").status_code == 409
 
 
+def test_fork_seed_job_creates_child_vuln_with_ai_seed_facts(client: TestClient) -> None:
+    parent = _create_recon(client)
+    parent_id = parent["project"]["id"]
+    client.post(
+        f"/projects/{parent_id}/intents",
+        json={"from": ["origin"], "description": "map upload", "creator": "reasoner", "worker": None, "auth_scope": "anonymous"},
+    )
+    client.post(
+        f"/projects/{parent_id}/intents/i001/conclude",
+        json={"worker": "explorer", "description": "upload endpoint accepts images"},
+    )
+    snapshot = _create_snapshot(client, parent_id)
+
+    created = client.post(
+        f"/projects/{parent_id}/fork-vuln/seed-jobs",
+        json={"title": "seeded vuln", "snapshot_id": snapshot["id"], "auth_mode": "anonymous"},
+    )
+    assert created.status_code == 201, created.text
+    job_id = created.json()["job_id"]
+    assert job_id.startswith("fork_")
+    assert client.post(f"/ephemeral-jobs/{job_id}/claim", json={"worker": "planner"}).status_code == 200
+
+    finished = client.post(
+        f"/ephemeral-jobs/{job_id}/finish-fork-seed",
+        json={
+            "worker": "planner",
+            "seed_facts": [
+                {
+                    "title": "Upload surface",
+                    "auth_scope": "anonymous",
+                    "candidate_type": "api_surface",
+                    "derived_from": ["f001"],
+                    "description": "candidate_summary:\n- upload endpoint is worth vuln validation",
+                }
+            ],
+        },
+    )
+
+    assert finished.status_code == 200, finished.text
+    result = finished.json()["result"]
+    child_id = result["child_project_id"]
+    child = client.get(f"/projects/{child_id}").json()
+    assert child["project"]["project_kind"] == "vuln"
+    assert child["project"]["parent_project_id"] == parent_id
+    assert child["project"]["parent_snapshot_id"] == snapshot["id"]
+    assert child["facts"][0] == {"id": "origin", "description": "https://target.test"}
+    assert "recon_snapshot:" in child["facts"][1]["description"]
+    assert "derived_from: f001" in child["facts"][2]["description"]
+    assert result["seed_fact_ids"] == ["f002"]
+
+
+def test_fork_seed_finish_rejects_unknown_parent_fact(client: TestClient) -> None:
+    parent_id = _create_recon(client)["project"]["id"]
+    snapshot = _create_snapshot(client, parent_id)
+    job_id = client.post(
+        f"/projects/{parent_id}/fork-vuln/seed-jobs",
+        json={"title": "seeded vuln", "snapshot_id": snapshot["id"]},
+    ).json()["job_id"]
+    client.post(f"/ephemeral-jobs/{job_id}/claim", json={"worker": "planner"})
+
+    response = client.post(
+        f"/ephemeral-jobs/{job_id}/finish-fork-seed",
+        json={
+            "worker": "planner",
+            "seed_facts": [
+                {
+                    "title": "Missing source",
+                    "auth_scope": "anonymous",
+                    "candidate_type": "api_surface",
+                    "derived_from": ["missing"],
+                    "description": "invalid source",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_recon_judgement_job_lifecycle_updates_project_judge_status(client: TestClient) -> None:
     project_id = _create_recon(client)["project"]["id"]
     response = client.post(f"/projects/{project_id}/recon/judgements")

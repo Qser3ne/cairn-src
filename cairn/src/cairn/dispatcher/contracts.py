@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import yaml
+
 from cairn.dispatcher.output_parser import extract_json_object
 
 
@@ -105,6 +107,78 @@ def validate_judge_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]
     if verdict not in ("ready", "not_ready", "blocked"):
         raise ValueError("verdict must be ready, not_ready, or blocked")
     return "judge", data
+
+
+def _snapshot_fact_ids(graph_yaml: str) -> set[str]:
+    try:
+        data = yaml.safe_load(graph_yaml) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError("graph_yaml must be valid YAML") from exc
+    facts = data.get("facts")
+    if not isinstance(facts, list):
+        raise ValueError("graph_yaml must contain facts")
+    fact_ids = set()
+    for fact in facts:
+        if isinstance(fact, dict) and isinstance(fact.get("id"), str):
+            fact_ids.add(fact["id"])
+    return fact_ids
+
+
+def validate_fork_seed_payload(payload: dict[str, Any], graph_yaml: str, max_seed_facts: int = 10) -> tuple[str, dict[str, Any] | None]:
+    accepted, data = _unwrap_wrapped_payload(payload)
+    if accepted is False:
+        return "rejected", None
+    if accepted is None:
+        raise ValueError("accepted must be true or false")
+    if not isinstance(data, dict):
+        raise ValueError("data must be an object")
+    seed_facts = data.get("seed_facts")
+    if not isinstance(seed_facts, list) or not seed_facts:
+        raise ValueError("seed_facts must be a non-empty array")
+    if len(seed_facts) > max_seed_facts:
+        seed_facts = seed_facts[:max_seed_facts]
+    valid_fact_ids = _snapshot_fact_ids(graph_yaml)
+    normalized = []
+    for index, seed_fact in enumerate(seed_facts):
+        if not isinstance(seed_fact, dict):
+            raise ValueError(f"invalid seed_fact at index {index}")
+        title = seed_fact.get("title")
+        auth_scope = seed_fact.get("auth_scope")
+        candidate_type = seed_fact.get("candidate_type")
+        derived_from = seed_fact.get("derived_from")
+        description = seed_fact.get("description")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError(f"seed_fact title is required at index {index}")
+        if auth_scope not in ("anonymous", "authenticated"):
+            raise ValueError(f"seed_fact auth_scope is invalid at index {index}")
+        if not isinstance(candidate_type, str) or not candidate_type.strip():
+            raise ValueError(f"seed_fact candidate_type is required at index {index}")
+        if not isinstance(derived_from, list) or not derived_from:
+            raise ValueError(f"seed_fact derived_from is required at index {index}")
+        cleaned_sources = []
+        for source in derived_from:
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError(f"seed_fact derived_from has invalid id at index {index}")
+            source_id = source.strip()
+            if source_id not in valid_fact_ids:
+                raise ValueError(f"seed_fact references unknown source fact {source_id}")
+            cleaned_sources.append(source_id)
+        if len(set(cleaned_sources)) != len(cleaned_sources):
+            raise ValueError(f"seed_fact derived_from must be unique at index {index}")
+        if cleaned_sources == ["origin"]:
+            raise ValueError(f"seed_fact cannot derive only from origin at index {index}")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError(f"seed_fact description is required at index {index}")
+        normalized.append(
+            {
+                "title": title.strip(),
+                "auth_scope": auth_scope,
+                "candidate_type": candidate_type.strip(),
+                "derived_from": cleaned_sources,
+                "description": description.strip(),
+            }
+        )
+    return "fork_seed", {"seed_facts": normalized}
 
 
 def validate_report_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:

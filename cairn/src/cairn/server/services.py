@@ -83,8 +83,8 @@ def next_snapshot_id(conn: sqlite3.Connection, project_id: str) -> str:
     return _next_scoped_id(conn, "snapshot", "snap_", project_id)
 
 
-def next_ephemeral_job_id(conn: sqlite3.Connection) -> str:
-    return _next_existing_numeric_id(conn, "ephemeral_jobs", "id", "judge_")
+def next_ephemeral_job_id(conn: sqlite3.Connection, prefix: str = "judge_") -> str:
+    return _next_existing_numeric_id(conn, "ephemeral_jobs", "id", prefix)
 
 
 def next_report_id(conn: sqlite3.Connection, project_id: str) -> str:
@@ -503,6 +503,9 @@ def get_snapshot_or_404(
 
 
 def ephemeral_job_to_model(row: sqlite3.Row) -> EphemeralJob:
+    input_data = None
+    if "input_json" in row.keys() and row["input_json"]:
+        input_data = json.loads(row["input_json"])
     result = None
     if row["result_json"]:
         result = json.loads(row["result_json"])
@@ -512,6 +515,7 @@ def ephemeral_job_to_model(row: sqlite3.Row) -> EphemeralJob:
         job_type=row["job_type"],
         status=row["status"],
         input_snapshot_yaml=row["input_snapshot_yaml"],
+        input=input_data,
         result=result,
         error=row["error"],
         worker=row["worker"],

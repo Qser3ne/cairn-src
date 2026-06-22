@@ -44,11 +44,31 @@
   - 新 intent 是否和已有 intent/finding 在目标、入口、漏洞假设、验证方式上重复。
 - 如果一个方向已经有 open intent 正在处理，不要再次创建。
 - 如果一个方向已经由 concluded intent 验证过，除非新 fact 明确说明需要更深阶段，否则不要重复创建。
-- 如果已有 finding 已经覆盖某类漏洞，不要再创建同一目标、同一入口、同一漏洞类型的重复验证 intent。
+- 如果已有 finding 已经覆盖某类漏洞，不要创建完全相同目标、入口、来源/接收方、参数矩阵和验证目的的重复 intent；但如果新 fact 明确引出新的来源、接收方、接口族、最小条件矩阵或影响面补强，则可以创建窄范围派生 intent。
+- 返回 decision=noop 且 intents=[] 前，必须先做全图 gap check：检查所有 findings 是否还有未覆盖的 token/source/receiver/interface/condition 矩阵；检查最近 facts 是否只是局部收敛，是否仍能回连到更早 finding 的未覆盖维度；检查是否存在因 token 缺失、现网回摆、超时 fallback 或前置条件变化导致的未完成验证。只有确认没有高价值、非重复派生方向后，才返回 noop。
 - 如果没有明显的新方向，返回 decision=noop 且 intents=[]；不要为了推进而硬造宽泛 intent。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。
 - 每个 intent 的 description 必须包含清晰的去重语义：目标或入口、漏洞假设、验证重点。避免“继续测试”“深入挖掘”等泛泛描述。
+- 派生 intent 的 description 必须明确：基于哪些 fact/finding；新增维度是什么，例如新的 token 来源、接收方、接口族或最小条件矩阵；成功条件和否定条件；去重边界，明确不重复哪个已有 finding 或 intent。
 - `data.intents[*].from` 必须来自有效 facts。
+
+## Finding 派生方向
+
+已有 finding 不代表同一漏洞机制已经完全收敛。创建新 intent 前，需要区分“重复验证”和“非重复派生验证”。
+
+以下情况不视为重复，可以创建新 intent：
+
+- 同一漏洞机制下验证新的 token 来源、接收方、Host、Origin/Referer 或 session/cookie 组合。
+- 同一 finding 下补齐最小利用条件矩阵，例如 header-only、cookie-only、header/cookie 不匹配、signature 不匹配、跨来源混搭。
+- 对已有 finding 的影响面做窄范围扩展，例如同一接收方上的未覆盖接口族、同一 token 来源对未验证业务入口的影响。
+- 对早期因环境回摆、token 缺失、前置条件未满足或结论不完整而未完成的方向做 fresh 复测。
+- 对报告证据链做必要补强，例如证明接口确实依赖 CSRF、证明跨主机 token 比伪造 token 多进入一层业务逻辑。
+
+以下情况仍视为重复，不要创建 intent：
+
+- 目标、入口、token 来源/接收方、参数矩阵和验证目的均与已有 intent/finding 相同。
+- 只是把已确认 finding 换一种描述重跑。
+- 只提出“继续测试”“扩大覆盖”“深入验证”等没有明确新增维度的泛化方向。
 
 ## 上下文
 

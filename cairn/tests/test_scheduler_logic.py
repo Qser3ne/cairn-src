@@ -558,6 +558,32 @@ def test_dispatch_judge_jobs_uses_ephemeral_job_queue() -> None:
     assert loop.futures[executor.futures[0]].intent_id == "job_001"
 
 
+def test_dispatch_fork_seed_jobs_uses_ephemeral_job_queue() -> None:
+    loop = _loop()
+    config = make_config()
+    executor = _RecordingExecutor()
+    job = EphemeralJob(
+        id="fork_001",
+        project_id="proj_001",
+        job_type="fork_seed",
+        status="queued",
+        input_snapshot_yaml="project: {}\nfacts:\n- id: f001\n  description: fact\n",
+        created_at="2026-01-01T00:00:00Z",
+        expires_at="2026-01-02T00:00:00Z",
+    )
+    loop.config = config
+    loop.executor = executor
+    loop.futures = {}
+    loop.client = type("Client", (), {"list_queued_ephemeral_jobs": lambda _self, _job_type: [job]})()
+    loop.container_manager = _RecordingContainerManager()
+
+    loop._dispatch_fork_seed_jobs()
+
+    assert executor.submissions
+    assert loop.futures[executor.futures[0]].task_type == "fork_seed"
+    assert loop.futures[executor.futures[0]].intent_id == "fork_001"
+
+
 def test_dispatch_judge_jobs_waits_for_pending_container_cleanup() -> None:
     loop = _loop()
     config = make_config()

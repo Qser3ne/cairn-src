@@ -202,6 +202,13 @@ class CairnClient:
             json={"worker": worker, "result": result},
         )
 
+    def finish_fork_seed_job(self, job_id: str, worker: str, seed_facts: list[dict[str, Any]]) -> ApiResult:
+        return self._request_json(
+            "POST",
+            f"/ephemeral-jobs/{job_id}/finish-fork-seed",
+            json={"worker": worker, "seed_facts": seed_facts},
+        )
+
     def fail_ephemeral_job(self, job_id: str, worker: str, error: str) -> ApiResult:
         return self._request_json(
             "POST",

@@ -16,6 +16,7 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
         project_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
         intent_columns = {row["name"] for row in conn.execute("PRAGMA table_info(intents)")}
         finding_columns = {row["name"] for row in conn.execute("PRAGMA table_info(findings)")}
+        ephemeral_columns = {row["name"] for row in conn.execute("PRAGMA table_info(ephemeral_jobs)")}
         tables = {
             row["name"]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -28,6 +29,7 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert {"intent_kind", "finding_id", "auth_scope"} <= intent_columns
     assert "session_lock" not in intent_columns
     assert {"research_value", "next_action", "report_status", "report_intent_id"} <= finding_columns
+    assert "input_json" in ephemeral_columns
     assert {"project_accounts", "project_snapshots", "ephemeral_jobs", "finding_reports"} <= tables
 
 

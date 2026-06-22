@@ -17,6 +17,7 @@ from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.startup_healthcheck import format_failure_summary, run_startup_healthchecks
 from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.tasks.explore import run_explore_task
+from cairn.dispatcher.tasks.fork_seed import run_fork_seed_task
 from cairn.dispatcher.tasks.judge import run_judge_task
 from cairn.dispatcher.tasks.reason import run_reason_task
 from cairn.dispatcher.tasks.report import run_report_task
@@ -89,6 +90,7 @@ class DispatcherLoop:
                     self._queue_container_cleanups(summaries)
                     self._dispatch_available(summaries)
                     self._dispatch_judge_jobs()
+                    self._dispatch_fork_seed_jobs()
                 except requests.RequestException as exc:
                     if once:
                         raise
@@ -234,6 +236,67 @@ class DispatcherLoop:
             self.runtime_project_ids.add(job.project_id)
             self._clear_log_state(f"job:{job.id}:worker:judge")
             LOG.info("dispatched judge job=%s project=%s worker=%s", job.id, job.project_id, worker.name)
+
+    def _dispatch_fork_seed_jobs(self) -> None:
+        if len(self.futures) >= self.config.runtime.max_workers:
+            return
+        try:
+            jobs = self.client.list_queued_ephemeral_jobs("fork_seed")
+        except requests.RequestException:
+            raise
+        for job in jobs:
+            if len(self.futures) >= self.config.runtime.max_workers:
+                return
+            if any(task.task_type == "fork_seed" and task.intent_id == job.id for task in self.futures.values()):
+                continue
+            container_name = self.container_manager.container_name(job.project_id)
+            if container_name in self._cleanup_pending:
+                self._log_changed(
+                    f"job:{job.id}:cleanup:fork_seed",
+                    logging.INFO,
+                    "skip fork_seed dispatch because project container cleanup is pending job=%s project=%s container=%s",
+                    job.id,
+                    job.project_id,
+                    container_name,
+                )
+                continue
+            selection = self._select_worker(job.project_id, "fork_seed")
+            worker = selection.worker
+            if worker is None:
+                self._log_changed(
+                    f"job:{job.id}:worker:fork_seed",
+                    logging.INFO,
+                    "no worker available for fork_seed job=%s project=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                    job.id,
+                    job.project_id,
+                    selection.blocked_busy,
+                    selection.blocked_unhealthy,
+                    selection.blocked_rejected,
+                )
+                continue
+            try:
+                future = self.executor.submit(
+                    run_fork_seed_task,
+                    self.config,
+                    self.client,
+                    self.container_manager,
+                    job,
+                    worker,
+                    cancellation := TaskCancellation(),
+                )
+            except Exception:
+                LOG.exception("failed to submit fork_seed job=%s worker=%s", job.id, worker.name)
+                continue
+            self.futures[future] = RunningTask(
+                project_id=job.project_id,
+                task_type="fork_seed",
+                worker_name=worker.name,
+                cancellation=cancellation,
+                intent_id=job.id,
+            )
+            self.runtime_project_ids.add(job.project_id)
+            self._clear_log_state(f"job:{job.id}:worker:fork_seed")
+            LOG.info("dispatched fork_seed job=%s project=%s worker=%s", job.id, job.project_id, worker.name)
 
     def _sync_authenticated_wait_queues(self, summaries: list[ProjectSummary]) -> None:
         for summary in summaries:
@@ -1057,7 +1120,7 @@ class DispatcherLoop:
         status_by_project = {summary.id: summary.status for summary in summaries}
         for task in self.futures.values():
             status = status_by_project.get(task.project_id, "deleted")
-            if task.task_type == "judge" and status == "stopped":
+            if task.task_type in ("judge", "fork_seed") and status == "stopped":
                 continue
             if status != "active" and task.cancellation.cancel(status):
                 LOG.info(
