@@ -186,6 +186,17 @@ class DispatcherLoop:
                 return
             if any(task.task_type == "judge" and task.intent_id == job.id for task in self.futures.values()):
                 continue
+            container_name = self.container_manager.container_name(job.project_id)
+            if container_name in self._cleanup_pending:
+                self._log_changed(
+                    f"job:{job.id}:cleanup:judge",
+                    logging.INFO,
+                    "skip judge dispatch because project container cleanup is pending job=%s project=%s container=%s",
+                    job.id,
+                    job.project_id,
+                    container_name,
+                )
+                continue
             selection = self._select_worker(job.project_id, "judge")
             worker = selection.worker
             if worker is None:
@@ -1004,6 +1015,8 @@ class DispatcherLoop:
             container_name = self.container_manager.container_name(summary.id)
             if container_name in self._cleanup_pending:
                 continue
+            if any(task.project_id == summary.id and task.task_type == "judge" for task in self.futures.values()):
+                continue
             if not self.container_manager.needs_stopped_cleanup(summary.id):
                 self._inactive_cleanup_done[summary.id] = summary.status
                 continue
@@ -1044,6 +1057,8 @@ class DispatcherLoop:
         status_by_project = {summary.id: summary.status for summary in summaries}
         for task in self.futures.values():
             status = status_by_project.get(task.project_id, "deleted")
+            if task.task_type == "judge" and status == "stopped":
+                continue
             if status != "active" and task.cancellation.cancel(status):
                 LOG.info(
                     "cancelling running task for inactive project project=%s task=%s worker=%s status=%s",

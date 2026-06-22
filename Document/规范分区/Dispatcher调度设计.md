@@ -277,6 +277,7 @@ Judge 写回规则：
 - 成功完成时写入 `result_json`，并更新 project 的 `judge_status/judged_at`。
 - 失败时写入 job error。
 - 不创建 facts、intents、findings 或 reports。
+- Stopped recon project 仍可执行 judge；completed/deleted project 的 judge 仍按 inactive 任务取消并写入 failure。
 
 ### Report
 
@@ -319,8 +320,8 @@ Report 写回规则：
 5. 初始化 reason checkpoints。
 6. 刷新 active runtime projects。
 7. 清理 inactive 项目的 authenticated cookie session queues。
-8. 取消 inactive/deleted projects 上的本地运行任务。
-9. 为 stopped/completed projects 排队 container cleanup。
+8. 取消 inactive/deleted projects 上的本地运行任务，但 stopped project 上正在运行的 judge 不取消。
+9. 为 stopped/completed projects 排队 container cleanup；如果 stopped project 正在运行 judge，则暂缓 stopped-container cleanup。
 10. 调度可执行的 project tasks。
 11. 调度 queued judge jobs。
 
@@ -379,11 +380,12 @@ min(cookie sessions, runtime.max_project_workers, runtime.max_workers, available
 
 ## 容器生命周期
 
-Dispatcher 把非 active projects 视为硬停止：
+Dispatcher 对非 active projects 的容器和任务按状态处理：
 
-- 不再调度新任务。
-- 取消本地正在运行的任务。
-- Stopped projects 执行 stopped-container cleanup。
+- 不再调度 reason、explore 或 report。
+- 取消本地正在运行的 reason、explore 和 report。
+- Stopped recon projects 仍允许执行 queued judge ephemeral jobs。
+- Stopped projects 执行 stopped-container cleanup；如果该 project 正在运行 judge，则等 judge 完成后再清理。
 - Completed projects 按 `container.completed_action` 执行 cleanup。
 - Deleted projects 作为 orphan cleanup targets 处理。
 

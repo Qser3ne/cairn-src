@@ -24,7 +24,7 @@
 - recon 达到 `recon_max_reason_rounds` 后自动 `stopped` 并清空 reason lease。
 - judge 是 `ephemeral_jobs`，只写 job result 和 project `judge_status/judged_at`，不写 graph。
 - Project ID 和 judge ephemeral job ID 不再依赖全局 `counters` 单调递增；`next_project_id` 从当前 `projects.id` 最大 `proj_###` 计算，`next_ephemeral_job_id` 从当前 `ephemeral_jobs.id` 最大 `judge_###` 计算。删除当前最大编号后可复用该编号，中间空洞不填补；项目内 scoped IDs 仍使用 `scoped_counters`。
-- judge 任务如果被 stopped/completed/deleted 等 inactive cancellation 中断，dispatcher 必须调用 ephemeral job fail 接口把 job 从 `running` 写回 `failed`，错误信息形如 `judge cancelled: stopped`；否则 UI/API 会长期显示 Evaluate running 但实际容器 exec 已结束。
+- stopped recon 仍允许执行 judge；dispatcher 不应因项目 stopped 取消 judge，也不应在 stopped judge 运行中执行 stopped-container cleanup。completed/deleted 等状态仍会取消 judge，并由 dispatcher 调用 ephemeral job fail 接口把 job 从 `running` 写回 `failed`。
 - snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` fact，可复制 selected facts。
 - vuln explore 可写 findings；finding lifecycle 可自动创建 follow-up explore intent 或 report intent。
 - report task 写入 `finding_reports` 并更新 finding `report_status="drafted"`。

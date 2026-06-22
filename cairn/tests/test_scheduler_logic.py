@@ -64,6 +64,21 @@ class _RecordingExecutor:
         return future
 
 
+class _RecordingContainerManager:
+    def __init__(self) -> None:
+        self.needs_stopped_cleanup_calls: list[str] = []
+
+    def container_name(self, project_id: str) -> str:
+        return f"container-{project_id}"
+
+    def needs_stopped_cleanup(self, project_id: str) -> bool:
+        self.needs_stopped_cleanup_calls.append(project_id)
+        return True
+
+    def cleanup_stopped(self, _project_id: str) -> bool:
+        return True
+
+
 def _authenticated_project(intent_count: int, account_count: int = 3):
     intents = []
     for index in range(1, intent_count + 1):
@@ -534,13 +549,39 @@ def test_dispatch_judge_jobs_uses_ephemeral_job_queue() -> None:
     loop.executor = executor
     loop.futures = {}
     loop.client = type("Client", (), {"list_queued_ephemeral_jobs": lambda _self, _job_type: [job]})()
-    loop.container_manager = object()
+    loop.container_manager = _RecordingContainerManager()
 
     loop._dispatch_judge_jobs()
 
     assert executor.submissions
     assert loop.futures[executor.futures[0]].task_type == "judge"
     assert loop.futures[executor.futures[0]].intent_id == "job_001"
+
+
+def test_dispatch_judge_jobs_waits_for_pending_container_cleanup() -> None:
+    loop = _loop()
+    config = make_config()
+    executor = _RecordingExecutor()
+    job = EphemeralJob(
+        id="job_001",
+        project_id="proj_001",
+        job_type="judge",
+        status="queued",
+        input_snapshot_yaml="project: {}",
+        created_at="2026-01-01T00:00:00Z",
+        expires_at="2026-01-02T00:00:00Z",
+    )
+    loop.config = config
+    loop.executor = executor
+    loop.futures = {}
+    loop.client = type("Client", (), {"list_queued_ephemeral_jobs": lambda _self, _job_type: [job]})()
+    loop.container_manager = _RecordingContainerManager()
+    loop._cleanup_pending = {"container-proj_001"}
+
+    loop._dispatch_judge_jobs()
+
+    assert executor.submissions == []
+    assert loop.futures == {}
 
 
 def test_cancel_inactive_tasks_marks_stopped_and_deleted_projects() -> None:
@@ -556,6 +597,41 @@ def test_cancel_inactive_tasks_marks_stopped_and_deleted_projects() -> None:
 
     assert stopped.reason == "stopped"
     assert deleted.reason == "deleted"
+
+
+def test_cancel_inactive_tasks_keeps_stopped_judge_running() -> None:
+    loop = _loop()
+    stopped_judge = TaskCancellation()
+    stopped_explore = TaskCancellation()
+    completed_judge = TaskCancellation()
+    deleted_judge = TaskCancellation()
+    loop.futures = {
+        Future(): RunningTask("stopped", "judge", "worker", stopped_judge, intent_id="judge_001"),
+        Future(): RunningTask("stopped", "explore", "worker", stopped_explore, intent_id="i001"),
+        Future(): RunningTask("completed", "judge", "worker", completed_judge, intent_id="judge_002"),
+        Future(): RunningTask("deleted", "judge", "worker", deleted_judge, intent_id="judge_003"),
+    }
+
+    loop._cancel_inactive_tasks([_summary("stopped", "stopped"), _summary("completed", "completed")])
+
+    assert stopped_judge.reason is None
+    assert stopped_explore.reason == "stopped"
+    assert completed_judge.reason == "completed"
+    assert deleted_judge.reason == "deleted"
+
+
+def test_cleanup_stopped_containers_skips_project_with_running_judge() -> None:
+    loop = _loop()
+    containers = _RecordingContainerManager()
+    executor = _RecordingExecutor()
+    loop.container_manager = containers
+    loop.cleanup_executor = executor
+    loop.futures = {Future(): RunningTask("proj_001", "judge", "worker", TaskCancellation(), intent_id="judge_001")}
+
+    loop._cleanup_stopped_containers([_summary("proj_001", "stopped")])
+
+    assert containers.needs_stopped_cleanup_calls == []
+    assert executor.submissions == []
 
 
 def test_initialize_reason_checkpoint_only_for_active_projects_with_open_intents() -> None:
