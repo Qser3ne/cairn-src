@@ -330,7 +330,7 @@ def test_authenticated_intent_logs_missing_accounts(caplog) -> None:
     assert list(loop.authenticated_wait_queues["proj_001"]) == ["i001"]
     messages = [record.getMessage() for record in caplog.records]
     assert any(
-        "authenticated explore cannot dispatch because project has no accounts project=proj_001 intent=i001 queued_authenticated_intents=1 busy_accounts=0 total_accounts=0"
+        "authenticated explore cannot dispatch because project has no cookie sessions project=proj_001 intent=i001 queued_authenticated_intents=1 busy_accounts=0 total_accounts=0"
         in message
         for message in messages
     )
@@ -391,7 +391,7 @@ def test_second_authenticated_intent_queues_when_single_account_is_busy(caplog) 
     messages = [record.getMessage() for record in caplog.records]
     assert any("queued authenticated intent project=proj_001 intent=i001 queue_length=1" in message for message in messages)
     assert any(
-        "authenticated explore waiting for account project=proj_001 intent=i001 queued_authenticated_intents=1 busy_accounts=1 total_accounts=1"
+        "authenticated explore waiting for cookie session project=proj_001 intent=i001 queued_authenticated_intents=1 busy_accounts=1 total_accounts=1"
         in message
         for message in messages
     )

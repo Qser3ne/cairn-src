@@ -494,8 +494,12 @@ def test_authenticated_explore_prompt_includes_leased_account(monkeypatch) -> No
     prompt = driver.execute_prompts[0]
     assert "auth_scope is authenticated" in prompt
     assert "account_id: a001" in prompt
-    assert "username: user-a001" in prompt
-    assert "password: pass-a001" in prompt
+    assert "Cookie header:" in prompt
+    assert "session_a001=value-a001" in prompt
+    assert '"name": "session_a001"' in prompt
+    assert '"value": "value-a001"' in prompt
+    assert "username:" not in prompt
+    assert "password:" not in prompt
     assert "/home/kali/workspace/auth/proj_001/a001" in prompt
 
 

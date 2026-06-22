@@ -52,10 +52,10 @@
 - `scope_clarity`：目标、范围、origin、第三方/无关资产边界是否清楚。
 - `asset_coverage`：主资产、子资产、关联入口、不可达/噪声资产是否有足够覆盖。
 - `endpoint_coverage`：端点、路径、参数、功能入口、API/页面样本是否足够具体。
-- `auth_boundary_coverage`：anonymous 与 authenticated 边界、登录态入口、账号可用性、权限差异是否有覆盖。
+- `auth_boundary_coverage`：anonymous 与 authenticated 边界、登录态入口、cookie session 可用性、权限差异是否有覆盖。
 - `candidate_surface_quality`：是否存在可 fork 到 vuln 项目继续验证的具体候选攻击面。
 
-`data.blocking_gaps` 与 `data.non_blocking_gaps` 都必须是字符串数组。每个 gap 都要具体、可执行，并且能够直接转化为后续 recon intent，例如 `"Explore authenticated account settings endpoints and compare accessible fields across roles"`。不要输出对象、数字或嵌套数组。
+`data.blocking_gaps` 与 `data.non_blocking_gaps` 都必须是字符串数组。每个 gap 都要具体、可执行，并且能够直接转化为后续 recon intent，例如 `"Explore authenticated settings endpoints and compare accessible fields across roles"`。不要输出对象、数字或嵌套数组。
 
 ## 判定规则
 
@@ -69,23 +69,23 @@
 
 - `score < 75`。
 - 当前不足可以通过继续 recon 补齐。
-- 没有安全、合规、范围、账号或可达性层面的硬阻断。
+- 没有安全、合规、范围、cookie session 或可达性层面的硬阻断。
 
 选择 `blocked` 当出现任一情况：
 
 - 目标不可访问，且没有其他有效 recon 路线。
 - 授权或范围不清，无法判断继续探索是否合规。
-- 需要登录态 recon 但账号不可用、失效或无法进入目标。
+- 需要登录态 recon 但 cookie session 不可用、失效或无法进入目标。
 - graph 明显缺少 origin 以外的有效事实，无法形成可靠判断。
 - 存在安全、合规、政策或用户授权阻断。
 
 ## recommended_action 选择规则
 
 - `create_vuln_project`：仅用于 `ready`。
-- `continue_anonymous_recon`：匿名资产、端点或入口覆盖不足，且可以继续无账号 recon。
-- `continue_authenticated_recon`：登录态边界、账号内功能或权限差异覆盖不足，且账号可用。
+- `continue_anonymous_recon`：匿名资产、端点或入口覆盖不足，且可以继续无 cookie session recon。
+- `continue_authenticated_recon`：登录态边界、session 内功能或权限差异覆盖不足，且 cookie session 可用。
 - `clarify_scope`：范围、授权、origin 或第三方边界不清。
-- `fix_account_access`：登录态 recon 被账号、验证码、MFA、凭据失效或会话问题阻断。
+- `fix_account_access`：登录态 recon 被 cookie session、验证码、MFA 或会话问题阻断。
 - `stop_or_archive`：目标不可达、明显不在范围内、安全/合规阻断，或继续 recon 没有合理收益。
 
 ## 评分指南

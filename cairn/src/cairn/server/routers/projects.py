@@ -163,16 +163,19 @@ def create_project(body: CreateProjectRequest):
         for index, account in enumerate(body.accounts or [], start=1):
             account_id = next_account_id(conn, pid)
             label = account.label or f"account-{index}"
+            cookies_json = json.dumps(
+                [cookie.model_dump() for cookie in account.cookies],
+                ensure_ascii=False,
+            )
             conn.execute(
-                "INSERT INTO project_accounts (id, project_id, label, username, password) VALUES (?, ?, ?, ?, ?)",
-                (account_id, pid, label, account.username, account.password),
+                "INSERT INTO project_accounts (id, project_id, label, cookies_json) VALUES (?, ?, ?, ?)",
+                (account_id, pid, label, cookies_json),
             )
             accounts.append(
                 {
                     "id": account_id,
                     "label": label,
-                    "username": account.username,
-                    "password": account.password,
+                    "cookies": [cookie.model_dump() for cookie in account.cookies],
                 }
             )
 
@@ -467,16 +470,19 @@ def fork_vuln_project(project_id: str, body: ForkVulnRequest):
         for index, account in enumerate(body.accounts or [], start=1):
             account_id = next_account_id(conn, pid)
             label = account.label or f"account-{index}"
+            cookies_json = json.dumps(
+                [cookie.model_dump() for cookie in account.cookies],
+                ensure_ascii=False,
+            )
             conn.execute(
-                "INSERT INTO project_accounts (id, project_id, label, username, password) VALUES (?, ?, ?, ?, ?)",
-                (account_id, pid, label, account.username, account.password),
+                "INSERT INTO project_accounts (id, project_id, label, cookies_json) VALUES (?, ?, ?, ?)",
+                (account_id, pid, label, cookies_json),
             )
             accounts.append(
                 {
                     "id": account_id,
                     "label": label,
-                    "username": account.username,
-                    "password": account.password,
+                    "cookies": [cookie.model_dump() for cookie in account.cookies],
                 }
             )
         facts = conn.execute("SELECT * FROM facts WHERE project_id = ?", (pid,)).fetchall()

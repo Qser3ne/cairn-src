@@ -325,7 +325,7 @@ def _create_project(http: TestClient, **overrides) -> str:
     body = {
         "title": "integration",
         "origin": "start",
-        "accounts": [{"label": "alice", "username": "alice@example.test", "password": "secret"}],
+        "accounts": [{"label": "alice", "cookies": [{"name": "sessionid", "value": "secret"}]}],
     }
     body.update(overrides)
     response = http.post("/projects", json=body)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -428,24 +429,38 @@ def format_auth_context(project: ProjectDetail, intent: Intent, account: Project
     if intent.auth_scope != "authenticated":
         return (
             "Current intent auth_scope is anonymous. Explore only the unauthenticated surface. "
-            "Do not log in or use account credentials."
+            "Do not log in or use cookie sessions."
         )
     if account is None:
         return (
             "Current intent auth_scope is authenticated, but no account lease was attached. "
-            "Report that authenticated exploration could not start without credentials."
+            "Report that authenticated exploration could not start without a cookie session."
         )
     profile_dir = f"/home/kali/workspace/auth/{project.project.id}/{account.id}"
+    origin = _project_origin(project)
+    cookies = [cookie.model_dump() for cookie in account.cookies]
+    cookie_header = "; ".join(f"{cookie.name}={cookie.value}" for cookie in account.cookies)
     return (
-        "Current intent auth_scope is authenticated. Use only the leased account below for this task.\n\n"
+        "Current intent auth_scope is authenticated. Use only the leased cookie session below for this task.\n\n"
         f"- account_id: {account.id}\n"
         f"- label: {account.label}\n"
-        f"- username: {account.username}\n"
-        f"- password: {account.password}\n"
+        f"- origin: {origin}\n"
         f"- isolated_session_dir: {profile_dir}\n\n"
+        "Cookie header:\n"
+        f"{cookie_header}\n\n"
+        "Cookie pairs JSON:\n"
+        f"{json.dumps(cookies, ensure_ascii=False, indent=2)}\n\n"
+        "Inject these cookies for the origin before authenticated browsing or HTTP requests. "
         "Store browser profiles, cookies, tokens, temporary login state, and account-specific cache "
         "under isolated_session_dir. Do not reuse another account's session files."
     )
+
+
+def _project_origin(project: ProjectDetail) -> str:
+    for fact in project.facts:
+        if fact.id == "origin":
+            return fact.description
+    return ""
 
 
 def _run_process(

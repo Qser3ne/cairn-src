@@ -118,17 +118,35 @@ class Hint(BaseModel):
     created_at: str
 
 
+class ProjectCookie(BaseModel):
+    name: str
+    value: str
+
+    @field_validator("name", "value")
+    @classmethod
+    def validate_required_cookie_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
 class ProjectAccount(BaseModel):
     id: str
     label: str
-    username: str
-    password: str
+    cookies: list[ProjectCookie] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_cookie_names_unique(self) -> "ProjectAccount":
+        names = [cookie.name for cookie in self.cookies]
+        if len(names) != len(set(names)):
+            raise ValueError("cookie names must be unique within a session")
+        return self
 
 
 class ProjectAccountCreate(BaseModel):
     label: str | None = None
-    username: str
-    password: str
+    cookies: list[ProjectCookie] = Field(min_length=1)
 
     @field_validator("label")
     @classmethod
@@ -140,13 +158,12 @@ class ProjectAccountCreate(BaseModel):
             return None
         return text
 
-    @field_validator("username", "password")
-    @classmethod
-    def validate_required_account_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
+    @model_validator(mode="after")
+    def validate_cookie_names_unique(self) -> "ProjectAccountCreate":
+        names = [cookie.name for cookie in self.cookies]
+        if len(names) != len(set(names)):
+            raise ValueError("cookie names must be unique within a session")
+        return self
 
 
 class ProjectReason(BaseModel):
@@ -236,7 +253,7 @@ class CreateProjectRequest(BaseModel):
                 raise ValueError("recon project auth_mode is fixed to dual")
             self.auth_mode = "dual"
             if not accounts:
-                raise ValueError("recon project requires at least one account")
+                raise ValueError("recon project requires at least one cookie session")
         if self.project_kind == "vuln":
             if self.auth_mode is None:
                 self.auth_mode = "anonymous"
@@ -250,7 +267,7 @@ class CreateProjectRequest(BaseModel):
             if self.project_kind != "recon":
                 raise ValueError("accounts are only supported for authenticated projects")
         if self.auth_mode == "authenticated" and not accounts:
-            raise ValueError("authenticated projects require at least one account")
+            raise ValueError("authenticated projects require at least one cookie session")
         return self
 
 
@@ -411,7 +428,7 @@ class ForkVulnRequest(BaseModel):
         if self.auth_mode != "authenticated" and accounts:
             raise ValueError("accounts are only supported for authenticated projects")
         if self.auth_mode == "authenticated" and not accounts:
-            raise ValueError("authenticated vuln project requires at least one account")
+            raise ValueError("authenticated vuln project requires at least one cookie session")
         return self
 
 

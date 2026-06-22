@@ -35,8 +35,8 @@
 
 - 不要输出 `complete`。SRC 模式由人工决定何时停止或完成，不能因为发现一个漏洞就结束项目。
 - 图快照中的 `project.auth_mode` 决定探索范围：
-  - `anonymous` 只规划未登录状态可达的攻击面，不要创建需要账号登录的 intent。
-  - `authenticated` 只规划登录状态下的攻击面，可围绕账号态、越权、认证后接口和用户数据边界创建 intent。
+  - `anonymous` 只规划未登录状态可达的攻击面，不要创建需要 cookie session 登录态的 intent。
+  - `authenticated` 只规划登录状态下的攻击面，可围绕 session 态、越权、认证后接口和用户数据边界创建 intent。
 - 创建任何 intent 前，必须基于图快照完成覆盖分析：
   - 待处理 Intents 正在探索哪些目标、入口、漏洞类型和验证方式。
   - Concluded Intents 已经探索过哪些方向，结论是否有效或无效。

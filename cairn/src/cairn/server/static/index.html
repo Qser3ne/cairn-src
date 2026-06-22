@@ -1021,24 +1021,32 @@
               class="rounded-lg border px-3 py-2 text-left transition"
               :class="newProject.auth_mode === 'authenticated' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'">
               <span class="block text-sm font-medium">Authenticated</span>
-              <span class="block text-[11px] opacity-70">account-isolated workers</span>
+              <span class="block text-[11px] opacity-70">cookie-isolated workers</span>
             </button>
           </div>
         </div>
         <div x-show="newProjectNeedsAccounts()" class="space-y-2">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Accounts</span>
-            <button type="button" @click="addNewProjectAccount()" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium">+ Add account</button>
+            <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Cookie Sessions</span>
+            <button type="button" @click="addNewProjectAccount()" class="text-[11px] text-emerald-600 hover:text-emerald-700 font-medium">+ Add session</button>
           </div>
           <template x-for="(account, idx) in newProject.accounts" :key="idx">
-            <div class="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
-              <input x-model="account.label" placeholder="Label" class="min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition placeholder:text-slate-300">
-              <input x-model="account.username" placeholder="Username" class="min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition placeholder:text-slate-300">
-              <input x-model="account.password" placeholder="Password" type="password" class="min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition placeholder:text-slate-300">
-              <button type="button" @click="removeNewProjectAccount(idx)" :disabled="newProject.accounts.length <= 1" class="h-8 w-8 rounded-lg text-slate-300 hover:text-red-400 hover:bg-white transition disabled:opacity-30">&times;</button>
+            <div class="space-y-2 rounded-lg border border-slate-200 bg-white p-2">
+              <div class="flex items-center gap-2">
+                <input x-model="account.label" placeholder="Session label" class="min-w-0 flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition placeholder:text-slate-300">
+                <button type="button" @click="addNewProjectCookie(idx)" class="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-emerald-600 hover:bg-emerald-50 transition">+ Cookie</button>
+                <button type="button" @click="removeNewProjectAccount(idx)" :disabled="newProject.accounts.length <= 1" class="h-8 w-8 rounded-lg text-slate-300 hover:text-red-400 hover:bg-slate-50 transition disabled:opacity-30">&times;</button>
+              </div>
+              <template x-for="(cookie, cookieIdx) in account.cookies" :key="cookieIdx">
+                <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                  <input x-model="cookie.name" placeholder="Cookie name" class="min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition placeholder:text-slate-300">
+                  <input x-model="cookie.value" placeholder="Cookie value" class="min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 transition placeholder:text-slate-300">
+                  <button type="button" @click="removeNewProjectCookie(idx, cookieIdx)" :disabled="account.cookies.length <= 1" class="h-8 w-8 rounded-lg text-slate-300 hover:text-red-400 hover:bg-slate-50 transition disabled:opacity-30">&times;</button>
+                </div>
+              </template>
             </div>
           </template>
-          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500" x-text="newProject.project_kind === 'recon' ? 'Recon projects require at least one username and password.' : 'Authenticated projects require at least one username and password.'"></p>
+          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500" x-text="newProject.project_kind === 'recon' ? 'Recon projects require at least one cookie session.' : 'Authenticated projects require at least one cookie session.'"></p>
         </div>
       </div>
 
@@ -1314,7 +1322,7 @@ function cairnApp() {
       parent_project_id: '',
       parent_snapshot_id: '',
       recon_max_reason_rounds: 8,
-      accounts: [{ label: '', username: '', password: '' }],
+      accounts: [{ label: '', cookies: [{ name: '', value: '' }] }],
       hints: [{ content: '' }],
     },
     newProjectSnapshots: [],
@@ -1516,7 +1524,11 @@ function cairnApp() {
     },
 
     blankNewProjectAccount() {
-      return { label: '', username: '', password: '' };
+      return { label: '', cookies: [this.blankNewProjectCookie()] };
+    },
+
+    blankNewProjectCookie() {
+      return { name: '', value: '' };
     },
 
     resetNewProjectForm() {
@@ -1567,20 +1579,47 @@ function cairnApp() {
       this.newProject.accounts.splice(index, 1);
     },
 
+    addNewProjectCookie(accountIndex) {
+      const account = this.newProject.accounts[accountIndex];
+      if (!account) return;
+      if (!Array.isArray(account.cookies)) account.cookies = [];
+      account.cookies.push(this.blankNewProjectCookie());
+    },
+
+    removeNewProjectCookie(accountIndex, cookieIndex) {
+      const account = this.newProject.accounts[accountIndex];
+      if (!account || !Array.isArray(account.cookies) || account.cookies.length <= 1) return;
+      account.cookies.splice(cookieIndex, 1);
+    },
+
     cleanedNewProjectAccounts() {
       return this.newProject.accounts
-        .map(account => ({
-          label: account.label?.trim() || null,
-          username: account.username?.trim() || '',
-          password: account.password?.trim() || '',
-        }))
-        .filter(account => account.username || account.password || account.label);
+        .map(account => {
+          const cookies = (Array.isArray(account.cookies) ? account.cookies : [])
+            .map(cookie => ({
+              name: cookie.name?.trim() || '',
+              value: cookie.value?.trim() || '',
+            }))
+            .filter(cookie => cookie.name || cookie.value);
+          return {
+            label: account.label?.trim() || null,
+            cookies,
+          };
+        })
+        .filter(account => account.cookies.length > 0 || account.label);
     },
 
     newProjectAccountsValid() {
       if (!this.newProjectNeedsAccounts()) return true;
       const accounts = this.cleanedNewProjectAccounts();
-      return accounts.length > 0 && accounts.every(account => account.username && account.password);
+      return accounts.length > 0 && accounts.every(account => {
+        const names = new Set();
+        return account.cookies.length > 0 && account.cookies.every(cookie => {
+          if (!cookie.name || !cookie.value || names.has(cookie.name)) return false;
+          names.add(cookie.name);
+          return true;
+        });
+      });
     },
 
     newProjectNeedsAccounts() {

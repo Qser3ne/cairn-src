@@ -19,7 +19,12 @@ def _create_recon(client: TestClient, **overrides) -> dict:
     body = {
         "title": "recon",
         "origin": "https://target.test",
-        "accounts": [{"label": "alice", "username": "alice@example.test", "password": "secret-1"}],
+        "accounts": [
+            {
+                "label": "alice",
+                "cookies": [{"name": "sessionid", "value": "secret-1"}],
+            }
+        ],
         "hints": [{"content": "initial clue", "creator": "human"}],
     }
     body.update(overrides)
@@ -75,28 +80,61 @@ def test_authenticated_projects_require_accounts_and_persist_account_pool(client
                 "title": "recon explicit mode",
                 "origin": "start",
                 "auth_mode": auth_mode,
-                "accounts": [{"username": "alice@example.test", "password": "secret-1"}],
+                "accounts": [{"cookies": [{"name": "sessionid", "value": "secret-1"}]}],
             },
         )
         assert response.status_code == 422
 
+    duplicate_cookie = client.post(
+        "/projects",
+        json={
+            "title": "duplicate cookies",
+            "origin": "start",
+            "accounts": [
+                {
+                    "cookies": [
+                        {"name": "sessionid", "value": "one"},
+                        {"name": "sessionid", "value": "two"},
+                    ]
+                }
+            ],
+        },
+    )
+    assert duplicate_cookie.status_code == 422
+
     payload = _create_recon(
         client,
         accounts=[
-            {"label": "alice", "username": "alice@example.test", "password": "secret-1"},
-            {"username": "bob@example.test", "password": "secret-2"},
+            {
+                "label": "alice",
+                "cookies": [
+                    {"name": "sessionid", "value": "secret-1"},
+                    {"name": "csrf", "value": "csrf-1"},
+                ],
+            },
+            {"cookies": [{"name": "sessionid", "value": "secret-2"}]},
         ],
     )
     project_id = payload["project"]["id"]
     assert payload["accounts"] == [
-        {"id": "a001", "label": "alice", "username": "alice@example.test", "password": "secret-1"},
-        {"id": "a002", "label": "account-2", "username": "bob@example.test", "password": "secret-2"},
+        {
+            "id": "a001",
+            "label": "alice",
+            "cookies": [
+                {"name": "sessionid", "value": "secret-1"},
+                {"name": "csrf", "value": "csrf-1"},
+            ],
+        },
+        {"id": "a002", "label": "account-2", "cookies": [{"name": "sessionid", "value": "secret-2"}]},
     ]
     detail = client.get(f"/projects/{project_id}").json()
     assert detail["accounts"][1]["label"] == "account-2"
     exported = client.get(f"/projects/{project_id}/export?format=yaml").text
     assert "auth_mode: dual" in exported
-    assert "username: alice@example.test" in exported
+    assert "name: sessionid" in exported
+    assert "value: secret-1" in exported
+    assert "username:" not in exported
+    assert "password:" not in exported
 
 
 def test_vuln_authenticated_projects_require_accounts(client: TestClient) -> None:
@@ -139,7 +177,7 @@ def test_vuln_authenticated_projects_require_accounts(client: TestClient) -> Non
             "auth_mode": "authenticated",
             "parent_project_id": parent,
             "parent_snapshot_id": snapshot["id"],
-            "accounts": [{"username": "alice@example.test", "password": "secret-1"}],
+            "accounts": [{"cookies": [{"name": "sessionid", "value": "secret-1"}]}],
         },
     )
     assert authenticated.status_code == 201

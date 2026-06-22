@@ -270,11 +270,11 @@ def build_findings(conn: sqlite3.Connection, project_id: str) -> list[Finding]:
 
 
 def account_to_model(row: sqlite3.Row) -> ProjectAccount:
+    cookies = json.loads(row["cookies_json"] or "[]")
     return ProjectAccount(
         id=row["id"],
         label=row["label"],
-        username=row["username"],
-        password=row["password"],
+        cookies=cookies,
     )
 
 
@@ -283,7 +283,13 @@ def build_project_accounts(conn: sqlite3.Connection, project_id: str) -> list[Pr
         "SELECT * FROM project_accounts WHERE project_id = ? ORDER BY id",
         (project_id,),
     ).fetchall()
-    return [account_to_model(row) for row in rows]
+    accounts = []
+    for row in rows:
+        try:
+            accounts.append(account_to_model(row))
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return accounts
 
 
 def get_intent_timeout(conn: sqlite3.Connection) -> int:

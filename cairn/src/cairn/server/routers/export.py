@@ -20,6 +20,16 @@ def format_export_timestamp(value: str | None) -> str | None:
     return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _account_cookies(account) -> list[dict]:
+    try:
+        cookies = json.loads(account["cookies_json"] or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(cookies, list):
+        return []
+    return [cookie for cookie in cookies if isinstance(cookie, dict)]
+
+
 def _load_project_data(conn, project_id: str):
     expire_workers(conn, project_id)
     expire_reason_leases(conn, project_id)
@@ -135,10 +145,10 @@ def _export_yaml(conn, project_id: str) -> str:
             {
                 "id": account["id"],
                 "label": account["label"],
-                "username": account["username"],
-                "password": account["password"],
+                "cookies": cookies,
             }
             for account in accounts
+            if (cookies := _account_cookies(account))
         ]
 
     intent_list = []

@@ -53,7 +53,7 @@ def test_legacy_standard_project_blocks_startup(tmp_path, monkeypatch) -> None:
         db.configure(path)
 
 
-def test_legacy_src_project_migrates_to_parentless_vuln_and_keeps_accounts(tmp_path, monkeypatch) -> None:
+def test_legacy_src_project_migrates_to_parentless_vuln_and_drops_password_accounts(tmp_path, monkeypatch) -> None:
     path = tmp_path / "src.db"
     with sqlite3.connect(path) as conn:
         conn.executescript(
@@ -95,14 +95,18 @@ def test_legacy_src_project_migrates_to_parentless_vuln_and_keeps_accounts(tmp_p
             "SELECT project_kind, auth_mode, parent_project_id, parent_snapshot_id FROM projects WHERE id = 'proj_001'"
         ).fetchone()
         account = conn.execute(
-            "SELECT label, username, password FROM project_accounts WHERE project_id = 'proj_001'"
+            "SELECT label, cookies_json FROM project_accounts WHERE project_id = 'proj_001'"
         ).fetchone()
+        account_columns = {row["name"] for row in conn.execute("PRAGMA table_info(project_accounts)")}
 
     assert project["project_kind"] == "vuln"
     assert project["auth_mode"] == "authenticated"
     assert project["parent_project_id"] is None
     assert project["parent_snapshot_id"] is None
-    assert account["username"] == "alice@example.test"
+    assert account is None
+    assert "cookies_json" in account_columns
+    assert "username" not in account_columns
+    assert "password" not in account_columns
     assert "session_lock_enabled" not in project_columns
 
 

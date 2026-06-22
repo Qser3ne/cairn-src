@@ -26,14 +26,14 @@
 - 只围绕 Current Intent 探索，不要切换到其他资产、入口、漏洞假设或任务方向。
 - 只写本次 Current Intent 相比图中已有 facts 的增量事实；先检查图结构，不要复述已有 facts。
 - 只写已确认观察结果，不写未验证猜测，不把候选攻击面描述成已确认漏洞。
-- 无法推进时也必须返回客观结论，例如“未找到入口”“登录态缺少凭据”“当前账号权限不足以访问某页面”。
+- 无法推进时也必须返回客观结论，例如“未找到入口”“登录态缺少 cookie session”“当前 session 权限不足以访问某页面”。
 - 长输出、截图、响应体、大列表和原始扫描结果必须写入文件，并在 `description` 中引用文件路径；不要把大段原始内容直接塞进 JSON。
 - 记录有用的 recon 证据：资产列表、端点样本、认证边界、噪声排除项、范围说明和候选攻击面。
 
 ## 认证边界
 
-- 如果当前 intent/auth context 是 anonymous：不得登录，不得使用账号凭据，不得复用任何登录态或账号 session，只观察匿名可访问内容。
-- 如果当前 intent/auth context 是 authenticated：只能使用认证上下文中注入的 leased account，并在注入的隔离目录/session 中操作；不得复用其他账号、浏览器 profile、cookie、token 或历史 session。
+- 如果当前 intent/auth context 是 anonymous：不得登录，不得使用 cookie session，不得复用任何登录态或历史 session，只观察匿名可访问内容。
+- 如果当前 intent/auth context 是 authenticated：只能使用认证上下文中注入的 leased cookie session，并在注入的隔离目录/session 中操作；不得复用其他 session、浏览器 profile、cookie、token 或历史 session。
 
 ## Recon-only 安全边界
 

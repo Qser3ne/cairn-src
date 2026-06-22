@@ -13,8 +13,8 @@
 
 ## 数据流
 
-1. 前端创建项目时提交 `project_kind`；未传 `project_kind` 时服务端默认 recon。recon 固定 `auth_mode="dual"` 并要求 accounts；vuln 继续提交项目级 `auth_mode`。新项目只创建 `origin` fact，不再接受或创建 Goal。
-2. Server 将 `project_kind`、`auth_mode`、parent/snapshot、recon round 和 judge 字段写入 `projects`；recon 与 authenticated vuln 写入 `project_accounts`。
+1. 前端创建项目时提交 `project_kind`；未传 `project_kind` 时服务端默认 recon。recon 固定 `auth_mode="dual"` 并要求 accounts（每项是 cookie session）；vuln 继续提交项目级 `auth_mode`。新项目只创建 `origin` fact，不再接受或创建 Goal。
+2. Server 将 `project_kind`、`auth_mode`、parent/snapshot、recon round 和 judge 字段写入 `projects`；recon 与 authenticated vuln 写入 `project_accounts.cookies_json`。
 3. Scheduler 对只包含 `origin` 且无 intents 的初始项目直接 dispatch reason，不创建 bootstrap intent。
 4. Prompt loader 使用 `project.project.project_kind` 选择 `default/recon` 或 `default/vuln` 子目录；`mock` prompt 组继续允许平铺目录。
 5. Reason 只允许输出 `intents`、`decision="noop"` 或 `decision="no_new_high_value"`，不允许 `complete`。

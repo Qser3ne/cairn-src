@@ -63,7 +63,7 @@
 Recon 固定维护 anonymous 和 authenticated 两条信息收集线。
 
 - `auth_scope="anonymous"`：覆盖公开资产、未认证端点、公开参数、重定向、公开 API、登录入口和匿名认证边界。
-- `auth_scope="authenticated"`：覆盖登录后页面/API、角色边界、账号数据入口、会话隔离现象、账号态菜单和登录态参数。
+- `auth_scope="authenticated"`：覆盖登录后页面/API、角色边界、session 数据入口、会话隔离现象、登录态菜单和登录态参数。
 - 不要求每轮都强行同时创建两条线，但要避免长期只推进一条线。
 - 如果图中只有 `origin` 且没有 open intents，必须同时创建一个基线 `anonymous` recon intent 和一个基线 `authenticated` recon intent。
 - 初始基线 intent 应从 `origin` 出发，并分别建立匿名公开面 baseline 与登录态页面/API baseline。

@@ -15,7 +15,7 @@
 - Standard/bootstrap 自动完成流已从 dispatcher、prompt、配置和 UI 中移除。
 - `/complete` 和 `/reopen` 路由只保留兼容入口并返回 410。
 - `completed` 是人工归档状态；归档后不可恢复，只能读、导出和改标题。
-- `session_lock_enabled` 和 `session_lock` 不重新引入；账号并发由 intent 级 `auth_scope` 和 account lease 管理。
+- `session_lock_enabled` 和 `session_lock` 不重新引入；登录态并发由 intent 级 `auth_scope` 和 cookie session lease 管理。
 
 ## 当前功能上下文
 
@@ -27,15 +27,15 @@
 - snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` fact，可复制 selected facts。
 - vuln explore 可写 findings；finding lifecycle 可自动创建 follow-up explore intent 或 report intent。
 - report task 写入 `finding_reports` 并更新 finding `report_status="drafted"`。
-- recon 固定 `auth_mode="dual"`，新建时必须有 `project_accounts`，reason 首轮必须创建 anonymous/authenticated 两条 baseline intent。
-- vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts`。
-- explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租账号，anonymous explore 不被账号池阻塞。
+- recon 固定 `auth_mode="dual"`，新建时必须有 `project_accounts` cookie session，reason 首轮必须创建 anonymous/authenticated 两条 baseline intent。
+- vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts` cookie session。
+- explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租 cookie session，anonymous explore 不被 session 池阻塞。
 - 默认 prompt 对 graph 写入文本采用中文优先软建议：`intent.description`、`fact.description` 和 vuln `findings` 的人类可读字段建议优先简体中文；协议字段、枚举值和导出结构保持英文，不做运行时中文校验。
 
 ## 公开仓库文档状态
 
 - 顶层 `README.md` 已按 `Qser3ne/cairn-src` 公开仓库重写，明确声明本仓库是 `oritera/Cairn` 的 modified version，由 `Qser3ne` 维护并聚焦授权 SRC 工作流。
-- README 当前覆盖 recon/vuln 流程、fact-intent graph、dispatcher、worker container、账号池、report 流程、配置、测试和安全免责声明。
+- README 当前覆盖 recon/vuln 流程、fact-intent graph、dispatcher、worker container、cookie session 池、report 流程、配置、测试和安全免责声明。
 - 原 `docs/specs` 文档已中文化并迁移到 `Document/规范分区/`：`Recon工作流架构.md`、`Dispatcher调度设计.md`、`Server协议规范.md`。`docs/` 目录已移除，README 的 See 链接已改到 `Document/规范分区`。
 - README 已删除上游商业授权、PR 双授权、`personal and educational use`、上游 star history 等不适合下游公开仓库的表述。
 - README 不再引用 `README/` 目录下的 banner 或运行截图图片，当前保持纯文本 Markdown 入口。

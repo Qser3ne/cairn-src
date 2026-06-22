@@ -82,8 +82,7 @@ CREATE TABLE IF NOT EXISTS project_accounts (
     id TEXT NOT NULL,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     label TEXT NOT NULL,
-    username TEXT NOT NULL,
-    password TEXT NOT NULL,
+    cookies_json TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (id, project_id)
 );
 
@@ -420,12 +419,38 @@ def _ensure_project_accounts_table(conn: sqlite3.Connection) -> None:
             id TEXT NOT NULL,
             project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             label TEXT NOT NULL,
-            username TEXT NOT NULL,
-            password TEXT NOT NULL,
+            cookies_json TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY (id, project_id)
         )
         """
     )
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(project_accounts)")}
+    if "cookies_json" in columns and "username" not in columns and "password" not in columns:
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute(
+        """
+        CREATE TABLE project_accounts_new (
+            id TEXT NOT NULL,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            cookies_json TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (id, project_id)
+        )
+        """
+    )
+    if "cookies_json" in columns:
+        conn.execute(
+            """
+            INSERT INTO project_accounts_new (id, project_id, label, cookies_json)
+            SELECT id, project_id, label, cookies_json
+            FROM project_accounts
+            """
+        )
+    conn.execute("DROP TABLE project_accounts")
+    conn.execute("ALTER TABLE project_accounts_new RENAME TO project_accounts")
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _ensure_findings_table(conn: sqlite3.Connection) -> None:

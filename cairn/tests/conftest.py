@@ -76,8 +76,12 @@ def make_account(account_id: str = "a001") -> ProjectAccount:
     return ProjectAccount(
         id=account_id,
         label=f"account-{account_id}",
-        username=f"user-{account_id}",
-        password=f"pass-{account_id}",
+        cookies=[
+            {
+                "name": f"session_{account_id}",
+                "value": f"value-{account_id}",
+            }
+        ],
     )
 
 

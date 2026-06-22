@@ -26,8 +26,8 @@ intents, confirmed facts, human hints, findings, snapshots, and report drafts.
 ## Current workflow
 
 1. Create a `recon` project with a title, origin, hints, and at least one
-   account. Recon always uses `auth_mode="dual"` so the system can explore both
-   anonymous and authenticated attack surface.
+   cookie session. Recon always uses `auth_mode="dual"` so the system can
+   explore both anonymous and authenticated attack surface.
 2. The dispatcher schedules `reason` tasks to propose non-duplicate intents and
    `explore` tasks to execute one claimed intent at a time.
 3. Recon `explore` tasks write confirmed facts. Recon can be evaluated by a
@@ -39,9 +39,10 @@ intents, confirmed facts, human hints, findings, snapshots, and report drafts.
    follow-up explore intents or report intents.
 6. `report` tasks draft SRC submission reports and update finding report state.
 
-The account pool is intent-scoped. Anonymous explore intents do not lease an
-account. Authenticated explore intents lease one account, isolate browser and
-session state for that account, and release the account when the task ends.
+The cookie session pool is intent-scoped. Anonymous explore intents do not
+lease a session. Authenticated explore intents lease one cookie session,
+isolate browser and session state for that lease, and release it when the task
+ends.
 
 ## Core concepts
 
@@ -111,13 +112,13 @@ cp dispatch.example.yaml dispatch.yaml
 Edit `dispatch.yaml` with your server URL, worker backend settings, model
 endpoints, and API keys.
 
-`dispatch.yaml`, local SQLite data, worker evidence, browser profiles, account
-credentials, exported YAML, and model/API keys can contain sensitive data. Do
-not commit real runtime configuration or task artifacts.
+`dispatch.yaml`, local SQLite data, worker evidence, browser profiles, cookie
+sessions, exported YAML, and model/API keys can contain sensitive data. Do not
+commit real runtime configuration or task artifacts.
 
-Accounts are stored in the local SQLite database and can appear in project
-detail/export data so workers can use them during authorized testing. Use only
-accounts and targets you are allowed to test.
+Cookie sessions are stored in the local SQLite database and can appear in
+project detail/export data so workers can use them during authorized testing.
+Use only sessions and targets you are allowed to test.
 
 ### Docker Compose
 
@@ -215,15 +216,16 @@ Do not commit `.venv-test/`.
 This project is intended only for authorized security research, SRC testing,
 vulnerability validation, and related defensive workflows.
 
-Do not use Cairn against systems, networks, applications, accounts, or data
-without explicit permission from the owner or operator. Unauthorized scanning,
-testing, exploitation, or data access may be illegal and may cause harm.
+Do not use Cairn against systems, networks, applications, sessions, accounts,
+or data without explicit permission from the owner or operator. Unauthorized
+scanning, testing, exploitation, or data access may be illegal and may cause
+harm.
 
 You are responsible for how you configure and run this project, including the
-targets you provide, accounts you use, worker tools you enable, and artifacts
-you store. The developers and contributors do not endorse misuse and do not
-accept responsibility for damage, loss, legal consequences, or policy violations
-arising from unauthorized use.
+targets you provide, sessions/accounts you use, worker tools you enable, and
+artifacts you store. The developers and contributors do not endorse misuse and
+do not accept responsibility for damage, loss, legal consequences, or policy
+violations arising from unauthorized use.
 
 ## Upstream and license
 

@@ -203,7 +203,7 @@ Explore 写回规则：
 - 解析失败或超时时，如果取消状态允许，可以运行 `explore_conclude` fallback。
 - Recon explore 即使模型越界返回 `findings`，dispatcher 也会在写回前丢弃，只保留 `description` 写成 fact；vuln explore 仍允许把合法 findings 传给 server。
 - Recon conclude 会在 server 上增加 explore rounds。
-- 只有当 `intent.auth_scope == "authenticated"` 时，explore 才领取一个项目账号；账号租约在 `_reap_futures` 中释放。
+- 只有当 `intent.auth_scope == "authenticated"` 时，explore 才领取一个项目 cookie session；session 租约在 `_reap_futures` 中释放。
 
 ### Judge
 
@@ -266,7 +266,7 @@ Verdict 规则：
 
 - `ready`：`score >= 75`，没有 blocking gaps，且至少存在可用于 vuln fork 的具体候选攻击面。
 - `not_ready`：`score < 75`，但可以通过继续 recon 补齐。
-- `blocked`：目标不可访问、授权/范围不清、账号不可用、graph 明显缺少 origin 以外有效事实，或存在安全/合规阻断。
+- `blocked`：目标不可访问、授权/范围不清、cookie session 不可用、graph 明显缺少 origin 以外有效事实，或存在安全/合规阻断。
 
 `blocking_gaps` 和 `non_blocking_gaps` 都是字符串数组，内容应能转化为后续 recon intent。
 
@@ -317,7 +317,7 @@ Report 写回规则：
 4. 拉取 projects。
 5. 初始化 reason checkpoints。
 6. 刷新 active runtime projects。
-7. 清理 inactive 项目的 authenticated account queues。
+7. 清理 inactive 项目的 authenticated cookie session queues。
 8. 取消 inactive/deleted projects 上的本地运行任务。
 9. 为 stopped/completed projects 排队 container cleanup。
 10. 调度可执行的 project tasks。
@@ -353,9 +353,9 @@ Worker selection 过滤条件：
 
 候选 worker 排序依据为 priority、当前运行数，再使用既有 selector tie-break 行为。
 
-## 账号池调度
+## Cookie Session 池调度
 
-`auth_scope="authenticated"` 的 explore intents 使用账号租约：
+`auth_scope="authenticated"` 的 explore intents 使用 cookie session 租约：
 
 ```text
 account_leases: project_id -> account_id -> intent_id
@@ -364,16 +364,16 @@ authenticated_wait_queues: project_id -> deque[intent_id]
 
 规则：
 
-- Reason、judge、report 和 anonymous explore 不领取账号。
-- Authenticated explore 至少需要一个项目账号。
-- 如果没有空闲账号，intent 进入 FIFO 等待队列，不会被 claim。
-- Future finish/fail/cancel/crash 时释放账号租约。
-- Inactive 或 anonymous projects 的账号队列和租约会被清理。
+- Reason、judge、report 和 anonymous explore 不领取 cookie session。
+- Authenticated explore 至少需要一个项目 cookie session。
+- 如果没有空闲 cookie session，intent 进入 FIFO 等待队列，不会被 claim。
+- Future finish/fail/cancel/crash 时释放 session 租约。
+- Inactive 或 anonymous projects 的 session 队列和租约会被清理。
 
 Authenticated explore 的实际并发上限为：
 
 ```text
-min(accounts, runtime.max_project_workers, runtime.max_workers, available workers)
+min(cookie sessions, runtime.max_project_workers, runtime.max_workers, available workers)
 ```
 
 ## 容器生命周期
@@ -431,7 +431,7 @@ Dispatcher 日志应重点记录状态变化：
 - timeout。
 - claim conflict。
 - rejected worker cooldown。
-- account lease wait/release。
+- cookie session lease wait/release。
 - judge claim/finish/fail。
 - report draft writeback。
 

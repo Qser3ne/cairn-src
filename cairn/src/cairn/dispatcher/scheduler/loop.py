@@ -279,7 +279,7 @@ class DispatcherLoop:
             self._log_changed(
                 f"{skip_scope}:accounts:missing",
                 logging.WARNING,
-                "skip recon project=%s because dual-line recon requires at least one account",
+                "skip recon project=%s because dual-line recon requires at least one cookie session",
                 summary.id,
             )
             return False
@@ -493,7 +493,7 @@ class DispatcherLoop:
                 self._log_changed(
                     f"project:{project.project.id}:accounts:missing",
                     logging.WARNING,
-                    "authenticated explore cannot dispatch because project has no accounts project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s",
+                    "authenticated explore cannot dispatch because project has no cookie sessions project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s",
                     project.project.id,
                     intent.id,
                     self._authenticated_queue_length(project.project.id),
@@ -507,7 +507,7 @@ class DispatcherLoop:
                 self._log_changed(
                     f"project:{project.project.id}:accounts:busy",
                     logging.INFO,
-                    "authenticated explore waiting for account project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s",
+                    "authenticated explore waiting for cookie session project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s",
                     project.project.id,
                     intent.id,
                     self._authenticated_queue_length(project.project.id),
