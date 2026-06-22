@@ -28,6 +28,7 @@
 - snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` fact，可复制 selected facts。
 - vuln explore 可写 findings；finding lifecycle 可自动创建 follow-up explore intent 或 report intent。
 - report task 写入 `finding_reports` 并更新 finding `report_status="drafted"`。
+- `projects.reason_pending` 是 reason/explore 并发安全信号：reason 运行期间有新 fact/hint 写入时置为 true；当前 reason release 后 Dispatcher 会基于 pending 立即再跑一轮 reason，claim 新 reason 时清除 pending，避免新增事实被 checkpoint 吞掉。
 - recon 固定 `auth_mode="dual"`，新建时必须有 `project_accounts` cookie session，reason 首轮必须创建 anonymous/authenticated 两条 baseline intent。
 - vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts` cookie session。
 - explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租 cookie session，anonymous explore 不被 session 池阻塞。

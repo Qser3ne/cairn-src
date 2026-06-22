@@ -265,6 +265,58 @@ def test_status_completed_is_terminal_and_clears_claims(client: TestClient) -> N
     assert detail["intents"][0]["worker"] is None
 
 
+def test_reason_pending_is_coalesced_while_reason_is_running(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin"], "description": "work", "creator": "explorer", "worker": "explorer"},
+    )
+    claim = client.post(
+        f"/projects/{project_id}/reason/claim",
+        json={"worker": "reasoner", "trigger": "facts:1->2"},
+    )
+    assert claim.status_code == 200
+    assert claim.json()["reason_pending"] is False
+
+    concluded = client.post(
+        f"/projects/{project_id}/intents/i001/conclude",
+        json={"worker": "explorer", "description": "new fact"},
+    )
+    assert concluded.status_code == 200
+    assert client.get(f"/projects/{project_id}").json()["project"]["reason_pending"] is True
+
+    hinted = client.post(
+        f"/projects/{project_id}/hints",
+        json={"content": "new clue", "creator": "human"},
+    )
+    assert hinted.status_code == 201
+    assert client.get(f"/projects/{project_id}").json()["project"]["reason_pending"] is True
+
+    released = client.post(f"/projects/{project_id}/reason/release", json={"worker": "reasoner"})
+    assert released.status_code == 200
+    assert released.json()["reason"] is None
+    assert released.json()["reason_pending"] is True
+
+    next_claim = client.post(
+        f"/projects/{project_id}/reason/claim",
+        json={"worker": "reasoner", "trigger": "pending"},
+    )
+    assert next_claim.status_code == 200
+    assert next_claim.json()["reason_pending"] is False
+
+
+def test_hint_without_running_reason_does_not_mark_reason_pending(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+
+    response = client.post(
+        f"/projects/{project_id}/hints",
+        json={"content": "new clue", "creator": "human"},
+    )
+
+    assert response.status_code == 201
+    assert client.get(f"/projects/{project_id}").json()["project"]["reason_pending"] is False
+
+
 def test_recon_rounds_stop_project_at_reason_limit(client: TestClient) -> None:
     project_id = _create_recon(client, recon_max_reason_rounds=2)["project"]["id"]
     assert client.post(f"/projects/{project_id}/recon/reason-round", json={"stable": True}).json()["status"] == "active"

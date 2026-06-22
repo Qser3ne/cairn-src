@@ -334,6 +334,7 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
         parent_snapshot_id=row["parent_snapshot_id"],
         created_at=row["created_at"],
         reason=project_reason_from_row(row),
+        reason_pending=bool(row["reason_pending"]),
         recon_max_reason_rounds=row["recon_max_reason_rounds"],
         recon_reason_rounds=row["recon_reason_rounds"],
         recon_explore_rounds=row["recon_explore_rounds"],
@@ -352,6 +353,23 @@ def clear_project_reason(conn: sqlite3.Connection, project_id: str) -> None:
             reason_started_at = NULL,
             reason_last_heartbeat_at = NULL
         WHERE id = ?
+        """,
+        (project_id,),
+    )
+
+
+def clear_reason_pending(conn: sqlite3.Connection, project_id: str) -> None:
+    conn.execute("UPDATE projects SET reason_pending = 0 WHERE id = ?", (project_id,))
+
+
+def mark_reason_pending_if_reason_running(conn: sqlite3.Connection, project_id: str) -> None:
+    conn.execute(
+        """
+        UPDATE projects
+        SET reason_pending = 1
+        WHERE id = ?
+          AND status = 'active'
+          AND reason_worker IS NOT NULL
         """,
         (project_id,),
     )

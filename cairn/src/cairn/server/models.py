@@ -183,6 +183,7 @@ class ProjectMeta(BaseModel):
     parent_snapshot_id: str | None = None
     created_at: str
     reason: ProjectReason | None = None
+    reason_pending: bool = False
     recon_max_reason_rounds: int | None = None
     recon_reason_rounds: int = 0
     recon_explore_rounds: int = 0

@@ -150,7 +150,8 @@ Reason 写回规则：
 - Recon `no_new_high_value`：记录 reason round，`stable=true`。
 - Vuln reason 不影响 recon counters。
 - Reason 任务结束时尽量释放 project reason lease。
-- Dispatcher 的本地 reason checkpoint 表示“上一次 reason 成功后的 graph baseline”，用于判断后续是否需要重新触发 reason；`RunningTask` 只保存 reason 启动时的 facts/hints/open intents 计数作为刷新失败 fallback。Reason 成功后 dispatcher 会重新读取 project detail 更新 checkpoint；如果读取失败，则回退到启动快照并记录 warning，不把任务改成失败。触发规则保持：facts 增加、hints 增加、或 open intent count 从非零变为零。
+- Dispatcher 的本地 reason checkpoint 表示“上一次 reason 成功后的 graph baseline”，用于判断后续是否需要重新触发 reason；`RunningTask` 只保存 reason 启动时的 facts/hints/open intents 计数作为刷新失败 fallback。Reason 成功后 dispatcher 会重新读取 project detail 更新 checkpoint；如果读取失败，则回退到启动快照并记录 warning，不把任务改成失败。触发规则包括：facts 增加、hints 增加、open intent count 从非零变为零，或 server 暴露 `reason_pending=true`。
+- `reason_pending` 是项目级合并触发信号。Server 在 reason lease 存在时收到新的 fact/hint 写入，会将该项目标记为 pending；多个写入只合并成一个 pending，不排多个 reason。当前 reason release 后，下一轮调度看到 pending 会立即 claim 新 reason；claim 成功时清除 pending。这样 reason 与 explore 并发时，reason 运行期间新增的事实不会被 checkpoint 刷新吞掉。
 
 ### Explore
 

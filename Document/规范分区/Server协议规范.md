@@ -30,6 +30,7 @@ parent_project_id      # only for vuln; legacy migrated vuln may be null
 parent_snapshot_id     # only for vuln; legacy migrated vuln may be null
 created_at
 reason                 # project-level reason lease, not graph data
+reason_pending         # coalesced reason trigger while reason is already running
 recon_max_reason_rounds
 recon_reason_rounds
 recon_explore_rounds
@@ -194,7 +195,7 @@ Body：
 - `active <-> stopped` 允许互相切换。
 - 可以设置为 `completed`，表示人工归档。
 - 一旦进入 `completed`，任何非 completed status 都返回 409。
-- 设置为 `stopped` 或 `completed` 会清理 open intent workers 和 reason lease。
+- 设置为 `stopped` 或 `completed` 会清理 open intent workers、reason lease 和 `reason_pending`。
 
 ### POST /projects/{project_id}/complete
 
@@ -206,7 +207,7 @@ Body：
 
 ## Reason Lease APIs
 
-Reason lease 是 project-level coordination state，不是 graph data。
+Reason lease 是 project-level coordination state，不是 graph data。`reason_pending` 是 project-level 合并触发信号：当 reason 正在运行时，如果新的 fact 或 hint 写入，Server 将 `reason_pending` 置为 `true`；当前 reason 释放 lease 后 Dispatcher 会立刻再启动一轮 reason，并在新的 claim 成功时清除该 pending 信号。
 
 ### POST /projects/{project_id}/reason/claim
 
@@ -216,7 +217,7 @@ Body：
 {"worker": "worker-a", "trigger": "initial"}
 ```
 
-只有 `active` projects 允许 claim。被其他 active claimant 持有时返回 409。
+只有 `active` projects 允许 claim。被其他 active claimant 持有时返回 409。成功 claim 会写入 reason lease，并清除 `reason_pending`，表示该 pending 信号已被新一轮 reason 消费。
 
 ### POST /projects/{project_id}/reason/heartbeat
 
@@ -236,7 +237,7 @@ Body：
 {"worker": "worker-a"}
 ```
 
-如果 reason lease 由该 worker 持有，则释放 lease。
+如果 reason lease 由该 worker 持有，则释放 lease。Release 不清除 `reason_pending`；如果当前 reason 运行期间发生 graph 写入，pending 信号会保留给下一轮调度。
 
 ## Recon APIs
 

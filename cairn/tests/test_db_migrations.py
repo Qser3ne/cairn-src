@@ -24,7 +24,7 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert "mode" not in project_columns
     assert "bootstrap_enabled" not in project_columns
     assert "session_lock_enabled" not in project_columns
-    assert {"project_kind", "auth_mode", "parent_project_id", "parent_snapshot_id"} <= project_columns
+    assert {"project_kind", "auth_mode", "parent_project_id", "parent_snapshot_id", "reason_pending"} <= project_columns
     assert {"intent_kind", "finding_id", "auth_scope"} <= intent_columns
     assert "session_lock" not in intent_columns
     assert {"research_value", "next_action", "report_status", "report_intent_id"} <= finding_columns
@@ -92,7 +92,7 @@ def test_legacy_src_project_migrates_to_parentless_vuln_and_drops_password_accou
     with db.get_conn() as conn:
         project_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
         project = conn.execute(
-            "SELECT project_kind, auth_mode, parent_project_id, parent_snapshot_id FROM projects WHERE id = 'proj_001'"
+            "SELECT project_kind, auth_mode, parent_project_id, parent_snapshot_id, reason_pending FROM projects WHERE id = 'proj_001'"
         ).fetchone()
         account = conn.execute(
             "SELECT label, cookies_json FROM project_accounts WHERE project_id = 'proj_001'"
@@ -103,6 +103,7 @@ def test_legacy_src_project_migrates_to_parentless_vuln_and_drops_password_accou
     assert project["auth_mode"] == "authenticated"
     assert project["parent_project_id"] is None
     assert project["parent_snapshot_id"] is None
+    assert project["reason_pending"] == 0
     assert account is None
     assert "cookies_json" in account_columns
     assert "username" not in account_columns

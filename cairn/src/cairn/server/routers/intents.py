@@ -23,6 +23,7 @@ from cairn.server.services import (
     get_releasable_open_intent_or_404,
     increment_recon_explore_round,
     intent_to_model,
+    mark_reason_pending_if_reason_running,
     next_fact_id,
     next_finding_id,
     next_intent_id,
@@ -188,6 +189,7 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
             "UPDATE intents SET to_fact_id = ?, worker = ?, last_heartbeat_at = ?, concluded_at = ? WHERE id = ? AND project_id = ?",
             (fid, body.worker, now, now, intent_id, project_id),
         )
+        mark_reason_pending_if_reason_running(conn, project_id)
         findings = []
         for finding in body.findings or []:
             finding_id = next_finding_id(conn, project_id)

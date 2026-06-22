@@ -124,6 +124,19 @@ def test_reason_trigger_detects_new_facts_and_open_intent_completion() -> None:
     assert loop._reason_trigger(project) == "facts:2->3,open_intents:1->0"
 
 
+def test_reason_trigger_detects_pending_reason_signal() -> None:
+    loop = _loop()
+    project = make_project()
+    project.project.reason_pending = True
+    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
+        fact_count=len(project.facts),
+        hint_count=len(project.hints),
+        open_intent_count=0,
+    )
+
+    assert loop._reason_trigger(project) == "pending"
+
+
 def test_reason_success_checkpoint_uses_latest_project_detail() -> None:
     loop = _loop()
     started_project = make_project(intents=[make_intent()])

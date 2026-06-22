@@ -858,9 +858,14 @@ class DispatcherLoop:
         # new facts, new hints, or the transition from some open intents to none.
         open_intent_count = self._project_open_intent_count(project)
         checkpoint = self.reason_checkpoints.get(project.project.id)
+        if project.project.reason_pending:
+            if checkpoint is None:
+                return "pending"
+            changes = ["pending"]
+        else:
+            changes = []
         if checkpoint is None:
             return "initial"
-        changes: list[str] = []
         if len(project.facts) > checkpoint.fact_count:
             changes.append(f"facts:{checkpoint.fact_count}->{len(project.facts)}")
         if len(project.hints) > checkpoint.hint_count:

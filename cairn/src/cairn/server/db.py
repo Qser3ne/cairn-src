@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS projects (
     reason_trigger TEXT,
     reason_started_at TEXT,
     reason_last_heartbeat_at TEXT,
+    reason_pending INTEGER NOT NULL DEFAULT 0,
     recon_max_reason_rounds INTEGER,
     recon_reason_rounds INTEGER NOT NULL DEFAULT 0,
     recon_explore_rounds INTEGER NOT NULL DEFAULT 0,
@@ -250,6 +251,9 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
     if "judged_at" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN judged_at TEXT")
         columns.add("judged_at")
+    if "reason_pending" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN reason_pending INTEGER NOT NULL DEFAULT 0")
+        columns.add("reason_pending")
     conn.execute("UPDATE projects SET auth_mode = 'dual' WHERE project_kind = 'recon'")
     if "session_lock_enabled" not in columns:
         return
@@ -270,6 +274,7 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_trigger TEXT,
             reason_started_at TEXT,
             reason_last_heartbeat_at TEXT,
+            reason_pending INTEGER NOT NULL DEFAULT 0,
             recon_max_reason_rounds INTEGER,
             recon_reason_rounds INTEGER NOT NULL DEFAULT 0,
             recon_explore_rounds INTEGER NOT NULL DEFAULT 0,
@@ -294,6 +299,7 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_trigger,
             reason_started_at,
             reason_last_heartbeat_at,
+            reason_pending,
             recon_max_reason_rounds,
             recon_reason_rounds,
             recon_explore_rounds,
@@ -314,6 +320,7 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_trigger,
             reason_started_at,
             reason_last_heartbeat_at,
+            reason_pending,
             recon_max_reason_rounds,
             recon_reason_rounds,
             recon_explore_rounds,

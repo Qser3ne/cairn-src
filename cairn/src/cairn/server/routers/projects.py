@@ -33,6 +33,7 @@ from cairn.server.services import (
     build_project_accounts,
     check_project_active,
     check_project_kind,
+    clear_reason_pending,
     clear_project_reason,
     ephemeral_job_to_model,
     expire_reason_leases,
@@ -68,6 +69,7 @@ def _summary_from_row(row) -> ProjectSummary:
         parent_snapshot_id=row["parent_snapshot_id"],
         created_at=row["created_at"],
         reason=project_reason_from_row(row),
+        reason_pending=bool(row["reason_pending"]),
         recon_max_reason_rounds=row["recon_max_reason_rounds"],
         recon_reason_rounds=row["recon_reason_rounds"],
         recon_explore_rounds=row["recon_explore_rounds"],
@@ -254,6 +256,7 @@ def update_project_status(project_id: str, body: UpdateProjectStatusRequest):
                 (project_id,),
             )
             clear_project_reason(conn, project_id)
+            clear_reason_pending(conn, project_id)
         return project_meta_from_row(get_project_or_404(conn, project_id))
 
 
@@ -276,7 +279,8 @@ def claim_project_reason(project_id: str, body: ReasonClaimRequest):
             SET reason_worker = ?,
                 reason_trigger = ?,
                 reason_started_at = ?,
-                reason_last_heartbeat_at = ?
+                reason_last_heartbeat_at = ?,
+                reason_pending = 0
             WHERE id = ?
             """,
             (body.worker, body.trigger, now, now, project_id),

@@ -17,6 +17,7 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 - Evaluate Recon 的最新结果会在项目 Detail 面板展示 verdict、score、recommended action、checklist、blocking gaps 和 non-blocking gaps，并保留最近历史结果，避免只看到 `judge_status` 而丢失具体判断理由；其中 `evidence` 和 gaps 等判断理由优先由 judge 产出简体中文，协议字段和枚举值仍保持英文。
 - 用户从 recon 创建 snapshot，再从 snapshot fork 一个 vuln 项目；新 vuln 必须记录 `parent_project_id` 和 `parent_snapshot_id`。
 - vuln 项目 reason 只规划非重复漏洞验证 intents；explore 可写 facts 和 findings；finding 可触发 follow-up intent 或 report intent。
+- 如果 reason 正在运行期间有 explore 写入新 fact 或用户追加 hint，系统会合并记录一次 pending reason；当前 reason 结束后立即再跑一轮 reason，用最新图快照分析期间新增信息，避免漏洞验证项目停在未分析的新 fact 上。
 - report intent 由 report task 生成 `finding_reports` 草稿，并更新 finding 的 `report_status`。
 
 ## 行为边界
