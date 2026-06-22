@@ -18,11 +18,11 @@
     "score": 86,
     "recommended_action": "create_vuln_project",
     "checklist": {
-      "scope_clarity": {"score": 18, "evidence": "scope and origin are explicit; in-scope assets are distinguishable from third-party services"},
-      "asset_coverage": {"score": 17, "evidence": "primary host and related sub-assets have been sampled"},
-      "endpoint_coverage": {"score": 16, "evidence": "anonymous and authenticated endpoints include concrete paths and parameters"},
-      "auth_boundary_coverage": {"score": 18, "evidence": "login-only surfaces and anonymous surfaces are separated"},
-      "candidate_surface_quality": {"score": 17, "evidence": "multiple concrete candidate attack surfaces can be validated in a vuln fork"}
+      "scope_clarity": {"score": 18, "evidence": "scope 与 origin 已明确，范围内资产和第三方服务边界可区分"},
+      "asset_coverage": {"score": 17, "evidence": "主机和相关子资产已有抽样覆盖"},
+      "endpoint_coverage": {"score": 16, "evidence": "anonymous 与 authenticated 端点包含具体路径和参数"},
+      "auth_boundary_coverage": {"score": 18, "evidence": "登录态功能面和匿名功能面已有区分"},
+      "candidate_surface_quality": {"score": 17, "evidence": "已有多个可在 vuln fork 中继续验证的具体候选攻击面"}
     },
     "blocking_gaps": [],
     "non_blocking_gaps": []
@@ -55,7 +55,12 @@
 - `auth_boundary_coverage`：anonymous 与 authenticated 边界、登录态入口、cookie session 可用性、权限差异是否有覆盖。
 - `candidate_surface_quality`：是否存在可 fork 到 vuln 项目继续验证的具体候选攻击面。
 
-`data.blocking_gaps` 与 `data.non_blocking_gaps` 都必须是字符串数组。每个 gap 都要具体、可执行，并且能够直接转化为后续 recon intent，例如 `"Explore authenticated settings endpoints and compare accessible fields across roles"`。不要输出对象、数字或嵌套数组。
+`data.blocking_gaps` 与 `data.non_blocking_gaps` 都必须是字符串数组。每个 gap 都要具体、可执行，并且能够直接转化为后续 recon intent，例如 `"补充 authenticated settings 端点采样，并比较不同角色可见字段"`。不要输出对象、数字或嵌套数组。
+
+## 语言建议
+
+- JSON 字段名、枚举值、模板变量和 checklist key 保持英文；不要把 `accepted`、`data`、`verdict`、`score`、`recommended_action`、`checklist`、`scope_clarity`、`blocking_gaps` 等协议字段改成中文。
+- 人类可读内容建议优先使用简体中文，包括 `checklist.*.evidence`、`blocking_gaps` 和 `non_blocking_gaps` 中的证据说明、阻断缺口和后续 recon 建议；资产名、URL、端点、路径、参数名、状态码、命令、漏洞缩写和技术术语可以保留英文。
 
 ## 判定规则
 

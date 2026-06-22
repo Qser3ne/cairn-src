@@ -99,7 +99,7 @@ Judge checklist 固定包含：
 - `auth_boundary_coverage`
 - `candidate_surface_quality`
 
-每项包含 `score`（0-20）和 `evidence`。总分建议为五项相加，0-100。`blocking_gaps` 和 `non_blocking_gaps` 都是可转化为后续 recon intent 的字符串数组。
+每项包含 `score`（0-20）和 `evidence`。总分建议为五项相加，0-100。`blocking_gaps` 和 `non_blocking_gaps` 都是可转化为后续 recon intent 的字符串数组。Judge 输出中 JSON 字段名、枚举值和 checklist key 保持英文，`evidence`、`blocking_gaps`、`non_blocking_gaps` 等 UI 可读内容建议优先使用简体中文。
 
 Judge verdict 规则：
 

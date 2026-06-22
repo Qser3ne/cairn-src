@@ -44,6 +44,12 @@ Status 规则：
 - `stopped` 拒绝 graph write operations，清理 open intent workers 和 reason lease，可恢复为 `active`。
 - `completed` 拒绝 graph write operations，不能恢复为 `active` 或 `stopped`。
 
+ID 规则：
+
+- Project ID 使用 `proj_###` 格式，由当前 `projects.id` 中最大数字后缀加 1 生成。
+- 删除当前最大编号项目后，该最大编号可被下一个新项目复用；删除中间编号不会填补空洞。
+- Project-scoped IDs（例如 `f001`、`i001`、`a001`、`snap_001`）仍按项目内 scoped counter 递增，不因同项目内资源删除而回收。
+
 ### Fact
 
 Facts 是不可变 graph nodes。每个项目从以下 fact 开始：
@@ -101,6 +107,8 @@ Recon snapshots 存储 YAML export、selected fact IDs 和 stats。它们是新 
 ### Ephemeral Job
 
 Ephemeral jobs 是不写 graph data 的临时任务。当前 judge 使用这条路径。
+
+Judge ephemeral job ID 使用 `judge_###` 格式，由当前 `ephemeral_jobs.id` 中最大数字后缀加 1 生成。删除项目会级联删除该项目的 judge jobs，因此被删除的当前最大 judge 编号可被后续 Evaluate Recon 复用；中间空洞不填补。
 
 ## 数据库与迁移
 

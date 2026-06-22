@@ -54,7 +54,7 @@ def test_recon_judge_prompt_declares_ephemeral_no_graph_write() -> None:
 
 def test_default_prompts_prefer_chinese_readable_output_without_protocol_translation() -> None:
     prompt_names = {
-        "recon": ("reason.md", "explore.md", "explore_conclude.md"),
+        "recon": ("reason.md", "explore.md", "explore_conclude.md", "judge.md"),
         "vuln": ("reason.md", "explore.md", "explore_conclude.md"),
     }
 

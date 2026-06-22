@@ -23,6 +23,7 @@
 - recon explore conclude 成功后记录 recon explore round。
 - recon 达到 `recon_max_reason_rounds` 后自动 `stopped` 并清空 reason lease。
 - judge 是 `ephemeral_jobs`，只写 job result 和 project `judge_status/judged_at`，不写 graph。
+- Project ID 和 judge ephemeral job ID 不再依赖全局 `counters` 单调递增；`next_project_id` 从当前 `projects.id` 最大 `proj_###` 计算，`next_ephemeral_job_id` 从当前 `ephemeral_jobs.id` 最大 `judge_###` 计算。删除当前最大编号后可复用该编号，中间空洞不填补；项目内 scoped IDs 仍使用 `scoped_counters`。
 - judge 任务如果被 stopped/completed/deleted 等 inactive cancellation 中断，dispatcher 必须调用 ephemeral job fail 接口把 job 从 `running` 写回 `failed`，错误信息形如 `judge cancelled: stopped`；否则 UI/API 会长期显示 Evaluate running 但实际容器 exec 已结束。
 - snapshot 只允许 recon 创建；fork-vuln 创建 child vuln 并写入 parent/snapshot、`origin`、`recon_snapshot` fact，可复制 selected facts。
 - vuln explore 可写 findings；finding lifecycle 可自动创建 follow-up explore intent 或 report intent。
@@ -30,7 +31,7 @@
 - recon 固定 `auth_mode="dual"`，新建时必须有 `project_accounts` cookie session，reason 首轮必须创建 anonymous/authenticated 两条 baseline intent。
 - vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts` cookie session。
 - explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租 cookie session，anonymous explore 不被 session 池阻塞。
-- 默认 prompt 对 graph 写入文本采用中文优先软建议：`intent.description`、`fact.description` 和 vuln `findings` 的人类可读字段建议优先简体中文；协议字段、枚举值和导出结构保持英文，不做运行时中文校验。
+- 默认 prompt 对人类可读文本采用中文优先软建议：`intent.description`、`fact.description`、vuln `findings` 以及 judge `evidence`/gaps 建议优先简体中文；协议字段、枚举值和导出结构保持英文，不做运行时中文校验。
 
 ## 公开仓库文档状态
 

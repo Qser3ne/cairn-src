@@ -21,10 +21,23 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _next_existing_numeric_id(conn: sqlite3.Connection, table: str, column: str, prefix: str) -> str:
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    rows = conn.execute(f"SELECT {column} FROM {table} WHERE {column} GLOB ?", (f"{prefix}*",)).fetchall()
+    max_value = 0
+    for row in rows:
+        value = row[0]
+        if not isinstance(value, str) or not value.startswith(prefix):
+            continue
+        suffix = value[len(prefix) :]
+        if suffix.isdigit():
+            max_value = max(max_value, int(suffix))
+    return f"{prefix}{max_value + 1:03d}"
+
+
 def next_project_id(conn: sqlite3.Connection) -> str:
-    conn.execute("UPDATE counters SET value = value + 1 WHERE name = 'project'")
-    row = conn.execute("SELECT value FROM counters WHERE name = 'project'").fetchone()
-    return f"proj_{row['value']:03d}"
+    return _next_existing_numeric_id(conn, "projects", "id", "proj_")
 
 
 def _next_scoped_id(
@@ -71,10 +84,7 @@ def next_snapshot_id(conn: sqlite3.Connection, project_id: str) -> str:
 
 
 def next_ephemeral_job_id(conn: sqlite3.Connection) -> str:
-    conn.execute("INSERT OR IGNORE INTO counters (name, value) VALUES ('ephemeral_job', 0)")
-    conn.execute("UPDATE counters SET value = value + 1 WHERE name = 'ephemeral_job'")
-    row = conn.execute("SELECT value FROM counters WHERE name = 'ephemeral_job'").fetchone()
-    return f"judge_{row['value']:03d}"
+    return _next_existing_numeric_id(conn, "ephemeral_jobs", "id", "judge_")
 
 
 def next_report_id(conn: sqlite3.Connection, project_id: str) -> str:

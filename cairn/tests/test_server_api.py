@@ -63,6 +63,30 @@ def test_create_project_defaults_to_recon_and_forbids_old_fields(client: TestCli
         assert response.status_code == 422
 
 
+def test_project_ids_follow_current_existing_max_after_deletes(client: TestClient) -> None:
+    first = _create_recon(client, title="first")["project"]["id"]
+    second = _create_recon(client, title="second")["project"]["id"]
+    third = _create_recon(client, title="third")["project"]["id"]
+    assert [first, second, third] == ["proj_001", "proj_002", "proj_003"]
+
+    assert client.delete(f"/projects/{second}").status_code == 204
+    fourth = _create_recon(client, title="fourth")["project"]["id"]
+    assert fourth == "proj_004"
+
+    assert client.delete(f"/projects/{fourth}").status_code == 204
+    reused_max = _create_recon(client, title="reused max")["project"]["id"]
+    assert reused_max == "proj_004"
+
+
+def test_project_id_restarts_when_no_projects_remain(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    assert project_id == "proj_001"
+
+    assert client.delete(f"/projects/{project_id}").status_code == 204
+    replacement_id = _create_recon(client, title="replacement")["project"]["id"]
+    assert replacement_id == "proj_001"
+
+
 def test_authenticated_projects_require_accounts_and_persist_account_pool(client: TestClient) -> None:
     response = client.post(
         "/projects",
@@ -303,6 +327,36 @@ def test_recon_judgement_job_lifecycle_updates_project_judge_status(client: Test
     assert detail["facts"] == [
         {"id": "origin", "description": "https://target.test"},
     ]
+
+
+def test_recon_judgement_ids_follow_current_existing_max_after_project_delete(client: TestClient) -> None:
+    first_project = _create_recon(client, title="first")["project"]["id"]
+    second_project = _create_recon(client, title="second")["project"]["id"]
+    third_project = _create_recon(client, title="third")["project"]["id"]
+
+    first_job = client.post(f"/projects/{first_project}/recon/judgements").json()["job_id"]
+    second_job = client.post(f"/projects/{second_project}/recon/judgements").json()["job_id"]
+    third_job = client.post(f"/projects/{third_project}/recon/judgements").json()["job_id"]
+    assert [first_job, second_job, third_job] == ["judge_001", "judge_002", "judge_003"]
+
+    assert client.delete(f"/projects/{second_project}").status_code == 204
+    fourth_job = client.post(f"/projects/{first_project}/recon/judgements").json()["job_id"]
+    assert fourth_job == "judge_004"
+
+    assert client.delete(f"/projects/{first_project}").status_code == 204
+    reused_max_job = client.post(f"/projects/{third_project}/recon/judgements").json()["job_id"]
+    assert reused_max_job == "judge_004"
+
+
+def test_recon_judgement_id_restarts_when_no_existing_jobs_remain(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    job_id = client.post(f"/projects/{project_id}/recon/judgements").json()["job_id"]
+    assert job_id == "judge_001"
+
+    assert client.delete(f"/projects/{project_id}").status_code == 204
+    replacement_project_id = _create_recon(client, title="replacement")["project"]["id"]
+    replacement_job_id = client.post(f"/projects/{replacement_project_id}/recon/judgements").json()["job_id"]
+    assert replacement_job_id == "judge_001"
 
 
 def test_recon_judgement_fail_marks_running_job_failed(client: TestClient) -> None:

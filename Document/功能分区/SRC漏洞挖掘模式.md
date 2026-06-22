@@ -14,7 +14,7 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 - 用户创建 recon 项目，输入 title、origin、hints 和至少一个 cookie session；recon 固定为 `auth_mode="dual"`，由 intent 级 `auth_scope` 分成未登录和已登录两条信息收集线路。
 - recon 项目通过 reason 规划 recon intents，通过 explore 产出资产、入口、边界和候选攻击面 facts。
 - 用户可触发 Evaluate Recon，系统创建 ephemeral judge job，评估当前 recon 是否足够 fork vuln；judge 只更新 `judge_status` 和 judgement result，不写 facts/intents/findings。
-- Evaluate Recon 的最新结果会在项目 Detail 面板展示 verdict、score、recommended action、checklist、blocking gaps 和 non-blocking gaps，并保留最近历史结果，避免只看到 `judge_status` 而丢失具体判断理由。
+- Evaluate Recon 的最新结果会在项目 Detail 面板展示 verdict、score、recommended action、checklist、blocking gaps 和 non-blocking gaps，并保留最近历史结果，避免只看到 `judge_status` 而丢失具体判断理由；其中 `evidence` 和 gaps 等判断理由优先由 judge 产出简体中文，协议字段和枚举值仍保持英文。
 - 用户从 recon 创建 snapshot，再从 snapshot fork 一个 vuln 项目；新 vuln 必须记录 `parent_project_id` 和 `parent_snapshot_id`。
 - vuln 项目 reason 只规划非重复漏洞验证 intents；explore 可写 facts 和 findings；finding 可触发 follow-up intent 或 report intent。
 - report intent 由 report task 生成 `finding_reports` 草稿，并更新 finding 的 `report_status`。
@@ -29,6 +29,8 @@ Cairn 现在只保留 SRC 方向工作流，项目不再区分 `standard` / `src
 - `/projects/{id}/complete` 和 `/projects/{id}/reopen` 保留路由但返回 410 Gone。
 - `PUT /projects/{id}/status` 支持 `active|stopped|completed`；`completed` 后不可恢复，只能读取、导出和改标题。
 - 删除父 recon 时，如果存在 child vuln，默认返回 409。
+- 新建项目 ID 使用当前已有 `proj_###` 最大编号加 1；删除当前最大编号后会复用该编号，删除中间编号不会填补空洞。
+- Evaluate Recon 创建的 judge job ID 使用当前已有 `judge_###` 最大编号加 1；删除项目会级联删除其 judge jobs，因此当前最大 judge 编号也可能被后续 Evaluate 复用。
 
 ## 输入输出
 
