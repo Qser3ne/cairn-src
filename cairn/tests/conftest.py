@@ -144,6 +144,11 @@ class FakeClient:
         intent_id: str,
         worker: str,
         description: str,
+        *,
+        fact_type: str = "observation",
+        title: str | None = None,
+        summary: str | None = None,
+        details: dict | None = None,
         findings: list[dict] | None = None,
     ) -> ApiResult:
         self.concluded.append((project_id, intent_id, worker, description))

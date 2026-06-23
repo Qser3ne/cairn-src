@@ -35,6 +35,10 @@
 - vuln 继续使用项目级 `auth_mode="anonymous|authenticated"`；authenticated vuln 必须有 `project_accounts` cookie session。
 - explore intent 使用 `auth_scope="anonymous|authenticated"`；scheduler 只为 authenticated explore 租 cookie session，anonymous explore 不被 session 池阻塞。
 - 默认 prompt 对人类可读文本采用中文优先软建议：`intent.description`、`fact.description`、vuln `findings` 以及 judge `evidence`/gaps 建议优先简体中文；协议字段、枚举值和导出结构保持英文，不做运行时中文校验。
+- Recon 已切换为功能理解优先：reason 优先规划 `feature_mapping`、`workflow_mapping`、`feature_api_binding`；explore 可写 `fact_type="feature_surface"`、`title`、`summary`、`details`，用于记录页面功能、用户动作、routes/apis、截图/DOM/证据引用。
+- `facts` 表采用兼容扩展方案：保留 `description`，新增 `fact_type`、`title`、`summary`、`details_json`；旧库启动迁移默认回填 `observation` 和 `{}`。
+- AI seeded fork 现在以功能点 seed 为主，seed fact 可包含 `feature_summary`、`user_actions`、`routes`、`apis`、`vuln_validation_focus`、`known_constraints`、`evidence_refs`；child vuln seed facts 会保留结构字段，job result 也返回 child `seed_facts` 摘要。
+- UI 已在 fact detail、judge checklist 和 AI seeded fork 卡片中显示结构化 feature/judge/seed 信息；graph fact label 优先使用 title/summary。
 
 ## 公开仓库文档状态
 
@@ -49,8 +53,8 @@
 
 - 查看状态：`git status --short --branch`
 - 语法检查：`python3 -m compileall -q cairn/src/cairn cairn/tests`
-- 完整测试：`cd cairn && ../.venv-test/bin/python -m pytest -q -s tests`
-- 当前环境缺少 `uv` 时，使用项目外临时 venv；本轮临时测试环境为 `/home/qser3ne/Application/carin-dev/.venv-test`，不要纳入提交。当前 pytest 全局捕获在该临时环境会触发 `FileNotFoundError`，使用 `-s` 禁用捕获。
+- 完整测试：`cd cairn && uv run --group dev pytest -s`
+- 本轮功能优先 recon/structured facts 改造已验证：`uv run --group dev pytest -s`，结果 `123 passed`。
 
 ## 项目级 Skill 约束
 

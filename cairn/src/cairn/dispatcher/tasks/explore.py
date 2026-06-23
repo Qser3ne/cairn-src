@@ -156,7 +156,7 @@ def run_explore_task(
             try:
                 model_output = driver.extract_response_text(first.stdout, first.stderr)
                 payload = parse_json_output(model_output)
-                kind, description = validate_explore_payload(payload)
+                kind, fact_data = validate_explore_payload(payload)
             except Exception as exc:
                 LOG.warning(
                     "explore parse failed project=%s intent=%s worker=%s error=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -196,12 +196,17 @@ def run_explore_task(
                 )
                 best_effort_release(client, project.project.id, intent.id, worker.name)
                 return "rejected"
+            assert fact_data is not None
             outcome = write_conclude_result(
                 client,
                 project.project.id,
                 intent.id,
                 worker.name,
-                description,
+                fact_data["description"],
+                fact_type=fact_data["fact_type"],
+                title=fact_data["title"],
+                summary=fact_data["summary"],
+                details=fact_data["details"],
                 findings=_payload_findings_for_project(payload, project.project.project_kind),
                 source="explore_execute",
                 phase_ms=execute_ms,
@@ -368,7 +373,7 @@ def _try_conclude_fallback(
     try:
         model_output = driver.extract_response_text(result.stdout, result.stderr)
         payload = parse_json_output(model_output)
-        kind, description = validate_explore_payload(payload)
+        kind, fact_data = validate_explore_payload(payload)
     except Exception as exc:
         LOG.warning(
             "conclude parse failed project=%s intent=%s worker=%s error=%s conclude_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -393,12 +398,17 @@ def _try_conclude_fallback(
         )
         best_effort_release(client, project_id, intent.id, worker.name)
         return "rejected"
+    assert fact_data is not None
     outcome = write_conclude_result(
         client,
         project_id,
         intent.id,
         worker.name,
-        description,
+        fact_data["description"],
+        fact_type=fact_data["fact_type"],
+        title=fact_data["title"],
+        summary=fact_data["summary"],
+        details=fact_data["details"],
         findings=_payload_findings_for_project(payload, project.project.project_kind),
         source="explore_conclude",
         phase_ms=conclude_ms,

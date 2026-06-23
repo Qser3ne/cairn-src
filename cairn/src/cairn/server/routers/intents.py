@@ -7,7 +7,6 @@ from cairn.server.models import (
     ConcludeRequest,
     ConcludeResponse,
     CreateIntentRequest,
-    Fact,
     HeartbeatRequest,
     Intent,
     ReportConcludeRequest,
@@ -16,6 +15,7 @@ from cairn.server.models import (
 from cairn.server.services import (
     check_duplicate_intent,
     check_project_active,
+    fact_from_row,
     finding_to_model,
     finding_report_to_model,
     get_finding_or_404,
@@ -182,8 +182,26 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
         fid = next_fact_id(conn, project_id)
 
         conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            (fid, project_id, body.description),
+            """
+            INSERT INTO facts (
+                id,
+                project_id,
+                description,
+                fact_type,
+                title,
+                summary,
+                details_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fid,
+                project_id,
+                body.description,
+                body.fact_type,
+                body.title,
+                body.summary,
+                json.dumps(body.details, ensure_ascii=False),
+            ),
         )
         conn.execute(
             "UPDATE intents SET to_fact_id = ?, worker = ?, last_heartbeat_at = ?, concluded_at = ? WHERE id = ? AND project_id = ?",
@@ -324,9 +342,13 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
             "SELECT * FROM intents WHERE id = ? AND project_id = ?",
             (intent_id, project_id),
         ).fetchone()
+        fact_row = conn.execute(
+            "SELECT * FROM facts WHERE id = ? AND project_id = ?",
+            (fid, project_id),
+        ).fetchone()
 
         return ConcludeResponse(
-            fact=Fact(id=fid, description=body.description),
+            fact=fact_from_row(fact_row),
             intent=intent_to_model(conn, updated, project_id),
             findings=findings,
         )

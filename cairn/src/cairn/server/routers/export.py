@@ -30,13 +30,38 @@ def _account_cookies(account) -> list[dict]:
     return [cookie for cookie in cookies if isinstance(cookie, dict)]
 
 
+def _fact_details(fact) -> dict:
+    try:
+        details = json.loads(fact["details_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return details if isinstance(details, dict) else {}
+
+
+def _fact_entry(fact) -> dict:
+    entry = {"id": fact["id"], "description": fact["description"]}
+    fact_type = fact["fact_type"] if "fact_type" in fact.keys() else "observation"
+    title = fact["title"] if "title" in fact.keys() else None
+    summary = fact["summary"] if "summary" in fact.keys() else None
+    details = _fact_details(fact) if "details_json" in fact.keys() else {}
+    if fact_type != "observation":
+        entry["fact_type"] = fact_type
+    if title:
+        entry["title"] = title
+    if summary:
+        entry["summary"] = summary
+    if details:
+        entry["details"] = details
+    return entry
+
+
 def _load_project_data(conn, project_id: str):
     expire_workers(conn, project_id)
     expire_reason_leases(conn, project_id)
     proj = get_project_or_404(conn, project_id)
 
     facts = conn.execute(
-        "SELECT id, description FROM facts WHERE project_id = ?", (project_id,)
+        "SELECT * FROM facts WHERE project_id = ?", (project_id,)
     ).fetchall()
     hints = conn.execute(
         "SELECT content, creator, created_at FROM hints WHERE project_id = ? ORDER BY created_at",
@@ -109,7 +134,7 @@ def _export_yaml(conn, project_id: str) -> str:
             for h in hints
         ]
 
-    data["facts"] = [{"id": f["id"], "description": f["description"]} for f in facts]
+    data["facts"] = [_fact_entry(f) for f in facts]
 
     if findings:
         data["findings"] = [

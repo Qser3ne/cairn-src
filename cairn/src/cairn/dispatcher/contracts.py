@@ -49,8 +49,18 @@ def _validate_reason_intent(intent: Any, index: int, *, require_auth_scope: bool
         raise ValueError(f"invalid auth_scope at index {index}")
 
 
+EXPLORE_ALLOWED_KEYS = {
+    "description",
+    "fact_type",
+    "title",
+    "summary",
+    "details",
+    "findings",
+}
+
+
 def _looks_like_explore_data(payload: dict[str, Any]) -> bool:
-    return isinstance(payload, dict) and "description" in payload and set(payload) <= {"description", "findings"}
+    return isinstance(payload, dict) and "description" in payload and set(payload) <= EXPLORE_ALLOWED_KEYS
 
 
 def validate_reason_payload(
@@ -169,6 +179,19 @@ def validate_fork_seed_payload(payload: dict[str, Any], graph_yaml: str, max_see
             raise ValueError(f"seed_fact cannot derive only from origin at index {index}")
         if not isinstance(description, str) or not description.strip():
             raise ValueError(f"seed_fact description is required at index {index}")
+        feature_summary = _optional_text(seed_fact.get("feature_summary"), f"seed_fact feature_summary at index {index}")
+        user_actions = _optional_text_list(seed_fact.get("user_actions"), f"seed_fact user_actions at index {index}")
+        routes = _optional_text_list(seed_fact.get("routes"), f"seed_fact routes at index {index}")
+        apis = _optional_text_list(seed_fact.get("apis"), f"seed_fact apis at index {index}")
+        vuln_validation_focus = _optional_text_list(
+            seed_fact.get("vuln_validation_focus"),
+            f"seed_fact vuln_validation_focus at index {index}",
+        )
+        known_constraints = _optional_text_list(
+            seed_fact.get("known_constraints"),
+            f"seed_fact known_constraints at index {index}",
+        )
+        evidence_refs = _optional_text_list(seed_fact.get("evidence_refs"), f"seed_fact evidence_refs at index {index}")
         normalized.append(
             {
                 "title": title.strip(),
@@ -176,6 +199,13 @@ def validate_fork_seed_payload(payload: dict[str, Any], graph_yaml: str, max_see
                 "candidate_type": candidate_type.strip(),
                 "derived_from": cleaned_sources,
                 "description": description.strip(),
+                "feature_summary": feature_summary,
+                "user_actions": user_actions,
+                "routes": routes,
+                "apis": apis,
+                "vuln_validation_focus": vuln_validation_focus,
+                "known_constraints": known_constraints,
+                "evidence_refs": evidence_refs,
             }
         )
     return "fork_seed", {"seed_facts": normalized}
@@ -198,7 +228,7 @@ def validate_report_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any
     return "report", {"report_markdown": report_markdown.strip(), "report_json": report_json}
 
 
-def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
+def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     accepted, data = _unwrap_wrapped_payload(payload)
     if accepted is False:
         return "rejected", None
@@ -211,6 +241,14 @@ def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
     description = data.get("description")
     if not isinstance(description, str) or not description.strip():
         raise ValueError("description is required")
+    fact_type = data.get("fact_type", "observation")
+    if fact_type not in ("observation", "feature_surface"):
+        raise ValueError("fact_type must be observation or feature_surface")
+    title = _optional_text(data.get("title"), "title")
+    summary = _optional_text(data.get("summary"), "summary")
+    details = data.get("details", {})
+    if not isinstance(details, dict):
+        raise ValueError("details must be an object")
     findings = data.get("findings")
     if findings is not None:
         if not isinstance(findings, list):
@@ -218,7 +256,37 @@ def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, str | None]:
         for index, finding in enumerate(findings):
             if not isinstance(finding, dict):
                 raise ValueError(f"invalid finding at index {index}")
-            title = finding.get("title")
-            if not isinstance(title, str) or not title.strip():
+            finding_title = finding.get("title")
+            if not isinstance(finding_title, str) or not finding_title.strip():
                 raise ValueError(f"finding title is required at index {index}")
-    return "fact", description.strip()
+    return "fact", {
+        "description": description.strip(),
+        "fact_type": fact_type,
+        "title": title,
+        "summary": summary,
+        "details": details,
+    }
+
+
+def _optional_text(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    text = value.strip()
+    return text or None
+
+
+def _optional_text_list(value: Any, label: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be an array")
+    cleaned = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{label} items must be strings")
+        text = item.strip()
+        if text:
+            cleaned.append(text)
+    return cleaned

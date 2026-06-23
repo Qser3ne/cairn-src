@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from cairn.server.models import (
     EphemeralJob,
+    Fact,
     Finding,
     FindingReport,
     Intent,
@@ -341,6 +342,24 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
         recon_stable_rounds=row["recon_stable_rounds"],
         judge_status=row["judge_status"],
         judged_at=row["judged_at"],
+    )
+
+
+def fact_from_row(row: sqlite3.Row) -> Fact:
+    raw_details = row["details_json"] if "details_json" in row.keys() else "{}"
+    try:
+        details = json.loads(raw_details or "{}")
+    except (TypeError, json.JSONDecodeError):
+        details = {}
+    if not isinstance(details, dict):
+        details = {}
+    return Fact(
+        id=row["id"],
+        description=row["description"],
+        fact_type=row["fact_type"] if "fact_type" in row.keys() else "observation",
+        title=row["title"] if "title" in row.keys() else None,
+        summary=row["summary"] if "summary" in row.keys() else None,
+        details=details,
     )
 
 

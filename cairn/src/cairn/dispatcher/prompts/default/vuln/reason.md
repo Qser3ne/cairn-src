@@ -41,15 +41,16 @@
   - 待处理 Intents 正在探索哪些目标、入口、漏洞类型和验证方式。
   - Concluded Intents 已经探索过哪些方向，结论是否有效或无效。
   - Facts 和 findings 已经覆盖哪些漏洞结果、攻击面和证据。
+  - Seed facts 中有哪些 `feature_surface`、`workflow_surface` 或包含 `feature_summary` 的功能点尚未被任何 open/concluded intent 消费。
   - 新 intent 是否和已有 intent/finding 在目标、入口、漏洞假设、验证方式上重复。
 - 如果一个方向已经有 open intent 正在处理，不要再次创建。
 - 如果一个方向已经由 concluded intent 验证过，除非新 fact 明确说明需要更深阶段，否则不要重复创建。
 - 如果已有 finding 已经覆盖某类漏洞，不要创建完全相同目标、入口、来源/接收方、参数矩阵和验证目的的重复 intent；但如果新 fact 明确引出新的来源、接收方、接口族、最小条件矩阵或影响面补强，则可以创建窄范围派生 intent。
-- 返回 decision=noop 且 intents=[] 前，必须先做全图 gap check：检查所有 findings 是否还有未覆盖的 token/source/receiver/interface/condition 矩阵；检查最近 facts 是否只是局部收敛，是否仍能回连到更早 finding 的未覆盖维度；检查是否存在因 token 缺失、现网回摆、超时 fallback 或前置条件变化导致的未完成验证。只有确认没有高价值、非重复派生方向后，才返回 noop。
+- 返回 decision=noop 且 intents=[] 前，必须先做全图 gap check：检查所有 findings 是否还有未覆盖的 token/source/receiver/interface/condition 矩阵；检查最近 facts 是否只是局部收敛，是否仍能回连到更早 finding 的未覆盖维度；检查 seed facts 中每个功能点、用户动作、route/API 是否至少被一个非重复 vuln intent 覆盖或被明确排除；检查是否存在因 token 缺失、现网回摆、超时 fallback 或前置条件变化导致的未完成验证。只有确认没有高价值、非重复派生方向后，才返回 noop。
 - 如果没有明显的新方向，返回 decision=noop 且 intents=[]；不要为了推进而硬造宽泛 intent。
 - 在提出新的 intents 时，最多提出 {max_intents} 个高价值且互不重叠的探索方向。
 - 每个 intent 的 description 必须包含清晰的去重语义：目标或入口、漏洞假设、验证重点。避免“继续测试”“深入挖掘”等泛泛描述。
-- 派生 intent 的 description 必须明确：基于哪些 fact/finding；新增维度是什么，例如新的 token 来源、接收方、接口族或最小条件矩阵；成功条件和否定条件；去重边界，明确不重复哪个已有 finding 或 intent。
+- 派生 intent 的 description 必须明确：基于哪些 fact/finding；对应哪个功能点、用户动作、route/API 或 finding；新增维度是什么，例如新的 token 来源、接收方、接口族或最小条件矩阵；成功条件和否定条件；去重边界，明确不重复哪个已有 finding 或 intent。
 - `data.intents[*].from` 必须来自有效 facts。
 
 ## Finding 派生方向

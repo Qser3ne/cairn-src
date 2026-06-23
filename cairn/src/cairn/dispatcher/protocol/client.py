@@ -113,9 +113,24 @@ class CairnClient:
         intent_id: str,
         worker: str,
         description: str,
+        *,
+        fact_type: str = "observation",
+        title: str | None = None,
+        summary: str | None = None,
+        details: dict[str, Any] | None = None,
         findings: list[dict[str, Any]] | None = None,
     ) -> ApiResult:
-        body: dict[str, Any] = {"worker": worker, "description": description}
+        body: dict[str, Any] = {
+            "worker": worker,
+            "description": description,
+            "fact_type": fact_type,
+        }
+        if title is not None:
+            body["title"] = title
+        if summary is not None:
+            body["summary"] = summary
+        if details:
+            body["details"] = details
         if findings:
             body["findings"] = findings
         return self._request_json(

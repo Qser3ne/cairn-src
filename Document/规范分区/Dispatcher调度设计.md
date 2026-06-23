@@ -107,6 +107,7 @@ cairn/src/cairn/dispatcher/prompts/default/
 - Dispatcher 解析和写回仍只依赖英文 JSON 字段名、枚举值和模板变量；不得把 `accepted`、`data`、`intents`、`description`、`findings`、`auth_scope`、`next_action` 等协议字段改成中文。
 - 默认任务提示词仅软性建议 worker 将 `intent.description`、`fact.description` 和 vuln `findings` 的人类可读内容优先写成简体中文。
 - 当前没有运行时中文比例校验或自动翻译；英文技术术语、URL、端点、路径、参数名、命令、payload、PoC、CVE/CWE 和漏洞缩写可以保留英文。
+- Recon 默认提示词采用功能理解优先策略：先建立页面/功能、用户动作、业务流程、截图/DOM 证据，再把 route/API 绑定到功能点；纯资产或端点枚举必须服务于明确功能面。
 
 ### Reason
 
@@ -155,6 +156,7 @@ Reason 写回规则：
 - Dispatcher 的本地 reason checkpoint 表示“上一次 reason 成功后的 graph baseline”，用于判断后续是否需要重新触发 reason；`RunningTask` 只保存 reason 启动时的 facts/hints/open intents 计数作为刷新失败 fallback。Reason 成功后 dispatcher 会重新读取 project detail 更新 checkpoint；如果读取失败，则回退到启动快照并记录 warning，不把任务改成失败。触发规则包括：facts 增加、hints 增加、open intent count 从非零变为零，或 server 暴露 `reason_pending=true`。
 - `reason_pending` 是项目级合并触发信号。Server 在 reason lease 存在时收到新的 fact/hint 写入，会将该项目标记为 pending；多个写入只合并成一个 pending，不排多个 reason。当前 reason release 后，下一轮调度看到 pending 会立即 claim 新 reason；claim 成功时清除 pending。这样 reason 与 explore 并发时，reason 运行期间新增的事实不会被 checkpoint 刷新吞掉。
 - 默认 vuln reason 提示词要求在返回 `noop` 前执行全图 gap check。已有 finding 不等于同一漏洞机制完全收敛；如果新 fact/finding 引出新的 token 来源、接收方、接口族、最小利用条件矩阵或影响面补强，reason 可以创建窄范围派生 intent。仍禁止目标、入口、来源/接收方、参数矩阵和验证目的均相同的重复 intent，也禁止“继续测试”“深入挖掘”等泛化描述。
+- 默认 vuln reason 还必须在 `noop` 前检查 fork seed 中尚未消费的功能点、用户动作、route/API；每个有价值 feature seed 要么被非重复 vuln intent 覆盖，要么被明确排除。
 
 ### Explore
 
@@ -169,6 +171,26 @@ Reason 写回规则：
 
 ```json
 {"accepted": true, "data": {"description": "..."}}
+```
+
+Recon explore 在功能面任务中可返回结构化 fact metadata：
+
+```json
+{
+  "accepted": true,
+  "data": {
+    "description": "...",
+    "fact_type": "feature_surface",
+    "title": "Upload page",
+    "summary": "用户可以选择图片并提交上传",
+    "details": {
+      "user_actions": ["选择图片", "提交上传"],
+      "routes": ["/upload"],
+      "apis": ["POST /api/upload"],
+      "evidence_refs": ["/tmp/evidence/upload.png"]
+    }
+  }
+}
 ```
 
 Vuln explore 可以包含 findings：
@@ -205,7 +227,7 @@ Explore 写回规则：
 - 启动 worker process 前先通过 heartbeat claim intent。
 - 成功后调用 `/intents/{intent_id}/conclude`。
 - 解析失败或超时时，如果取消状态允许，可以运行 `explore_conclude` fallback。
-- Recon explore 即使模型越界返回 `findings`，dispatcher 也会在写回前丢弃，只保留 `description` 写成 fact；vuln explore 仍允许把合法 findings 传给 server。
+- Recon explore 即使模型越界返回 `findings`，dispatcher 也会在写回前丢弃；`description`、`fact_type`、`title`、`summary` 和 `details` 会写成 fact。vuln explore 仍允许把合法 findings 传给 server。
 - Recon conclude 会在 server 上增加 explore rounds。
 - 只有当 `intent.auth_scope == "authenticated"` 时，explore 才领取一个项目 cookie session；session 租约在 `_reap_futures` 中释放。
 - 默认 vuln explore 提示词要求：产生 finding 时，如果存在明确且非重复的后续派生验证方向，需要填写 `followup_reason` 和 `followup_intent_description`；如果因 token 缺失、现网回摆、超时 fallback 或前置条件未满足而无法完成，需要在 fact description 中写清已完成矩阵、未完成矩阵和是否建议 fresh 条件下继续。
@@ -292,10 +314,11 @@ Fork seed 是 ephemeral job，不 claim project reason lease。它读取 `input_
 - JSON-only。
 - `seed_facts` 非空，最多受 `tasks.fork_seed.max_seed_facts` 限制。
 - 每个 seed fact 必须包含 `title`、`auth_scope`、`candidate_type`、`derived_from` 和 `description`。
+- 功能点 seed 可额外包含 `feature_summary`、`user_actions`、`routes`、`apis`、`vuln_validation_focus`、`known_constraints` 和 `evidence_refs`；contract 会清理空字符串并把缺省数组规范为 `[]`。
 - `derived_from` 必须引用 snapshot YAML 中存在的 recon fact ID。
 - 不创建 findings、reports 或 parent recon graph writes。
 
-成功完成时 Dispatcher 调用 `/ephemeral-jobs/{job_id}/finish-fork-seed`。Server 原子创建 child vuln project，写入 `origin`、`recon_snapshot` reference fact 和 AI seed facts，并把 job result 写为 `child_project_id`、`snapshot_id`、`seed_fact_ids`。
+成功完成时 Dispatcher 调用 `/ephemeral-jobs/{job_id}/finish-fork-seed`。Server 原子创建 child vuln project，写入 `origin`、`recon_snapshot` reference fact 和 AI seed facts，并把 job result 写为 `child_project_id`、`snapshot_id`、`seed_fact_ids` 和 child `seed_facts` 摘要。
 
 Stopped recon project 仍可执行 fork_seed；completed/deleted project 的 fork_seed 仍按 inactive 任务取消并写入 failure。
 

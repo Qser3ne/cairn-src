@@ -666,11 +666,14 @@
                           <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-2">Checklist</p>
                           <div class="space-y-1.5">
                             <template x-for="item in judgementChecklist(latestReconJudgement())" :key="item.key">
-                              <div class="flex items-start justify-between gap-3 text-xs">
-                                <span class="text-slate-500 break-words" x-text="formatJudgementKey(item.key)"></span>
-                                <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                                  :class="item.value ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'"
-                                  x-text="item.value ? 'yes' : 'no'"></span>
+                              <div class="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2 text-xs">
+                                <div class="flex items-start justify-between gap-3">
+                                  <span class="text-slate-600 break-words" x-text="formatJudgementKey(item.key)"></span>
+                                  <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                                    :class="item.value ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'"
+                                    x-text="judgementChecklistScore(item.value)"></span>
+                                </div>
+                                <p x-show="judgementChecklistEvidence(item.value)" class="mt-1.5 text-[11px] leading-relaxed text-slate-500 break-words" x-text="judgementChecklistEvidence(item.value)"></p>
                               </div>
                             </template>
                           </div>
@@ -753,6 +756,19 @@
                     <span x-text="formatTime(latestForkSeedJob().finished_at || latestForkSeedJob().started_at || latestForkSeedJob().created_at)"></span>
                     <span x-show="latestForkSeedJob()?.result?.seed_fact_ids" x-text="`${latestForkSeedJob().result.seed_fact_ids.length} seed facts`"></span>
                   </div>
+                  <template x-if="forkSeedFacts(latestForkSeedJob()).length > 0">
+                    <div class="pt-3 border-t border-rose-50 space-y-2">
+                      <template x-for="fact in forkSeedFacts(latestForkSeedJob()).slice(0, 4)" :key="fact.id">
+                        <button type="button" @click="openProject(latestForkSeedJob().result.child_project_id)" class="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left hover:bg-white transition">
+                          <div class="flex items-start justify-between gap-3">
+                            <span class="font-medium text-slate-700 break-words" x-text="factTitle(fact) || fact.id"></span>
+                            <span class="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 font-mono text-[10px] text-brand-700" x-text="fact.id"></span>
+                          </div>
+                          <p class="mt-1 text-[11px] leading-relaxed text-slate-500 break-words" x-text="factSummary(fact) || fact.description"></p>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
                 </div>
               </section>
             </template>
@@ -781,6 +797,12 @@
                   </div>
                 </div>
                 <div class="p-4 space-y-3">
+                  <template x-if="factTitle(fact)">
+                    <div>
+                      <p class="text-sm font-semibold text-slate-800 break-words" x-text="factTitle(fact)"></p>
+                      <p x-show="factSummary(fact)" class="mt-1 text-xs text-slate-500 leading-relaxed break-words" x-text="factSummary(fact)"></p>
+                    </div>
+                  </template>
                   <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="fact.description"></p>
                   <div class="text-xs text-slate-400 space-y-1.5">
                     <template x-if="fact.id === 'origin'">
@@ -805,10 +827,36 @@
                     'bg-brand-50 text-brand-700': selectedFactId() !== 'origin'
                   }" x-text="selectedFactId()"></span>
                 <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Fact</span>
+                <template x-if="selectedFactRecord().fact_type && selectedFactRecord().fact_type !== 'observation'">
+                  <span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-semibold uppercase tracking-[0.12em]" x-text="selectedFactRecord().fact_type"></span>
+                </template>
               </div>
             </div>
             <div class="p-4 space-y-4">
+              <template x-if="factTitle(selectedFactRecord())">
+                <div>
+                  <p class="text-sm font-semibold text-slate-800 break-words" x-text="factTitle(selectedFactRecord())"></p>
+                  <p x-show="factSummary(selectedFactRecord())" class="mt-1 text-xs text-slate-500 leading-relaxed break-words" x-text="factSummary(selectedFactRecord())"></p>
+                </div>
+              </template>
               <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedFactRecord().description"></p>
+              <template x-if="hasFeatureFactDetails(selectedFactRecord())">
+                <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
+                  <p class="text-[10px] font-semibold text-emerald-500 uppercase tracking-widest">Feature Surface</p>
+                  <template x-if="factDetailList(selectedFactRecord(), 'user_actions').length > 0">
+                    <div><span class="text-slate-400">Actions</span><div class="mt-1 flex flex-wrap gap-1"><template x-for="item in factDetailList(selectedFactRecord(), 'user_actions')" :key="item"><span class="rounded bg-slate-100 px-2 py-1 text-[11px] text-slate-600" x-text="item"></span></template></div></div>
+                  </template>
+                  <template x-if="factDetailList(selectedFactRecord(), 'routes').length > 0">
+                    <div><span class="text-slate-400">Routes</span><div class="mt-1 flex flex-wrap gap-1"><template x-for="item in factDetailList(selectedFactRecord(), 'routes')" :key="item"><span class="rounded bg-indigo-50 px-2 py-1 font-mono text-[11px] text-indigo-700" x-text="item"></span></template></div></div>
+                  </template>
+                  <template x-if="factDetailList(selectedFactRecord(), 'apis').length > 0">
+                    <div><span class="text-slate-400">APIs</span><div class="mt-1 flex flex-wrap gap-1"><template x-for="item in factDetailList(selectedFactRecord(), 'apis')" :key="item"><span class="rounded bg-rose-50 px-2 py-1 font-mono text-[11px] text-rose-700" x-text="item"></span></template></div></div>
+                  </template>
+                  <template x-if="factDetailList(selectedFactRecord(), 'evidence_refs').length > 0">
+                    <div><span class="text-slate-400">Evidence</span><div class="mt-1 space-y-1"><template x-for="item in factDetailList(selectedFactRecord(), 'evidence_refs')" :key="item"><p class="font-mono text-[11px] text-slate-600 break-all" x-text="item"></p></template></div></div>
+                  </template>
+                </div>
+              </template>
               <div class="space-y-3 text-xs">
                 <template x-if="selectedFactId() === 'origin'">
                   <div class="pt-4 border-t border-slate-100">
@@ -2900,7 +2948,7 @@ function cairnApp() {
 
     summarizeFactLabel(fact) {
       if (fact.id === 'origin') return 'Origin';
-      const normalized = fact.description.replace(/\s+/g, ' ').trim();
+      const normalized = (this.factTitle(fact) || this.factSummary(fact) || fact.description).replace(/\s+/g, ' ').trim();
       const chars = Array.from(normalized);
       if (chars.length <= 24) return normalized || fact.id;
       return `${chars.slice(0, 24).join('')}…`;
@@ -3346,6 +3394,16 @@ function cairnApp() {
       return Object.entries(checklist).map(([key, value]) => ({ key, value }));
     },
 
+    judgementChecklistScore(value) {
+      if (value && typeof value === 'object' && 'score' in value) return `${value.score}/20`;
+      return value ? 'yes' : 'no';
+    },
+
+    judgementChecklistEvidence(value) {
+      if (value && typeof value === 'object') return value.evidence || '';
+      return '';
+    },
+
     judgementGaps(job, key) {
       const value = this.judgementResult(job)[key];
       return Array.isArray(value) ? value : [];
@@ -3361,6 +3419,41 @@ function cairnApp() {
 
     formatJudgementKey(key) {
       return String(key || '').replace(/_/g, ' ');
+    },
+
+    forkSeedFacts(job) {
+      const seedFacts = job?.result?.seed_facts;
+      return Array.isArray(seedFacts) ? seedFacts : [];
+    },
+
+    factDetails(fact) {
+      return fact?.details && typeof fact.details === 'object' ? fact.details : {};
+    },
+
+    factTitle(fact) {
+      return fact?.title || this.factDetails(fact).feature_summary || '';
+    },
+
+    factSummary(fact) {
+      return fact?.summary || this.factDetails(fact).feature_summary || '';
+    },
+
+    factDetailList(fact, key) {
+      const value = this.factDetails(fact)[key];
+      if (Array.isArray(value)) return value.filter(Boolean);
+      if (typeof value === 'string' && value.trim()) return [value.trim()];
+      return [];
+    },
+
+    hasFeatureFactDetails(fact) {
+      return Boolean(
+        fact?.fact_type === 'feature_surface'
+        || this.factTitle(fact)
+        || this.factSummary(fact)
+        || this.factDetailList(fact, 'user_actions').length
+        || this.factDetailList(fact, 'routes').length
+        || this.factDetailList(fact, 'apis').length
+      );
     },
 
     timelineEvents() {

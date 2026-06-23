@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS facts (
     id TEXT NOT NULL,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     description TEXT NOT NULL,
+    fact_type TEXT NOT NULL DEFAULT 'observation',
+    title TEXT,
+    summary TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (id, project_id)
 );
 
@@ -182,6 +186,7 @@ def configure(path: Path) -> None:
         _ensure_no_legacy_standard_projects(conn)
         conn.executescript(SCHEMA)
         _ensure_src_only_project_columns(conn)
+        _ensure_fact_structure_columns(conn)
         _migrate_intent_table(conn)
         _ensure_project_accounts_table(conn)
         _ensure_findings_table(conn)
@@ -334,6 +339,21 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE projects")
     conn.execute("ALTER TABLE projects_new RENAME TO projects")
     conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _ensure_fact_structure_columns(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
+    if "fact_type" not in columns:
+        conn.execute("ALTER TABLE facts ADD COLUMN fact_type TEXT NOT NULL DEFAULT 'observation'")
+        columns.add("fact_type")
+    if "title" not in columns:
+        conn.execute("ALTER TABLE facts ADD COLUMN title TEXT")
+        columns.add("title")
+    if "summary" not in columns:
+        conn.execute("ALTER TABLE facts ADD COLUMN summary TEXT")
+        columns.add("summary")
+    if "details_json" not in columns:
+        conn.execute("ALTER TABLE facts ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'")
 
 
 def _migrate_intent_table(conn: sqlite3.Connection) -> None:

@@ -40,7 +40,7 @@
 - `container/Dockerfile` 应提供 `subfinder`、`dnsx`、`tlsx`、`interactsh-client`、`gau`、`waybackurls`、`uro`、`qsreplace`、`anew`、`kxss`、`gf`，并预置 `/home/kali/.gf` 常用 patterns。
 - 全量构筑命令应支持 `OSV_SCANNER_VERSION` 构筑参数，用于固定 `osv-scanner` 版本。
 - 修改 `cairn/src/cairn/dispatcher/prompts/default/*/*.md` 时，需要确认 `{...}` 模板变量在修改前后保持一致，且所有 `json` 代码块仍能被解析为合法 JSON。
-- `cairn/tests/test_prompt_contracts.py` 覆盖默认 recon prompt 契约：`validate_prompt_resources("default")` 不得失败，`reason.md` 必须保留 `auth_scope`、`anonymous`、`authenticated` 和禁止 `complete` 输出说明，`explore.md` 必须禁止 `findings` 字段，`judge.md` 必须声明 ephemeral judgement 且不得写入 facts、intents、findings、reports。
+- `cairn/tests/test_prompt_contracts.py` 覆盖默认 recon prompt 契约：`validate_prompt_resources("default")` 不得失败，`reason.md` 必须保留 `auth_scope`、`anonymous`、`authenticated`、功能地图优先和禁止 `complete` 输出说明，`explore.md` 必须禁止 `findings` 字段并声明 `feature_surface` 结构，`judge.md` 必须声明 ephemeral judgement、功能覆盖 checklist 且不得写入 facts、intents、findings、reports，`fork_seed.md` 必须声明功能点 seed 字段。
 - `cairn/tests/test_prompt_contracts.py` 也覆盖默认 recon/vuln `reason.md`、`explore.md`、`explore_conclude.md` 和 recon `judge.md` 的中文优先软约束：提示词应包含“建议优先使用简体中文”，并明确不要把协议字段改成中文。
 - 单纯修改提示词和文档时，可优先做模板变量与 JSON 契约检查；修改 prompt contract 测试时运行 `pytest tests/test_prompt_contracts.py` 和相关 dispatcher 测试。
 - 修改 vuln prompt 的 finding 派生、follow-up 或矩阵描述规则时，至少运行 `pytest tests/test_prompt_contracts.py`；如涉及 JSON 解析或 finding 字段约束，再运行 `pytest tests/test_contracts_and_drivers.py`。

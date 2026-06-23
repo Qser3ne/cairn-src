@@ -634,6 +634,13 @@ def test_fork_seed_task_finishes_with_seed_facts(monkeypatch) -> None:
                     "candidate_type": "api_surface",
                     "derived_from": ["f001"],
                     "description": "candidate_summary:\n- upload endpoint",
+                    "feature_summary": None,
+                    "user_actions": [],
+                    "routes": [],
+                    "apis": [],
+                    "vuln_validation_focus": [],
+                    "known_constraints": [],
+                    "evidence_refs": [],
                 }
             ],
         )

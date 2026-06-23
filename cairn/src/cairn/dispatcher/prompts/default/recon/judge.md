@@ -19,10 +19,10 @@
     "recommended_action": "create_vuln_project",
     "checklist": {
       "scope_clarity": {"score": 18, "evidence": "scope 与 origin 已明确，范围内资产和第三方服务边界可区分"},
-      "asset_coverage": {"score": 17, "evidence": "主机和相关子资产已有抽样覆盖"},
-      "endpoint_coverage": {"score": 16, "evidence": "anonymous 与 authenticated 端点包含具体路径和参数"},
+      "feature_coverage": {"score": 16, "evidence": "核心页面、菜单、按钮、表单和用户动作已有 feature_surface 事实"},
+      "feature_api_mapping_quality": {"score": 16, "evidence": "关键功能已能映射到 route、router/page 和核心 API"},
       "auth_boundary_coverage": {"score": 18, "evidence": "登录态功能面和匿名功能面已有区分"},
-      "candidate_surface_quality": {"score": 17, "evidence": "已有多个可在 vuln fork 中继续验证的具体候选攻击面"}
+      "candidate_surface_quality": {"score": 18, "evidence": "已有多个可按功能点 fork 到 vuln 项目继续验证的具体候选攻击面"}
     },
     "blocking_gaps": [],
     "non_blocking_gaps": []
@@ -50,10 +50,10 @@
 `data.checklist` 必须包含以下五个字段。每项 `score` 必须是 0 到 20 的整数；`evidence` 必须是稳定、简短、可 UI 展示的字符串，引用图中已有事实或明确说明证据缺口，不要编造图中不存在的信息。
 
 - `scope_clarity`：目标、范围、origin、第三方/无关资产边界是否清楚。
-- `asset_coverage`：主资产、子资产、关联入口、不可达/噪声资产是否有足够覆盖。
-- `endpoint_coverage`：端点、路径、参数、功能入口、API/页面样本是否足够具体。
+- `feature_coverage`：核心页面、菜单、按钮、表单、可见业务能力和用户动作是否已形成 `feature_surface` 功能地图。
+- `feature_api_mapping_quality`：关键功能是否已绑定到前端 route、router/page、页面配置、核心 API、请求体和响应证据。
 - `auth_boundary_coverage`：anonymous 与 authenticated 边界、登录态入口、cookie session 可用性、权限差异是否有覆盖。
-- `candidate_surface_quality`：是否存在可 fork 到 vuln 项目继续验证的具体候选攻击面。
+- `candidate_surface_quality`：是否存在可按功能点 fork 到 vuln 项目继续验证的具体候选攻击面。
 
 `data.blocking_gaps` 与 `data.non_blocking_gaps` 都必须是字符串数组。每个 gap 都要具体、可执行，并且能够直接转化为后续 recon intent，例如 `"补充 authenticated settings 端点采样，并比较不同角色可见字段"`。不要输出对象、数字或嵌套数组。
 
@@ -69,6 +69,7 @@
 - `score >= 75`。
 - `blocking_gaps` 为空数组。
 - 至少存在一个可用于 vuln fork 的候选攻击面；候选必须是具体资产、端点、参数、认证边界或功能面，而不是泛泛的“继续测试”。
+- 核心功能点不能只停留在端点清单；至少要能说明关键页面/流程做什么、用户能做什么、route/API 如何服务该功能。
 
 选择 `not_ready` 当：
 

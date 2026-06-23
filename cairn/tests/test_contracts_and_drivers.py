@@ -87,6 +87,13 @@ facts:
                         "auth_scope": "anonymous",
                         "candidate_type": "api_surface",
                         "derived_from": ["f001"],
+                        "feature_summary": "上传图片功能",
+                        "user_actions": ["选择图片", "提交上传"],
+                        "routes": ["/upload"],
+                        "apis": ["POST /api/upload"],
+                        "vuln_validation_focus": ["文件类型校验"],
+                        "known_constraints": ["anonymous only"],
+                        "evidence_refs": ["/tmp/evidence/upload.png"],
                         "description": "candidate_summary:\n- upload endpoint",
                     }
                 ]
@@ -104,6 +111,13 @@ facts:
                 "candidate_type": "api_surface",
                 "derived_from": ["f001"],
                 "description": "candidate_summary:\n- upload endpoint",
+                "feature_summary": "上传图片功能",
+                "user_actions": ["选择图片", "提交上传"],
+                "routes": ["/upload"],
+                "apis": ["POST /api/upload"],
+                "vuln_validation_focus": ["文件类型校验"],
+                "known_constraints": ["anonymous only"],
+                "evidence_refs": ["/tmp/evidence/upload.png"],
             }
         ]
     }
@@ -142,6 +156,39 @@ def test_reason_payload_requires_intent_when_none_are_open() -> None:
 def test_explore_payload_rejects_planning_text() -> None:
     with pytest.raises(ValueError):
         validate_explore_payload(parse_json_output("Need inspect files and keep working."))
+
+
+def test_explore_payload_accepts_feature_surface_metadata() -> None:
+    kind, data = validate_explore_payload(
+        {
+            "accepted": True,
+            "data": {
+                "description": "intent_summary: map upload feature",
+                "fact_type": "feature_surface",
+                "title": "Upload page",
+                "summary": "用户可以选择图片并提交上传",
+                "details": {
+                    "user_actions": ["选择图片", "提交上传"],
+                    "routes": ["/upload"],
+                    "apis": ["POST /api/upload"],
+                },
+                "findings": [{"title": "Potential upload issue"}],
+            },
+        }
+    )
+
+    assert kind == "fact"
+    assert data == {
+        "description": "intent_summary: map upload feature",
+        "fact_type": "feature_surface",
+        "title": "Upload page",
+        "summary": "用户可以选择图片并提交上传",
+        "details": {
+            "user_actions": ["选择图片", "提交上传"],
+            "routes": ["/upload"],
+            "apis": ["POST /api/upload"],
+        },
+    }
 
 
 def test_pi_driver_extracts_session_and_last_assistant_text() -> None:

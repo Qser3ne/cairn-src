@@ -70,9 +70,21 @@ class InProcessClient:
         intent_id: str,
         worker: str,
         description: str,
+        *,
+        fact_type: str = "observation",
+        title: str | None = None,
+        summary: str | None = None,
+        details: dict | None = None,
         findings: list[dict] | None = None,
     ) -> ApiResult:
-        body = {"worker": worker, "description": description}
+        body = {
+            "worker": worker,
+            "description": description,
+            "fact_type": fact_type,
+            "title": title,
+            "summary": summary,
+            "details": details or {},
+        }
         if findings:
             body["findings"] = findings
         return self._post(f"/projects/{project_id}/intents/{intent_id}/conclude", body)

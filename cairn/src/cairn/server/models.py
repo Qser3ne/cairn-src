@@ -15,6 +15,7 @@ ReportStatus = Literal["not_started", "queued", "drafted", "submitted", "closed"
 IntentKind = Literal["explore", "report"]
 AuthScope = Literal["anonymous", "authenticated"]
 EphemeralJobStatus = Literal["queued", "running", "succeeded", "failed", "expired"]
+FactType = Literal["observation", "feature_surface"]
 
 
 class Settings(BaseModel):
@@ -25,6 +26,10 @@ class Settings(BaseModel):
 class Fact(BaseModel):
     id: str
     description: str
+    fact_type: FactType = "observation"
+    title: str | None = None
+    summary: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class Finding(BaseModel):
@@ -346,6 +351,10 @@ class ReasonClaimRequest(BaseModel):
 class ConcludeRequest(BaseModel):
     worker: str
     description: str
+    fact_type: FactType = "observation"
+    title: str | None = None
+    summary: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
     findings: list[FindingCreate] | None = None
 
     @field_validator("worker", "description")
@@ -355,6 +364,14 @@ class ConcludeRequest(BaseModel):
         if not text:
             raise ValueError("must not be empty")
         return text
+
+    @field_validator("title", "summary")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
 
 
 class ConcludeResponse(BaseModel):
@@ -466,6 +483,13 @@ class ForkSeedFact(BaseModel):
     candidate_type: str
     derived_from: list[str] = Field(min_length=1)
     description: str
+    feature_summary: str | None = None
+    user_actions: list[str] = Field(default_factory=list)
+    routes: list[str] = Field(default_factory=list)
+    apis: list[str] = Field(default_factory=list)
+    vuln_validation_focus: list[str] = Field(default_factory=list)
+    known_constraints: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
 
     @field_validator("title", "candidate_type", "description")
     @classmethod
@@ -474,6 +498,31 @@ class ForkSeedFact(BaseModel):
         if not text:
             raise ValueError("must not be empty")
         return text
+
+    @field_validator("feature_summary")
+    @classmethod
+    def validate_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
+
+    @field_validator(
+        "user_actions",
+        "routes",
+        "apis",
+        "vuln_validation_focus",
+        "known_constraints",
+        "evidence_refs",
+    )
+    @classmethod
+    def validate_text_list(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for item in value:
+            text = item.strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
 
     @field_validator("derived_from")
     @classmethod

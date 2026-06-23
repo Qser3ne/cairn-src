@@ -35,12 +35,19 @@ def test_recon_reason_prompt_mentions_auth_scope_and_no_complete() -> None:
     assert "anonymous" in prompt
     assert "authenticated" in prompt
     assert "不要输出 complete" in plain_prompt or "Reason validator 会拒绝任何 complete payload" in plain_prompt
+    assert "功能地图优先策略" in prompt
+    assert "[feature_mapping]" in prompt
+    assert "[feature_api_binding]" in prompt
 
 
 def test_recon_explore_prompt_forbids_findings() -> None:
     prompt = _without_markdown_code_ticks(_read_default_recon_prompt("explore.md"))
 
     assert "不包含 findings" in prompt or "不要包含 findings" in prompt or "不要输出 findings" in prompt
+    assert "feature_surface" in prompt
+    assert "user_actions" in prompt
+    assert "routes" in prompt
+    assert "apis" in prompt
 
 
 def test_recon_judge_prompt_declares_ephemeral_no_graph_write() -> None:
@@ -48,6 +55,8 @@ def test_recon_judge_prompt_declares_ephemeral_no_graph_write() -> None:
 
     assert "ephemeral" in prompt
     assert "不能创建、修改或建议写入 graph 数据" in prompt
+    assert "feature_coverage" in prompt
+    assert "feature_api_mapping_quality" in prompt
     for graph_resource in ("facts", "intents", "findings", "reports"):
         assert graph_resource in prompt
 
@@ -59,8 +68,20 @@ def test_recon_fork_seed_prompt_declares_seed_fact_contract() -> None:
     assert "{max_seed_facts}" in prompt
     assert "derived_from" in prompt
     assert "seed_facts" in prompt
+    assert "feature_summary" in prompt
+    assert "user_actions" in prompt
+    assert "vuln_validation_focus" in prompt
     assert "不要创建 findings" in prompt
     assert "不要原样复制 recon fact" in prompt
+
+
+def test_vuln_reason_prompt_checks_unconsumed_feature_seeds_before_noop() -> None:
+    prompt = _read_default_prompt("vuln", "reason.md")
+
+    assert "feature_surface" in prompt
+    assert "feature_summary" in prompt
+    assert "decision=noop" in prompt
+    assert "每个功能点" in prompt
 
 
 def test_default_prompts_prefer_chinese_readable_output_without_protocol_translation() -> None:

@@ -14,6 +14,7 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
 
     with db.get_conn() as conn:
         project_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+        fact_columns = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
         intent_columns = {row["name"] for row in conn.execute("PRAGMA table_info(intents)")}
         finding_columns = {row["name"] for row in conn.execute("PRAGMA table_info(findings)")}
         ephemeral_columns = {row["name"] for row in conn.execute("PRAGMA table_info(ephemeral_jobs)")}
@@ -26,6 +27,7 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert "bootstrap_enabled" not in project_columns
     assert "session_lock_enabled" not in project_columns
     assert {"project_kind", "auth_mode", "parent_project_id", "parent_snapshot_id", "reason_pending"} <= project_columns
+    assert {"fact_type", "title", "summary", "details_json"} <= fact_columns
     assert {"intent_kind", "finding_id", "auth_scope"} <= intent_columns
     assert "session_lock" not in intent_columns
     assert {"research_value", "next_action", "report_status", "report_intent_id"} <= finding_columns
@@ -239,3 +241,43 @@ def test_legacy_goal_facts_are_removed_on_startup(tmp_path, monkeypatch) -> None
 
     assert fact_ids == ["f001", "origin"]
     assert source_ids == []
+
+
+def test_legacy_facts_gain_structured_fact_columns(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "legacy-facts.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE facts (
+                id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                description TEXT NOT NULL,
+                PRIMARY KEY (id, project_id)
+            );
+            INSERT INTO projects (id, title, created_at)
+            VALUES ('proj_001', 'legacy', '2026-01-01T00:00:00Z');
+            INSERT INTO facts (id, project_id, description)
+            VALUES ('origin', 'proj_001', 'https://target.test');
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
+        fact = conn.execute(
+            "SELECT fact_type, title, summary, details_json FROM facts WHERE id = 'origin'"
+        ).fetchone()
+
+    assert {"fact_type", "title", "summary", "details_json"} <= columns
+    assert fact["fact_type"] == "observation"
+    assert fact["title"] is None
+    assert fact["summary"] is None
+    assert fact["details_json"] == "{}"

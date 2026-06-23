@@ -42,6 +42,7 @@ from cairn.server.services import (
     ephemeral_job_to_model,
     expire_reason_leases,
     expire_workers,
+    fact_from_row,
     get_ephemeral_job_or_404,
     get_project_or_404,
     get_snapshot_or_404,
@@ -70,6 +71,28 @@ def _seed_fact_description(seed_fact) -> str:
         f"derived_from: {', '.join(seed_fact.derived_from)}\n\n"
         f"{seed_fact.description}"
     )
+
+
+def _seed_fact_details(seed_fact) -> dict:
+    return {
+        "seed_title": seed_fact.title,
+        "seed_type": seed_fact.candidate_type,
+        "auth_scope": seed_fact.auth_scope,
+        "derived_from": seed_fact.derived_from,
+        "feature_summary": seed_fact.feature_summary,
+        "user_actions": seed_fact.user_actions,
+        "routes": seed_fact.routes,
+        "apis": seed_fact.apis,
+        "vuln_validation_focus": seed_fact.vuln_validation_focus,
+        "known_constraints": seed_fact.known_constraints,
+        "evidence_refs": seed_fact.evidence_refs,
+    }
+
+
+def _seed_fact_summary(seed_fact) -> str | None:
+    if seed_fact.feature_summary:
+        return seed_fact.feature_summary
+    return seed_fact.description.splitlines()[0] if seed_fact.description else None
 
 
 def _insert_project_accounts(conn, project_id: str, accounts, now: str) -> list[dict]:
@@ -167,14 +190,32 @@ def _create_seeded_vuln_project(conn, parent_project_id: str, snapshot_id: str, 
     for seed_fact in seed_facts:
         child_fact_id = next_fact_id(conn, pid)
         conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-            (child_fact_id, pid, _seed_fact_description(seed_fact)),
+            """
+            INSERT INTO facts (
+                id,
+                project_id,
+                description,
+                fact_type,
+                title,
+                summary,
+                details_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                child_fact_id,
+                pid,
+                _seed_fact_description(seed_fact),
+                "feature_surface" if seed_fact.candidate_type == "feature_surface" else "observation",
+                seed_fact.title,
+                _seed_fact_summary(seed_fact),
+                json.dumps(_seed_fact_details(seed_fact), ensure_ascii=False),
+            ),
         )
     inserted_accounts = _insert_project_accounts(conn, pid, accounts, now)
     facts = conn.execute("SELECT * FROM facts WHERE project_id = ? ORDER BY id", (pid,)).fetchall()
     return ProjectDetail(
         project=project_meta_from_row(get_project_or_404(conn, pid)),
-        facts=[Fact(**dict(f)) for f in facts],
+        facts=[fact_from_row(f) for f in facts],
         intents=[],
         hints=[],
         findings=[],
@@ -333,7 +374,7 @@ def get_project(project_id: str):
         ).fetchall()
         return ProjectDetail(
             project=project_meta_from_row(row),
-            facts=[Fact(**dict(f)) for f in facts],
+            facts=[fact_from_row(f) for f in facts],
             intents=build_intents(conn, project_id),
             hints=[Hint(**dict(h)) for h in hints],
             findings=build_findings(conn, project_id),
@@ -584,15 +625,33 @@ def fork_vuln_project(project_id: str, body: ForkVulnRequest):
             selected = selected[: body.candidate_limit]
         for fact_id in selected:
             row = conn.execute(
-                "SELECT description FROM facts WHERE id = ? AND project_id = ?",
+                "SELECT * FROM facts WHERE id = ? AND project_id = ?",
                 (fact_id, project_id),
             ).fetchone()
             if row is None:
                 continue
             child_fact_id = next_fact_id(conn, pid)
             conn.execute(
-                "INSERT INTO facts (id, project_id, description) VALUES (?, ?, ?)",
-                (child_fact_id, pid, row["description"]),
+                """
+                INSERT INTO facts (
+                    id,
+                    project_id,
+                    description,
+                    fact_type,
+                    title,
+                    summary,
+                    details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    child_fact_id,
+                    pid,
+                    row["description"],
+                    row["fact_type"],
+                    row["title"],
+                    row["summary"],
+                    row["details_json"],
+                ),
             )
         accounts = []
         for index, account in enumerate(body.accounts or [], start=1):
@@ -616,7 +675,7 @@ def fork_vuln_project(project_id: str, body: ForkVulnRequest):
         facts = conn.execute("SELECT * FROM facts WHERE project_id = ?", (pid,)).fetchall()
         return ProjectDetail(
             project=project_meta_from_row(get_project_or_404(conn, pid)),
-            facts=[Fact(**dict(f)) for f in facts],
+            facts=[fact_from_row(f) for f in facts],
             intents=[],
             hints=[],
             findings=[],
@@ -811,6 +870,11 @@ def finish_fork_seed_job(job_id: str, body: ForkSeedFinishRequest):
             "child_project_id": child.project.id,
             "snapshot_id": input_data.snapshot_id,
             "seed_fact_ids": [fact.id for fact in child.facts if fact.id not in ("origin", "f001")],
+            "seed_facts": [
+                fact.model_dump(mode="json")
+                for fact in child.facts
+                if fact.id not in ("origin", "f001")
+            ],
         }
         now = utcnow()
         conn.execute(

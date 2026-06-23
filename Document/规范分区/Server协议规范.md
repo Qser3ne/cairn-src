@@ -59,6 +59,19 @@ Facts 是不可变 graph nodes。每个项目从以下 fact 开始：
 
 普通 facts 使用 scoped IDs，例如 `f001`。
 
+Fact fields：
+
+```text
+id
+description          # 兼容旧 UI/export 的人类可读事实全文
+fact_type            # observation | feature_surface
+title                # optional, UI/graph label 优先使用
+summary              # optional, 功能或事实摘要
+details              # object, 由 facts.details_json 持久化
+```
+
+`feature_surface` 用于功能理解优先的 recon fact。常见 `details` 键包括 `page_url`、`screenshot_refs`、`dom_refs`、`visible_features`、`user_actions`、`routes`、`apis`、`auth_scope`、`evidence_refs`、`feature_summary`、`vuln_validation_focus` 和 `known_constraints`。旧 facts 表通过迁移补齐 `fact_type='observation'`、`title=NULL`、`summary=NULL`、`details_json='{}'`，旧 `description` 仍可读、可导出。
+
 ### Intent
 
 Intent fields：
@@ -125,6 +138,7 @@ Judge ephemeral job ID 使用 `judge_###` 格式，由当前 `ephemeral_jobs.id`
 6. 保留 `project_accounts`。
 7. 将 legacy recon projects 回填为 `auth_mode='dual'`。
 8. 从 project auth mode 回填 legacy explore intent 的 `auth_scope`，默认使用 `anonymous`。
+9. 为 legacy `facts` 表补齐 `fact_type`、`title`、`summary` 和 `details_json`，保持旧 description 兼容。
 
 ## Project APIs
 
@@ -305,14 +319,14 @@ Body：
 - Parent project 必须是 recon。
 - Snapshot 必须属于 parent。
 - Server 创建 `job_type="fork_seed"` ephemeral job，并把 `snapshot.summary_yaml` 捕获为 `input_snapshot_yaml`。
-- Dispatcher 调度 AI fork planner 读取 snapshot graph，输出 `seed_facts`。
-- `finish-fork-seed` 原子创建 child vuln project，并写入 `origin`、`recon_snapshot` reference fact 和 AI seed facts。
-- AI seed facts 必须包含 `derived_from`，引用 parent recon snapshot 中存在的 fact IDs。
+- Dispatcher 调度 AI fork planner 读取 snapshot graph，输出功能点导向的 `seed_facts`。
+- `finish-fork-seed` 原子创建 child vuln project，并写入 `origin`、`recon_snapshot` reference fact 和 AI seed facts；`candidate_type="feature_surface"` 会写成 child `fact_type="feature_surface"`，结构字段写入 `details`。
+- AI seed facts 必须包含 `derived_from`，引用 parent recon snapshot 中存在的 fact IDs；推荐包含 `feature_summary`、`user_actions`、`routes`、`apis`、`vuln_validation_focus`、`known_constraints` 和 `evidence_refs`。
 - Authenticated child vuln 需要在 fork request 中提供 accounts；每个 account 表示一个 cookie session。
 
 ### GET /projects/{project_id}/fork-vuln/seed-jobs
 
-列出 parent recon 的 AI seeded fork job results，按创建时间倒序排列。成功结果包含 `child_project_id`、`snapshot_id` 和 `seed_fact_ids`。
+列出 parent recon 的 AI seeded fork job results，按创建时间倒序排列。成功结果包含 `child_project_id`、`snapshot_id`、`seed_fact_ids` 和 child `seed_facts` 摘要。
 
 ### POST /ephemeral-jobs/{job_id}/finish-fork-seed
 
@@ -323,10 +337,17 @@ Body：
   "worker": "planner-a",
   "seed_facts": [
     {
-      "title": "Anonymous auth surface",
+      "title": "Anonymous login feature surface",
       "auth_scope": "anonymous",
-      "candidate_type": "auth_surface",
+      "candidate_type": "feature_surface",
       "derived_from": ["f006", "f008"],
+      "feature_summary": "登录页提供账号密码登录和找回密码入口",
+      "user_actions": ["提交账号密码", "跳转找回密码"],
+      "routes": ["/login"],
+      "apis": ["POST /api/login"],
+      "vuln_validation_focus": ["认证边界", "错误处理"],
+      "known_constraints": ["anonymous only"],
+      "evidence_refs": ["/tmp/evidence/login.png"],
       "description": "candidate_summary:\n- ..."
     }
   ]

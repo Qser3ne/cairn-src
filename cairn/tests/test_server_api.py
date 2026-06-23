@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 import pytest
+import yaml
 
 from cairn.server import db
 from cairn.server.app import app
@@ -305,6 +306,44 @@ def test_reason_pending_is_coalesced_while_reason_is_running(client: TestClient)
     assert next_claim.json()["reason_pending"] is False
 
 
+def test_conclude_persists_structured_feature_fact_and_export(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin"], "description": "map upload page", "creator": "reasoner", "auth_scope": "anonymous"},
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/intents/i001/conclude",
+        json={
+            "worker": "explorer",
+            "description": "intent_summary: mapped upload page",
+            "fact_type": "feature_surface",
+            "title": "Upload page",
+            "summary": "用户可以选择图片并提交上传",
+            "details": {
+                "user_actions": ["选择图片", "提交上传"],
+                "routes": ["/upload"],
+                "apis": ["POST /api/upload"],
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    fact = response.json()["fact"]
+    assert fact["fact_type"] == "feature_surface"
+    assert fact["title"] == "Upload page"
+    assert fact["details"]["apis"] == ["POST /api/upload"]
+
+    detail = client.get(f"/projects/{project_id}").json()
+    persisted = next(fact for fact in detail["facts"] if fact["id"] == "f001")
+    assert persisted["summary"] == "用户可以选择图片并提交上传"
+    exported = yaml.safe_load(client.get(f"/projects/{project_id}/export?format=yaml").text)
+    exported_fact = next(fact for fact in exported["facts"] if fact["id"] == "f001")
+    assert exported_fact["fact_type"] == "feature_surface"
+    assert exported_fact["details"]["routes"] == ["/upload"]
+
+
 def test_hint_without_running_reason_does_not_mark_reason_pending(client: TestClient) -> None:
     project_id = _create_recon(client)["project"]["id"]
 
@@ -389,8 +428,15 @@ def test_fork_seed_job_creates_child_vuln_with_ai_seed_facts(client: TestClient)
                 {
                     "title": "Upload surface",
                     "auth_scope": "anonymous",
-                    "candidate_type": "api_surface",
+                    "candidate_type": "feature_surface",
                     "derived_from": ["f001"],
+                    "feature_summary": "上传页允许匿名用户选择图片并提交",
+                    "user_actions": ["选择图片", "提交上传"],
+                    "routes": ["/upload"],
+                    "apis": ["POST /api/upload"],
+                    "vuln_validation_focus": ["文件类型校验"],
+                    "known_constraints": ["anonymous only"],
+                    "evidence_refs": ["/tmp/evidence/upload.png"],
                     "description": "candidate_summary:\n- upload endpoint is worth vuln validation",
                 }
             ],
@@ -404,10 +450,17 @@ def test_fork_seed_job_creates_child_vuln_with_ai_seed_facts(client: TestClient)
     assert child["project"]["project_kind"] == "vuln"
     assert child["project"]["parent_project_id"] == parent_id
     assert child["project"]["parent_snapshot_id"] == snapshot["id"]
-    assert child["facts"][0] == {"id": "origin", "description": "https://target.test"}
+    assert child["facts"][0]["id"] == "origin"
+    assert child["facts"][0]["description"] == "https://target.test"
+    assert child["facts"][0]["fact_type"] == "observation"
     assert "recon_snapshot:" in child["facts"][1]["description"]
     assert "derived_from: f001" in child["facts"][2]["description"]
+    assert child["facts"][2]["title"] == "Upload surface"
+    assert child["facts"][2]["fact_type"] == "feature_surface"
+    assert child["facts"][2]["summary"] == "上传页允许匿名用户选择图片并提交"
+    assert child["facts"][2]["details"]["apis"] == ["POST /api/upload"]
     assert result["seed_fact_ids"] == ["f002"]
+    assert result["seed_facts"][0]["details"]["feature_summary"] == "上传页允许匿名用户选择图片并提交"
 
 
 def test_fork_seed_finish_rejects_unknown_parent_fact(client: TestClient) -> None:
@@ -456,7 +509,14 @@ def test_recon_judgement_job_lifecycle_updates_project_judge_status(client: Test
     detail = client.get(f"/projects/{project_id}").json()
     assert detail["project"]["judge_status"] == "ready"
     assert detail["facts"] == [
-        {"id": "origin", "description": "https://target.test"},
+        {
+            "id": "origin",
+            "description": "https://target.test",
+            "fact_type": "observation",
+            "title": None,
+            "summary": None,
+            "details": {},
+        },
     ]
 
 

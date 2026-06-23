@@ -8,7 +8,13 @@
 {"accepted": true, "data": {"description": "..."}}
 ```
 
-`data` 中只允许包含 `description`。不要输出 `findings`、`complete`、`report`、`intents` 或其他字段。
+如果当前 intent 是 `[feature_mapping]`、`[workflow_mapping]` 或 `[feature_api_binding]`，优先返回结构化功能事实：
+
+```json
+{"accepted": true, "data": {"description": "...", "fact_type": "feature_surface", "title": "...", "summary": "...", "details": {"page_url": "...", "screenshot_refs": [], "dom_refs": [], "visible_features": [], "user_actions": [], "routes": [], "apis": [], "auth_scope": "anonymous", "evidence_refs": []}}}
+```
+
+`data` 允许包含 `description`、`fact_type`、`title`、`summary`、`details`。不要输出 `findings`、`complete`、`report`、`intents` 或其他字段。
 
 如果拒绝：
 
@@ -28,7 +34,8 @@
 - 只写已确认观察结果，不写未验证猜测，不把候选攻击面描述成已确认漏洞。
 - 无法推进时也必须返回客观结论，例如“未找到入口”“登录态缺少 cookie session”“当前 session 权限不足以访问某页面”。
 - 长输出、截图、响应体、大列表和原始扫描结果必须写入文件，并在 `description` 中引用文件路径；不要把大段原始内容直接塞进 JSON。
-- 记录有用的 recon 证据：资产列表、端点样本、认证边界、噪声排除项、范围说明和候选攻击面。
+- 记录有用的 recon 证据：页面截图、DOM 片段、可见功能、用户动作、route/API 绑定、资产列表、端点样本、认证边界、噪声排除项、范围说明和候选攻击面。
+- 做功能面 recon 时，应先用真实浏览器截图和 DOM/可见文本理解“页面能做什么”，再把 route/API 挂到功能点下；不要只输出接口清单。
 
 ## 认证边界
 
@@ -59,6 +66,24 @@ noise_or_dead_ends:
 - <已排除的无效入口、重复结果、不可达资产、无关第三方服务等>
 suggested_next_recon:
 - <仍属于 recon 的下一步建议；不得建议漏洞验证、finding 或 report>
+```
+
+## Feature Surface details 结构
+
+当 `fact_type="feature_surface"` 时，`details` 建议包含以下键；没有内容时使用空数组或省略该键，不要编造：
+
+```json
+{
+  "page_url": "当前页面或流程入口 URL",
+  "screenshot_refs": ["/home/kali/evidence/...png"],
+  "dom_refs": ["/home/kali/evidence/...json"],
+  "visible_features": ["页面上可见的功能区或业务能力"],
+  "user_actions": ["用户可以点击、提交、切换或查看的动作"],
+  "routes": ["前端 route 或 router/page id"],
+  "apis": ["和该功能直接相关的核心 API"],
+  "auth_scope": "anonymous|authenticated",
+  "evidence_refs": ["截图、HAR、网络日志、响应体或脚本分析路径"]
+}
 ```
 
 示例 JSON 形态如下，注意 `description` 仍然是字符串，不是嵌套对象：
