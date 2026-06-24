@@ -124,6 +124,17 @@ git push origin main
 git push origin v1.9
 ```
 
+## 当前发布记录
+
+### v1.9
+
+- 新增 AI seeded vuln fork 工作流，recon snapshot 可创建 `fork_seed` ephemeral job，由 AI fork planner 生成 child vuln 初始 seed facts。
+- Recon 改为功能理解优先，默认提示词优先建立页面/功能、用户动作、业务流程和 route/API 绑定。
+- `facts` 表新增 `fact_type`、`title`、`summary`、`details_json`，保留旧 `description` 兼容旧项目和 YAML export。
+- UI 增强 feature fact、judge checklist score/evidence 和 AI seeded fork seed 摘要展示。
+- 修复 stopped recon 上 judge/fork_seed 的调度语义，并补充 fork seed、structured facts、prompt contract、DB migration、Server API 和 worker task 测试。
+- 文档体系从旧中文文档目录迁移到 `docs/`，并改为使用 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 记录 Superpowers 驱动的设计与执行计划。
+
 ## 公开仓库前检查
 
 - README 明确说明本仓库是 `oritera/Cairn` 的 modified version。
