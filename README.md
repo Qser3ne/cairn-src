@@ -81,6 +81,16 @@ only protocol writer for model workers. Workers receive prompts, run inside
 project-scoped Docker containers, and return structured output for the
 dispatcher to validate and write back.
 
+## Documentation
+
+The Chinese documentation set lives under [`docs/`](./docs/):
+
+- [`docs/user/quickstart.md`](./docs/user/quickstart.md) for local setup and first run.
+- [`docs/user/src-workflow.md`](./docs/user/src-workflow.md) for the recon-to-vuln workflow.
+- [`docs/architecture/`](./docs/architecture/) for server, dispatcher, data model, worker contracts, and prompt design.
+- [`docs/ops/`](./docs/ops/) for configuration safety, worker containers, deployment, and release notes.
+- [`docs/development/testing.md`](./docs/development/testing.md) for the test and quality gate matrix.
+
 ## Task types
 
 | Task | Project kind | Purpose | Writes |
@@ -189,9 +199,11 @@ Main dispatcher configuration lives in `dispatch.yaml`.
 See:
 
 - [`dispatch.example.yaml`](./dispatch.example.yaml)
-- [`Document/规范分区/Recon工作流架构.md`](./Document/规范分区/Recon工作流架构.md)
-- [`Document/规范分区/Dispatcher调度设计.md`](./Document/规范分区/Dispatcher调度设计.md)
-- [`Document/规范分区/Server协议规范.md`](./Document/规范分区/Server协议规范.md)
+- [`docs/user/quickstart.md`](./docs/user/quickstart.md)
+- [`docs/user/src-workflow.md`](./docs/user/src-workflow.md)
+- [`docs/architecture/overview.md`](./docs/architecture/overview.md)
+- [`docs/architecture/dispatcher.md`](./docs/architecture/dispatcher.md)
+- [`docs/architecture/server-api.md`](./docs/architecture/server-api.md)
 - [`container/README.md`](./container/README.md)
 
 ## Tests
