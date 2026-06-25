@@ -48,6 +48,11 @@ container:
 - `report`
 - `fork_seed`
 
+配置校验规则：
+
+- Dispatcher 配置模型对嵌套段落使用 strict parsing，未知字段会在启动配置解析阶段失败。
+- 需要新增配置时，应同步更新 `dispatcher/config.py` 的 Pydantic model、`dispatch.example.yaml` 和相关测试。
+
 ## 子模块职责
 
 | 模块 | 职责 |
@@ -163,6 +168,7 @@ Authenticated explore prompt 会包含 session 信息和隔离目录。Anonymous
 - `init=true` 用于回收 Playwright/Chrome 等子进程，降低 zombie 进程累积风险。
 - Completed projects 按 `container.completed_action` 执行 stop/remove。
 - Stopped project 如有正在运行的 judge/fork_seed，会推迟 stopped-container cleanup。
+- Dispatcher 会清理本地 orphan worker 容器；对刚完成 task 的项目使用短暂 cooldown，避免 cleanup 与后续调度抢同一容器。
 
 ## Task 数据流摘要
 

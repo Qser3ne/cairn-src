@@ -19,6 +19,8 @@ FactType = Literal["observation", "feature_surface"]
 
 
 class Settings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     intent_timeout: int = Field(ge=5)
     reason_timeout: int = Field(ge=5)
 
@@ -58,6 +60,8 @@ class Finding(BaseModel):
 
 
 class FindingCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     vulnerability_type: str = "unknown"
     severity: str = "unknown"
@@ -124,6 +128,8 @@ class Hint(BaseModel):
 
 
 class ProjectCookie(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     value: str
 
@@ -150,6 +156,8 @@ class ProjectAccount(BaseModel):
 
 
 class ProjectAccountCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     label: str | None = None
     cookies: list[ProjectCookie] = Field(min_length=1)
 
@@ -216,6 +224,8 @@ class ProjectDetail(BaseModel):
 
 
 class CreateHintInline(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     content: str
     creator: str
 
@@ -278,6 +288,8 @@ class CreateProjectRequest(BaseModel):
 
 
 class CreateHintRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     content: str
     creator: str
 
@@ -299,7 +311,7 @@ class CreateIntentRequest(BaseModel):
     finding_id: str | None = None
     auth_scope: AuthScope | None = None
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     @field_validator("description", "creator", "worker")
     @classmethod
@@ -324,6 +336,8 @@ class CreateIntentRequest(BaseModel):
 
 
 class HeartbeatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
 
     @field_validator("worker")
@@ -336,6 +350,8 @@ class HeartbeatRequest(BaseModel):
 
 
 class ReasonClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
     trigger: str
 
@@ -349,6 +365,8 @@ class ReasonClaimRequest(BaseModel):
 
 
 class ConcludeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
     description: str
     fact_type: FactType = "observation"
@@ -381,10 +399,14 @@ class ConcludeResponse(BaseModel):
 
 
 class UpdateProjectStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: ProjectStatus
 
 
 class UpdateProjectTitleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
 
     @field_validator("title")
@@ -397,10 +419,14 @@ class UpdateProjectTitleRequest(BaseModel):
 
 
 class ReconReasonRoundRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     stable: bool = False
 
 
 class ProjectSnapshotCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     snapshot_type: str = "recon_fork"
     selected_fact_ids: list[str] = Field(default_factory=list)
 
@@ -424,6 +450,8 @@ class ProjectSnapshot(BaseModel):
 
 
 class ForkVulnRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     auth_mode: AuthMode = "anonymous"
     snapshot_id: str
@@ -451,6 +479,8 @@ class ForkVulnRequest(BaseModel):
 
 
 class ForkVulnSeedJobRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     auth_mode: AuthMode = "anonymous"
     snapshot_id: str
@@ -478,6 +508,8 @@ class ForkVulnSeedJobRequest(BaseModel):
 
 
 class ForkSeedFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     auth_scope: AuthScope
     candidate_type: str
@@ -539,6 +571,8 @@ class ForkSeedFact(BaseModel):
 
 
 class ForkSeedFinishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
     seed_facts: list[ForkSeedFact] = Field(min_length=1, max_length=10)
 
@@ -590,6 +624,8 @@ class EphemeralJob(BaseModel):
 
 
 class EphemeralJobClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
 
     @field_validator("worker")
@@ -602,6 +638,8 @@ class EphemeralJobClaimRequest(BaseModel):
 
 
 class EphemeralJobFinishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
     result: dict[str, Any] = Field(default_factory=dict)
 
@@ -615,6 +653,8 @@ class EphemeralJobFinishRequest(BaseModel):
 
 
 class EphemeralJobFailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
     error: str
 
@@ -638,6 +678,8 @@ class FindingReport(BaseModel):
 
 
 class ReportConcludeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker: str
     report_markdown: str
     report_json: dict[str, Any] = Field(default_factory=dict)

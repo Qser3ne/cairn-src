@@ -56,6 +56,8 @@ from cairn.server.services import (
     next_snapshot_id,
     project_meta_from_row,
     project_reason_from_row,
+    safe_json_object,
+    safe_json_list,
     snapshot_to_model,
     utcnow,
 )
@@ -262,7 +264,7 @@ def _project_summary_rows(conn, where: str = "", params: tuple = ()):
             (SELECT COUNT(*) FROM findings WHERE project_id = p.id) AS finding_count
         FROM projects p
         {where}
-        ORDER BY p.created_at
+        ORDER BY p.created_at, p.id
         """,
         params,
     ).fetchall()
@@ -366,10 +368,11 @@ def get_project(project_id: str):
         expire_reason_leases(conn, project_id)
         row = get_project_or_404(conn, project_id)
         facts = conn.execute(
-            "SELECT * FROM facts WHERE project_id = ?", (project_id,)
+            "SELECT * FROM facts WHERE project_id = ? ORDER BY CASE WHEN id = 'origin' THEN 0 ELSE 1 END, id",
+            (project_id,),
         ).fetchall()
         hints = conn.execute(
-            "SELECT * FROM hints WHERE project_id = ? ORDER BY created_at",
+            "SELECT * FROM hints WHERE project_id = ? ORDER BY created_at, id",
             (project_id,),
         ).fetchall()
         return ProjectDetail(
@@ -620,7 +623,7 @@ def fork_vuln_project(project_id: str, body: ForkVulnRequest):
             """,
             (pid,),
         )
-        selected = json.loads(snapshot["selected_fact_ids_json"] or "[]")
+        selected = safe_json_list(snapshot["selected_fact_ids_json"])
         if body.candidate_limit is not None:
             selected = selected[: body.candidate_limit]
         for fact_id in selected:
@@ -672,7 +675,10 @@ def fork_vuln_project(project_id: str, body: ForkVulnRequest):
                     "cookies": [cookie.model_dump() for cookie in account.cookies],
                 }
             )
-        facts = conn.execute("SELECT * FROM facts WHERE project_id = ?", (pid,)).fetchall()
+        facts = conn.execute(
+            "SELECT * FROM facts WHERE project_id = ? ORDER BY CASE WHEN id = 'origin' THEN 0 ELSE 1 END, id",
+            (pid,),
+        ).fetchall()
         return ProjectDetail(
             project=project_meta_from_row(get_project_or_404(conn, pid)),
             facts=[fact_from_row(f) for f in facts],
@@ -856,7 +862,10 @@ def finish_fork_seed_job(job_id: str, body: ForkSeedFinishRequest):
             raise HTTPException(409, "Ephemeral job is not claimed by this worker")
         if not row["input_json"]:
             raise HTTPException(422, "Fork seed job is missing input_json")
-        input_data = ForkVulnSeedJobRequest.model_validate(json.loads(row["input_json"]))
+        try:
+            input_data = ForkVulnSeedJobRequest.model_validate(safe_json_object(row["input_json"]))
+        except ValueError as exc:
+            raise HTTPException(422, "Fork seed job input_json is invalid") from exc
         child = _create_seeded_vuln_project(
             conn,
             row["project_id"],

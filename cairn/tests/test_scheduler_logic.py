@@ -67,6 +67,9 @@ class _RecordingExecutor:
 class _RecordingContainerManager:
     def __init__(self) -> None:
         self.needs_stopped_cleanup_calls: list[str] = []
+        self.needs_orphan_cleanup_calls: list[str] = []
+        self.cleanup_orphan_calls: list[str] = []
+        self.managed_names: list[str] = []
 
     def container_name(self, project_id: str) -> str:
         return f"container-{project_id}"
@@ -76,6 +79,17 @@ class _RecordingContainerManager:
         return True
 
     def cleanup_stopped(self, _project_id: str) -> bool:
+        return True
+
+    def managed_container_names(self) -> list[str]:
+        return self.managed_names
+
+    def needs_orphan_cleanup(self, name: str) -> bool:
+        self.needs_orphan_cleanup_calls.append(name)
+        return True
+
+    def cleanup_orphan(self, name: str) -> bool:
+        self.cleanup_orphan_calls.append(name)
         return True
 
 
@@ -256,6 +270,67 @@ def test_reap_cleanup_future_records_only_successful_inactive_cleanup() -> None:
     assert loop.cleanup_futures == {}
     assert loop._cleanup_pending == set()
     assert loop._inactive_cleanup_done == {"proj-success": "completed"}
+
+
+def test_reap_orphan_cleanup_future_does_not_mark_inactive_project() -> None:
+    loop = _loop()
+    succeeded: Future[bool] = Future()
+    succeeded.set_result(True)
+    loop.cleanup_futures = {succeeded: ("container-orphan", None, "orphan")}
+    loop._cleanup_pending = {"container-orphan"}
+    loop._inactive_cleanup_done = {"proj_001": "stopped"}
+
+    loop._reap_cleanup_futures()
+
+    assert loop.cleanup_futures == {}
+    assert loop._cleanup_pending == set()
+    assert loop._inactive_cleanup_done == {"proj_001": "stopped"}
+
+
+def test_queue_container_cleanups_removes_deleted_project_orphans() -> None:
+    loop = _loop()
+    containers = _RecordingContainerManager()
+    containers.managed_names = ["container-active", "container-deleted"]
+    executor = _RecordingExecutor()
+    loop.container_manager = containers
+    loop.cleanup_executor = executor
+
+    loop._queue_container_cleanups([_summary("active", "active")])
+
+    assert containers.needs_orphan_cleanup_calls == ["container-deleted"]
+    assert len(executor.submissions) == 1
+    assert executor.submissions[0][1] == ("container-deleted",)
+    assert loop.cleanup_futures[executor.futures[0]] == ("container-deleted", None, "orphan")
+    assert loop._cleanup_pending == {"container-deleted"}
+
+
+def test_queue_container_cleanups_skips_active_project_container() -> None:
+    loop = _loop()
+    containers = _RecordingContainerManager()
+    containers.managed_names = ["container-active"]
+    executor = _RecordingExecutor()
+    loop.container_manager = containers
+    loop.cleanup_executor = executor
+
+    loop._queue_container_cleanups([_summary("active", "active")])
+
+    assert containers.needs_orphan_cleanup_calls == []
+    assert executor.submissions == []
+
+
+def test_queue_container_cleanups_skips_pending_orphan_cleanup() -> None:
+    loop = _loop()
+    containers = _RecordingContainerManager()
+    containers.managed_names = ["container-deleted"]
+    executor = _RecordingExecutor()
+    loop.container_manager = containers
+    loop.cleanup_executor = executor
+    loop._cleanup_pending = {"container-deleted"}
+
+    loop._queue_container_cleanups([])
+
+    assert containers.needs_orphan_cleanup_calls == []
+    assert executor.submissions == []
 
 
 def test_choose_worker_prefers_priority_then_lower_running_count() -> None:
@@ -692,6 +767,37 @@ def test_select_worker_reports_busy_unhealthy_rejected_and_unsupported_workers(m
     assert selection.blocked_unhealthy == ["unhealthy(10.0s)"]
     assert selection.blocked_rejected == ["rejected(20.0s)"]
     assert selection.blocked_task_type == ["unsupported"]
+
+
+def test_successful_task_does_not_clear_existing_worker_cooldowns() -> None:
+    loop = _loop()
+    done: Future[str] = Future()
+    done.set_result("success")
+    loop.futures = {
+        done: RunningTask("proj", "explore", "worker", TaskCancellation(), intent_id="i001")
+    }
+    loop.worker_unhealthy_until = {"worker": 200.0}
+    loop.worker_rejected_until = {("proj", "explore", "worker"): 200.0}
+
+    loop._reap_futures()
+
+    assert loop.worker_unhealthy_until == {"worker": 200.0}
+    assert loop.worker_rejected_until == {("proj", "explore", "worker"): 200.0}
+
+
+def test_select_worker_prunes_expired_cooldowns(monkeypatch) -> None:
+    loop = _loop()
+    loop.config = make_config()
+    loop.worker_unhealthy_until = {"test-worker": 90.0}
+    loop.worker_rejected_until = {("proj", "reason", "test-worker"): 95.0}
+    monkeypatch.setattr("cairn.dispatcher.scheduler.loop.time.time", lambda: 100.0)
+
+    selection = loop._select_worker("proj", "reason")
+
+    assert selection.worker is not None
+    assert selection.worker.name == "test-worker"
+    assert loop.worker_unhealthy_until == {}
+    assert loop.worker_rejected_until == {}
 
 
 def test_disabled_worker_healthcheck_skips_automatic_startup_but_force_runs_diagnostic() -> None:

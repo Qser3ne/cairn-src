@@ -22,6 +22,22 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def safe_json_object(value: str | None) -> dict:
+    try:
+        data = json.loads(value or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def safe_json_list(value: str | None) -> list:
+    try:
+        data = json.loads(value or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
 def _next_existing_numeric_id(conn: sqlite3.Connection, table: str, column: str, prefix: str) -> str:
     if not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
@@ -216,14 +232,21 @@ def get_finding_or_404(
     return row
 
 
-def intent_to_model(conn: sqlite3.Connection, row: sqlite3.Row, project_id: str) -> Intent:
-    sources = conn.execute(
-        "SELECT fact_id FROM intent_sources WHERE intent_id = ? AND project_id = ? ORDER BY rowid",
-        (row["id"], project_id),
-    ).fetchall()
+def intent_to_model(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    project_id: str,
+    source_ids: list[str] | None = None,
+) -> Intent:
+    if source_ids is None:
+        sources = conn.execute(
+            "SELECT fact_id FROM intent_sources WHERE intent_id = ? AND project_id = ? ORDER BY rowid",
+            (row["id"], project_id),
+        ).fetchall()
+        source_ids = [s["fact_id"] for s in sources]
     return Intent(
         id=row["id"],
-        **{"from": [s["fact_id"] for s in sources]},
+        **{"from": source_ids},
         to=row["to_fact_id"],
         description=row["description"],
         creator=row["creator"],
@@ -239,10 +262,22 @@ def intent_to_model(conn: sqlite3.Connection, row: sqlite3.Row, project_id: str)
 
 def build_intents(conn: sqlite3.Connection, project_id: str) -> list[Intent]:
     rows = conn.execute(
-        "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at",
+        "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at, id",
         (project_id,),
     ).fetchall()
-    return [intent_to_model(conn, r, project_id) for r in rows]
+    sources_by_intent = _intent_sources_by_id(conn, project_id)
+    return [intent_to_model(conn, r, project_id, sources_by_intent.get(r["id"], [])) for r in rows]
+
+
+def _intent_sources_by_id(conn: sqlite3.Connection, project_id: str) -> dict[str, list[str]]:
+    rows = conn.execute(
+        "SELECT intent_id, fact_id FROM intent_sources WHERE project_id = ? ORDER BY intent_id, rowid",
+        (project_id,),
+    ).fetchall()
+    sources_by_intent: dict[str, list[str]] = {}
+    for row in rows:
+        sources_by_intent.setdefault(row["intent_id"], []).append(row["fact_id"])
+    return sources_by_intent
 
 
 def finding_to_model(row: sqlite3.Row) -> Finding:
@@ -281,7 +316,7 @@ def build_findings(conn: sqlite3.Connection, project_id: str) -> list[Finding]:
 
 
 def account_to_model(row: sqlite3.Row) -> ProjectAccount:
-    cookies = json.loads(row["cookies_json"] or "[]")
+    cookies = safe_json_list(row["cookies_json"])
     return ProjectAccount(
         id=row["id"],
         label=row["label"],
@@ -347,12 +382,7 @@ def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
 
 def fact_from_row(row: sqlite3.Row) -> Fact:
     raw_details = row["details_json"] if "details_json" in row.keys() else "{}"
-    try:
-        details = json.loads(raw_details or "{}")
-    except (TypeError, json.JSONDecodeError):
-        details = {}
-    if not isinstance(details, dict):
-        details = {}
+    details = safe_json_object(raw_details)
     return Fact(
         id=row["id"],
         description=row["description"],
@@ -503,8 +533,8 @@ def snapshot_to_model(row: sqlite3.Row) -> ProjectSnapshot:
         project_id=row["project_id"],
         snapshot_type=row["snapshot_type"],
         summary_yaml=row["summary_yaml"],
-        selected_fact_ids=json.loads(row["selected_fact_ids_json"] or "[]"),
-        stats=json.loads(row["stats_json"] or "{}"),
+        selected_fact_ids=safe_json_list(row["selected_fact_ids_json"]),
+        stats=safe_json_object(row["stats_json"]),
         created_at=row["created_at"],
     )
 
@@ -524,10 +554,10 @@ def get_snapshot_or_404(
 def ephemeral_job_to_model(row: sqlite3.Row) -> EphemeralJob:
     input_data = None
     if "input_json" in row.keys() and row["input_json"]:
-        input_data = json.loads(row["input_json"])
+        input_data = safe_json_object(row["input_json"])
     result = None
     if row["result_json"]:
-        result = json.loads(row["result_json"])
+        result = safe_json_object(row["result_json"])
     return EphemeralJob(
         id=row["id"],
         project_id=row["project_id"],
@@ -559,6 +589,6 @@ def finding_report_to_model(row: sqlite3.Row) -> FindingReport:
         finding_id=row["finding_id"],
         intent_id=row["intent_id"],
         report_markdown=row["report_markdown"],
-        report_json=json.loads(row["report_json"] or "{}"),
+        report_json=safe_json_object(row["report_json"]),
         created_at=row["created_at"],
     )

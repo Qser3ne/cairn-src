@@ -53,7 +53,11 @@ def run_report_task(
                 cancellation=cancellation,
             )
             if cancel_reason(healthcheck.result, cancellation) is not None:
+                best_effort_release(client, project.project.id, intent.id, worker.name)
                 return "cancelled"
+            if lease.failure is not None:
+                best_effort_release(client, project.project.id, intent.id, worker.name)
+                return "failed"
             if healthcheck.result.returncode != 0:
                 best_effort_release(client, project.project.id, intent.id, worker.name)
                 return "unhealthy"

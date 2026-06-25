@@ -66,6 +66,12 @@ uv run --project cairn cairn serve --host 127.0.0.1 --port 8000
 - authenticated vuln 必须提供 accounts。
 - anonymous vuln 不能提供 accounts。
 
+写请求校验规则：
+
+- 创建/更新类请求使用严格 Pydantic model，未知字段返回 `422`。
+- 严格校验包含嵌套结构，例如 project account cookie 只接受 `name` 和 `value`。
+- `fork-vuln/seed-jobs` 读取损坏的 job input JSON 时返回受控 `422`，不暴露未捕获解析异常。
+
 ## Reason Lease APIs
 
 Reason lease 是项目级协调状态，不是 graph data。
@@ -125,6 +131,8 @@ Ephemeral jobs 不直接写 graph。Judge 只更新 readiness judgement；fork s
 | `POST /projects/{project_id}/intents/{intent_id}/release` | 释放 open intent。 |
 | `POST /projects/{project_id}/intents/{intent_id}/conclude` | 写入 fact，并可在 vuln 中写 findings。 |
 | `POST /projects/{project_id}/intents/{intent_id}/report` | 写入 finding report draft。 |
+
+`report` intent 只允许在 `vuln` 项目创建。`recon` 项目的 `/conclude` 请求只能写 facts，包含 `findings` 时返回 `400`。`report` intent 必须通过 `/report` endpoint 完成，不能通过普通 `/conclude` 写成 fact。
 
 服务端重复保护使用窄范围规则：同一 project、相同 `from` 集合、规范化后相同 `description`、相同 `auth_scope` 时返回 `409`。
 

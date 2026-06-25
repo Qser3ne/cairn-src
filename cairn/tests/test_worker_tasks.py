@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+import json
 
 from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
+from cairn.dispatcher.runtime.heartbeat import HeartbeatFailure
 from cairn.dispatcher.runtime.process import ProcessResult
 from cairn.dispatcher.tasks.common import HealthcheckRun
 from cairn.dispatcher.tasks import explore, fork_seed, judge, reason, report
@@ -28,6 +30,45 @@ def _healthy(*_args, **_kwargs) -> HealthcheckRun:
 
 def _lease_factory(lease: FakeLease):
     return lambda *_args, **_kwargs: lease
+
+
+def _finding_payload(title: str = "confirmed issue") -> dict:
+    return {
+        "title": title,
+        "vulnerability_type": "idor",
+        "severity": "medium",
+        "target": "https://target.test",
+        "location": "GET /api/orders/1",
+        "impact": "other users may be able to read order data",
+        "evidence": "changing the order id returned another record",
+        "reproduction": "request /api/orders/1 with a different account",
+        "remediation": "enforce object-level authorization",
+        "status": "candidate",
+        "research_value": "medium",
+        "next_action": "triage",
+    }
+
+
+def _judge_payload() -> str:
+    return json.dumps(
+        {
+            "accepted": True,
+            "data": {
+                "verdict": "ready",
+                "score": 86,
+                "recommended_action": "create_vuln_project",
+                "checklist": {
+                    "scope_clarity": {"score": 18, "evidence": "scope is clear"},
+                    "feature_coverage": {"score": 17, "evidence": "main features mapped"},
+                    "feature_api_mapping_quality": {"score": 16, "evidence": "routes and APIs linked"},
+                    "auth_boundary_coverage": {"score": 18, "evidence": "auth boundary covered"},
+                    "candidate_surface_quality": {"score": 17, "evidence": "candidate surfaces are concrete"},
+                },
+                "blocking_gaps": [],
+                "non_blocking_gaps": [],
+            },
+        }
+    )
 
 
 def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
@@ -345,7 +386,7 @@ def test_recon_explore_conclude_fallback_ignores_findings_from_model(monkeypatch
 def test_vuln_explore_passes_findings_from_model(monkeypatch) -> None:
     config = make_config()
     intent = make_intent()
-    finding = {"title": "confirmed issue"}
+    finding = _finding_payload()
     project = make_project(intents=[intent])
     client = FakeClient(project)
     containers = FakeContainerManager()
@@ -359,7 +400,7 @@ def test_vuln_explore_passes_findings_from_model(monkeypatch) -> None:
         "_run_process",
         lambda *_args, **_kwargs: ProcessResult(
             0,
-            '{"accepted":true,"data":{"description":"vuln fact","findings":[{"title":"confirmed issue"}]}}',
+            json.dumps({"accepted": True, "data": {"description": "vuln fact", "findings": [finding]}}),
             "",
         ),
     )
@@ -549,7 +590,7 @@ def test_judge_task_finishes_ephemeral_job_without_graph_writes(monkeypatch) -> 
         "run_worker_process",
         lambda *_args, **_kwargs: ProcessResult(
             0,
-            '{"accepted":true,"data":{"verdict":"ready","summary":"enough signal"}}',
+            _judge_payload(),
             "",
         ),
     )
@@ -558,7 +599,7 @@ def test_judge_task_finishes_ephemeral_job_without_graph_writes(monkeypatch) -> 
 
     assert outcome == "success"
     assert client.claimed == [("job_001", "test-worker")]
-    assert client.finished == [("job_001", "test-worker", {"verdict": "ready", "summary": "enough signal"})]
+    assert client.finished == [("job_001", "test-worker", json.loads(_judge_payload())["data"])]
     assert containers.writes[0][1].startswith("/tmp/cairn-prompts/judge_execute-")
 
 
@@ -682,4 +723,84 @@ def test_report_task_writes_report_artifact(monkeypatch) -> None:
     )
 
     assert outcome == "success"
+    assert lease.started and lease.stopped
+
+
+def test_report_task_releases_intent_when_healthcheck_is_cancelled(monkeypatch) -> None:
+    base_config = make_config()
+    config = base_config.model_copy(
+        update={"runtime": base_config.runtime.model_copy(update={"worker_healthcheck": "startup_and_task"})}
+    )
+    intent = make_intent()
+    intent.intent_kind = "report"
+    project = make_project(intents=[intent])
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+    cancellation = TaskCancellation()
+    cancellation.cancel("stopped")
+
+    monkeypatch.setattr(report, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(report.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(report, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        report,
+        "run_worker_process",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("execute should not run")),
+    )
+
+    outcome = report.run_report_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        cancellation,
+    )
+
+    assert outcome == "cancelled"
+    assert client.released == [("proj_001", "i001", "test-worker")]
+    assert lease.started and lease.stopped
+
+
+def test_report_task_releases_intent_when_healthcheck_loses_heartbeat(monkeypatch) -> None:
+    base_config = make_config()
+    config = base_config.model_copy(
+        update={"runtime": base_config.runtime.model_copy(update={"worker_healthcheck": "startup_and_task"})}
+    )
+    intent = make_intent()
+    intent.intent_kind = "report"
+    project = make_project(intents=[intent])
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    def healthcheck_with_heartbeat_failure(*_args, **_kwargs) -> HealthcheckRun:
+        lease.failure = HeartbeatFailure(409, "lost")
+        return HealthcheckRun(ProcessResult(0, "", ""), duration_ms=1)
+
+    monkeypatch.setattr(report, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(report.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(report, "run_healthcheck", healthcheck_with_heartbeat_failure)
+    monkeypatch.setattr(
+        report,
+        "run_worker_process",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("execute should not run")),
+    )
+
+    outcome = report.run_report_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "failed"
+    assert client.released == [("proj_001", "i001", "test-worker")]
     assert lease.started and lease.stopped

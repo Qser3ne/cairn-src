@@ -155,29 +155,41 @@ MOCK_ALLOWED_ENV_KEYS = frozenset(
 
 
 class ReasonTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0)
     max_intents: int = Field(gt=0, default=3)
 
 
 class ExploreTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0)
     conclude_timeout: int = Field(gt=0)
 
 
 class JudgeTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0, default=10)
 
 
 class ReportTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0, default=10)
 
 
 class ForkSeedTaskConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timeout: int = Field(gt=0, default=120)
     max_seed_facts: int = Field(gt=0, default=8)
 
 
 class TasksConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     reason: ReasonTaskConfig
     explore: ExploreTaskConfig
     judge: JudgeTaskConfig = Field(default_factory=lambda: JudgeTaskConfig(timeout=10))
@@ -186,6 +198,8 @@ class TasksConfig(BaseModel):
 
 
 class ContainerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     image: str
     network_mode: str
     completed_action: CompletedAction
@@ -194,6 +208,8 @@ class ContainerConfig(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     max_workers: int = Field(gt=0)
     max_running_projects: int = Field(gt=0)
     max_project_workers: int = Field(gt=0)

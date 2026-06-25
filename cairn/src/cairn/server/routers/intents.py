@@ -65,6 +65,8 @@ def create_intent(project_id: str, body: CreateIntentRequest):
         ):
             raise HTTPException(400, "vuln intent auth_scope must match project auth_mode")
         if body.intent_kind == "report":
+            if project["project_kind"] != "vuln":
+                raise HTTPException(400, "report intents are only supported for vuln projects")
             if not body.finding_id:
                 raise HTTPException(400, "finding_id is required for report intents")
             get_finding_or_404(conn, project_id, body.finding_id)
@@ -177,6 +179,15 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
     with get_conn() as conn:
         check_project_active(conn, project_id)
         intent = get_claimable_open_intent_or_404(conn, project_id, intent_id, body.worker)
+        project = conn.execute(
+            "SELECT project_kind FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if project is None:
+            raise HTTPException(404, "Project not found")
+        if intent["intent_kind"] == "report":
+            raise HTTPException(400, "Report intents must be concluded through the report endpoint")
+        if project["project_kind"] == "recon" and body.findings:
+            raise HTTPException(400, "recon projects cannot write findings")
 
         now = utcnow()
         fid = next_fact_id(conn, project_id)
@@ -334,7 +345,6 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
             ).fetchone()
             findings.append(finding_to_model(row))
 
-        project = conn.execute("SELECT project_kind FROM projects WHERE id = ?", (project_id,)).fetchone()
         if project and project["project_kind"] == "recon":
             increment_recon_explore_round(conn, project_id)
 
@@ -360,7 +370,9 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
 )
 def conclude_report(project_id: str, intent_id: str, body: ReportConcludeRequest):
     with get_conn() as conn:
-        check_project_active(conn, project_id)
+        project = check_project_active(conn, project_id)
+        if project["project_kind"] != "vuln":
+            raise HTTPException(400, "reports are only supported for vuln projects")
         intent = get_claimable_open_intent_or_404(conn, project_id, intent_id, body.worker)
         if intent["intent_kind"] != "report":
             raise HTTPException(400, "Intent is not a report intent")

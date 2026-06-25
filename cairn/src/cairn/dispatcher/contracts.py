@@ -58,6 +58,38 @@ EXPLORE_ALLOWED_KEYS = {
     "findings",
 }
 
+JUDGE_RECOMMENDED_ACTIONS = {
+    "create_vuln_project",
+    "continue_anonymous_recon",
+    "continue_authenticated_recon",
+    "clarify_scope",
+    "fix_account_access",
+    "stop_or_archive",
+}
+
+JUDGE_CHECKLIST_KEYS = (
+    "scope_clarity",
+    "feature_coverage",
+    "feature_api_mapping_quality",
+    "auth_boundary_coverage",
+    "candidate_surface_quality",
+)
+
+FINDING_REQUIRED_TEXT_FIELDS = (
+    "title",
+    "vulnerability_type",
+    "severity",
+    "target",
+    "location",
+    "impact",
+    "evidence",
+    "reproduction",
+    "remediation",
+    "status",
+)
+FINDING_RESEARCH_VALUES = {"unknown", "high", "medium", "low", "none"}
+FINDING_NEXT_ACTIONS = {"triage", "follow_up", "report", "close"}
+
 
 def _looks_like_explore_data(payload: dict[str, Any]) -> bool:
     return isinstance(payload, dict) and "description" in payload and set(payload) <= EXPLORE_ALLOWED_KEYS
@@ -116,7 +148,25 @@ def validate_judge_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]
     verdict = data.get("verdict")
     if verdict not in ("ready", "not_ready", "blocked"):
         raise ValueError("verdict must be ready, not_ready, or blocked")
+    _required_number(data, "score", minimum=0, maximum=100)
+    recommended_action = data.get("recommended_action")
+    if recommended_action not in JUDGE_RECOMMENDED_ACTIONS:
+        raise ValueError("recommended_action is required and must be valid")
+    _validate_judge_checklist(data.get("checklist"))
+    _required_text_list(data, "blocking_gaps")
+    _required_text_list(data, "non_blocking_gaps")
     return "judge", data
+
+
+def _validate_judge_checklist(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("checklist is required")
+    for key in JUDGE_CHECKLIST_KEYS:
+        item = value.get(key)
+        if not isinstance(item, dict):
+            raise ValueError(f"checklist {key} is required")
+        _required_number(item, f"checklist {key} score", minimum=0, maximum=20)
+        _required_text(item, f"checklist {key} evidence", key="evidence")
 
 
 def _snapshot_fact_ids(graph_yaml: str) -> set[str]:
@@ -256,9 +306,7 @@ def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, dict[str, An
         for index, finding in enumerate(findings):
             if not isinstance(finding, dict):
                 raise ValueError(f"invalid finding at index {index}")
-            finding_title = finding.get("title")
-            if not isinstance(finding_title, str) or not finding_title.strip():
-                raise ValueError(f"finding title is required at index {index}")
+            _validate_finding_payload(finding, index)
     return "fact", {
         "description": description.strip(),
         "fact_type": fact_type,
@@ -268,6 +316,19 @@ def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, dict[str, An
     }
 
 
+def _validate_finding_payload(finding: dict[str, Any], index: int) -> None:
+    for field in FINDING_REQUIRED_TEXT_FIELDS:
+        _required_text(finding, f"finding {field} at index {index}", key=field)
+    research_value = finding.get("research_value")
+    if research_value not in FINDING_RESEARCH_VALUES:
+        raise ValueError(f"finding research_value is required at index {index}")
+    next_action = finding.get("next_action")
+    if next_action not in FINDING_NEXT_ACTIONS:
+        raise ValueError(f"finding next_action is required at index {index}")
+    if next_action == "follow_up":
+        _required_text(finding, f"finding followup_intent_description at index {index}", key="followup_intent_description")
+
+
 def _optional_text(value: Any, label: str) -> str | None:
     if value is None:
         return None
@@ -275,6 +336,37 @@ def _optional_text(value: Any, label: str) -> str | None:
         raise ValueError(f"{label} must be a string")
     text = value.strip()
     return text or None
+
+
+def _required_text(data: dict[str, Any], label: str, *, key: str | None = None) -> str:
+    value = data.get(key or label)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} is required")
+    return value.strip()
+
+
+def _required_number(data: dict[str, Any], label: str, *, minimum: int, maximum: int) -> int:
+    key = label.rsplit(" ", 1)[-1] if label.startswith("checklist ") else label
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{label} is required")
+    if value < minimum or value > maximum:
+        raise ValueError(f"{label} must be between {minimum} and {maximum}")
+    return value
+
+
+def _required_text_list(data: dict[str, Any], key: str) -> list[str]:
+    value = data.get(key)
+    if not isinstance(value, list):
+        raise ValueError(f"{key} is required")
+    cleaned = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ValueError(f"{key} item {index} must be a string")
+        text = item.strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
 
 
 def _optional_text_list(value: Any, label: str) -> list[str]:

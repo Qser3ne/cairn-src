@@ -99,7 +99,14 @@ if phase=="reason":
 
 if phase=="judge":
     if outcome in ("ready","not_ready","blocked"):
-        print(json.dumps({"accepted":True,"data":{"verdict":outcome,"score":86,"recommended_action":"create_vuln_project","checklist":{},"blocking_gaps":[],"non_blocking_gaps":[]}}, ensure_ascii=False))
+        checklist={
+            "scope_clarity":{"score":18,"evidence":"mock scope clarity evidence"},
+            "feature_coverage":{"score":17,"evidence":"mock feature coverage evidence"},
+            "feature_api_mapping_quality":{"score":16,"evidence":"mock route and API mapping evidence"},
+            "auth_boundary_coverage":{"score":18,"evidence":"mock auth boundary evidence"},
+            "candidate_surface_quality":{"score":17,"evidence":"mock candidate surface evidence"},
+        }
+        print(json.dumps({"accepted":True,"data":{"verdict":outcome,"score":86,"recommended_action":"create_vuln_project","checklist":checklist,"blocking_gaps":[],"non_blocking_gaps":[]}}, ensure_ascii=False))
     elif outcome=="rejected":
         print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
     else:

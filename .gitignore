@@ -3,6 +3,7 @@
 __pycache__/
 .playwright-cli/
 .agents/
+.superpowers/
 .venv-test/
 datas/
 datas.backup/

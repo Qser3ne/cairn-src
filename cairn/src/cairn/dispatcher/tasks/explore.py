@@ -156,7 +156,7 @@ def run_explore_task(
             try:
                 model_output = driver.extract_response_text(first.stdout, first.stderr)
                 payload = parse_json_output(model_output)
-                kind, fact_data = validate_explore_payload(payload)
+                kind, fact_data = validate_explore_payload(_payload_for_validation(payload, project.project.project_kind))
             except Exception as exc:
                 LOG.warning(
                     "explore parse failed project=%s intent=%s worker=%s error=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -373,7 +373,7 @@ def _try_conclude_fallback(
     try:
         model_output = driver.extract_response_text(result.stdout, result.stderr)
         payload = parse_json_output(model_output)
-        kind, fact_data = validate_explore_payload(payload)
+        kind, fact_data = validate_explore_payload(_payload_for_validation(payload, project.project.project_kind))
     except Exception as exc:
         LOG.warning(
             "conclude parse failed project=%s intent=%s worker=%s error=%s conclude_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -423,6 +423,21 @@ def _payload_findings_for_project(payload: dict, project_kind: str) -> list[dict
             LOG.warning("dropping findings from recon explore payload count=%s", len(findings))
         return None
     return findings
+
+
+def _payload_for_validation(payload: dict, project_kind: str) -> dict:
+    if project_kind != "recon":
+        return payload
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not isinstance(data, dict) or "findings" not in data:
+        return payload
+    cleaned_data = dict(data)
+    cleaned_data.pop("findings", None)
+    if isinstance(payload.get("data"), dict):
+        cleaned_payload = dict(payload)
+        cleaned_payload["data"] = cleaned_data
+        return cleaned_payload
+    return cleaned_data
 
 
 def _payload_findings(payload: dict) -> list[dict] | None:

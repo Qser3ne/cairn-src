@@ -692,14 +692,19 @@ class DispatcherLoop:
             if running >= worker.max_running:
                 blocked_busy.append(f"{worker.name}({running}/{worker.max_running})")
                 continue
-            unhealthy_until = self.worker_unhealthy_until.get(worker.name, 0)
-            if unhealthy_until > now:
-                blocked_unhealthy.append(f"{worker.name}({unhealthy_until - now:.1f}s)")
-                continue
-            rejected_until = self.worker_rejected_until.get((project_id, task_type, worker.name), 0)
-            if rejected_until > now:
-                blocked_rejected.append(f"{worker.name}({rejected_until - now:.1f}s)")
-                continue
+            unhealthy_until = self.worker_unhealthy_until.get(worker.name)
+            if unhealthy_until is not None:
+                if unhealthy_until > now:
+                    blocked_unhealthy.append(f"{worker.name}({unhealthy_until - now:.1f}s)")
+                    continue
+                self.worker_unhealthy_until.pop(worker.name, None)
+            rejection_key = (project_id, task_type, worker.name)
+            rejected_until = self.worker_rejected_until.get(rejection_key)
+            if rejected_until is not None:
+                if rejected_until > now:
+                    blocked_rejected.append(f"{worker.name}({rejected_until - now:.1f}s)")
+                    continue
+                self.worker_rejected_until.pop(rejection_key, None)
             candidates.append(worker)
         if not candidates:
             LOG.debug(
@@ -990,8 +995,6 @@ class DispatcherLoop:
                         task.worker_name,
                         retry_after_seconds,
                     )
-                else:
-                    self.worker_unhealthy_until.pop(task.worker_name, None)
                 rejection_key = (task.project_id, task.task_type, task.worker_name)
                 if outcome == "rejected":
                     retry_after_seconds = REJECTED_RETRY_AFTER_SECONDS
@@ -1003,8 +1006,6 @@ class DispatcherLoop:
                         task.worker_name,
                         retry_after_seconds,
                     )
-                else:
-                    self.worker_rejected_until.pop(rejection_key, None)
                 if outcome == "success" and task.task_type == "reason":
                     self._update_reason_checkpoint_after_success(task)
             except Exception:
@@ -1087,9 +1088,23 @@ class DispatcherLoop:
             self.cleanup_futures[future] = (container_name, summary.id, summary.status)
             self._cleanup_pending.add(container_name)
 
+    def _cleanup_orphan_containers(self, summaries: list[ProjectSummary]) -> None:
+        known_container_names = {self.container_manager.container_name(summary.id) for summary in summaries}
+        for container_name in self.container_manager.managed_container_names():
+            if container_name in known_container_names:
+                continue
+            if container_name in self._cleanup_pending:
+                continue
+            if not self.container_manager.needs_orphan_cleanup(container_name):
+                continue
+            future = self.cleanup_executor.submit(self.container_manager.cleanup_orphan, container_name)
+            self.cleanup_futures[future] = (container_name, None, "orphan")
+            self._cleanup_pending.add(container_name)
+
     def _queue_container_cleanups(self, summaries: list[ProjectSummary]) -> None:
         self._cleanup_completed_containers(summaries)
         self._cleanup_stopped_containers(summaries)
+        self._cleanup_orphan_containers(summaries)
 
     def _reap_cleanup_futures(self) -> None:
         done = [future for future in self.cleanup_futures if future.done()]

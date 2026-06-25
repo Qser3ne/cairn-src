@@ -43,6 +43,22 @@ def _create_snapshot(client: TestClient, project_id: str, selected_fact_ids: lis
     return response.json()
 
 
+def _create_authenticated_vuln(client: TestClient) -> dict:
+    parent_id = _create_recon(client)["project"]["id"]
+    snapshot = _create_snapshot(client, parent_id)
+    response = client.post(
+        f"/projects/{parent_id}/fork-vuln",
+        json={
+            "title": "vuln",
+            "snapshot_id": snapshot["id"],
+            "auth_mode": "authenticated",
+            "accounts": [{"cookies": [{"name": "sid", "value": "child"}]}],
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def test_create_project_defaults_to_recon_and_forbids_old_fields(client: TestClient) -> None:
     payload = _create_recon(client)
 
@@ -62,6 +78,70 @@ def test_create_project_defaults_to_recon_and_forbids_old_fields(client: TestCli
             },
         )
         assert response.status_code == 422
+
+
+def test_write_requests_reject_unknown_fields(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    nested_cookie = client.post(
+        "/projects",
+        json={
+            "title": "nested cookie extra",
+            "origin": "start",
+            "accounts": [{"cookies": [{"name": "sessionid", "value": "secret", "surprise": True}]}],
+        },
+    )
+
+    hint = client.post(
+        f"/projects/{project_id}/hints",
+        json={"content": "new clue", "creator": "human", "surprise": True},
+    )
+    intent = client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin"], "description": "work", "creator": "tester", "surprise": True},
+    )
+    status = client.put(
+        f"/projects/{project_id}/status",
+        json={"status": "stopped", "surprise": True},
+    )
+    settings = client.put(
+        "/settings",
+        json={"intent_timeout": 10, "reason_timeout": 10, "surprise": True},
+    )
+
+    assert nested_cookie.status_code == 422
+    assert hint.status_code == 422
+    assert intent.status_code == 422
+    assert status.status_code == 422
+    assert settings.status_code == 422
+
+
+def test_static_ui_polling_avoids_fixed_interval_overlap(client: TestClient) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "setInterval(async" not in response.text
+    assert "resumePolling()" in response.text
+    assert "this.resumePolling();" in response.text
+    assert "pollGeneration: 0" in response.text
+    assert "pausePolling()" in response.text
+    assert "this.pollGeneration += 1;" in response.text
+    assert "this.pausePolling();" in response.text
+    assert "shouldApply: () => this.polling && this.selectedProjectId === projectId && this.view === 'graph'" in response.text
+    assert "generation === this.pollGeneration" in response.text
+    assert "if (updated) this.updateGraph();" in response.text
+    assert "async pollOnce(generation = this.pollGeneration)" in response.text
+    assert "setTimeout(() => this.pollOnce(generation), 5000)" in response.text
+    assert "if (!projectId) {\n        this.resumePolling();\n        return;\n      }" in response.text
+
+    open_project = response.text[
+        response.text.index("async openProject(id)") : response.text.index("backToList(fromRoute)")
+    ]
+    assert open_project.index("this.selectedProjectId = id;") < open_project.index("this.resumePolling();")
+
+    back_to_list = response.text[
+        response.text.index("backToList(fromRoute)") : response.text.index("    startPolling()")
+    ]
+    assert back_to_list.index("this.selectedProjectId = '';") < back_to_list.index("this.resumePolling();")
 
 
 def test_project_ids_follow_current_existing_max_after_deletes(client: TestClient) -> None:
@@ -306,6 +386,116 @@ def test_reason_pending_is_coalesced_while_reason_is_running(client: TestClient)
     assert next_claim.json()["reason_pending"] is False
 
 
+def test_project_detail_orders_intents_by_created_at_then_id(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    with db.get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO intents (id, project_id, description, creator, created_at, intent_kind, auth_scope)
+            VALUES ('i010', ?, 'late id inserted first', 'tester', '2026-01-01T00:00:02Z', 'explore', 'anonymous')
+            """,
+            (project_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO intents (id, project_id, description, creator, created_at, intent_kind, auth_scope)
+            VALUES ('i002', ?, 'early id inserted second', 'tester', '2026-01-01T00:00:02Z', 'explore', 'anonymous')
+            """,
+            (project_id,),
+        )
+
+    detail = client.get(f"/projects/{project_id}")
+
+    assert detail.status_code == 200
+    assert [intent["id"] for intent in detail.json()["intents"]] == ["i002", "i010"]
+
+
+def test_snapshot_and_judgement_bad_json_fields_fall_back_to_empty_defaults(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    snapshot = _create_snapshot(client, project_id)
+    job_id = client.post(f"/projects/{project_id}/recon/judgements").json()["job_id"]
+    with db.get_conn() as conn:
+        conn.execute(
+            "UPDATE project_snapshots SET selected_fact_ids_json = 'not-json', stats_json = 'not-json' WHERE id = ? AND project_id = ?",
+            (snapshot["id"], project_id),
+        )
+        conn.execute(
+            "UPDATE ephemeral_jobs SET input_json = 'not-json', result_json = 'not-json' WHERE id = ?",
+            (job_id,),
+        )
+
+    snapshots = client.get(f"/projects/{project_id}/snapshots")
+    judgements = client.get(f"/projects/{project_id}/recon/judgements")
+    judgement_detail = client.get(f"/projects/{project_id}/recon/judgements/{job_id}")
+
+    assert snapshots.status_code == 200
+    assert snapshots.json()[0]["selected_fact_ids"] == []
+    assert snapshots.json()[0]["stats"] == {}
+    assert judgements.status_code == 200
+    assert judgements.json()[0]["result"] == {}
+    assert judgement_detail.status_code == 200
+    assert judgement_detail.json()["input"] == {}
+    assert judgement_detail.json()["result"] == {}
+
+
+def test_project_detail_bad_fact_and_account_json_fields_fall_back_to_empty_defaults(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    with db.get_conn() as conn:
+        conn.execute(
+            "UPDATE facts SET details_json = 'not-json' WHERE id = 'origin' AND project_id = ?",
+            (project_id,),
+        )
+        conn.execute(
+            "UPDATE project_accounts SET cookies_json = 'not-json' WHERE id = 'a001' AND project_id = ?",
+            (project_id,),
+        )
+
+    detail = client.get(f"/projects/{project_id}")
+
+    assert detail.status_code == 200
+    assert detail.json()["facts"][0]["details"] == {}
+    assert detail.json()["accounts"] == []
+
+
+def test_export_bad_report_json_falls_back_to_empty_object(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+    with db.get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO intents (id, project_id, to_fact_id, description, creator, created_at, concluded_at, intent_kind)
+            VALUES ('i900', ?, 'origin', 'report finding', 'tester', '2026-01-01T00:00:02Z', '2026-01-01T00:00:03Z', 'report')
+            """,
+            (project_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO findings (
+                id, project_id, fact_id, intent_id, title, vulnerability_type, severity,
+                target, location, impact, evidence, reproduction, remediation, status,
+                research_value, next_action, created_at
+            ) VALUES (
+                'v900', ?, 'origin', 'i900', 'Finding', 'idor', 'medium',
+                'https://target.test', 'GET /api', 'impact', 'evidence', 'steps', 'fix', 'candidate',
+                'medium', 'triage', '2026-01-01T00:00:03Z'
+            )
+            """,
+            (project_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO finding_reports (id, project_id, finding_id, intent_id, report_markdown, report_json, created_at)
+            VALUES ('r900', ?, 'v900', 'i900', '# Report', 'not-json', '2026-01-01T00:00:04Z')
+            """,
+            (project_id,),
+        )
+
+    response = client.get(f"/projects/{project_id}/export?format=yaml")
+
+    assert response.status_code == 200
+    exported = yaml.safe_load(response.text)
+    assert exported["reports"][0]["report_json"] == {}
+
+
 def test_conclude_persists_structured_feature_fact_and_export(client: TestClient) -> None:
     project_id = _create_recon(client)["project"]["id"]
     client.post(
@@ -463,6 +653,39 @@ def test_fork_seed_job_creates_child_vuln_with_ai_seed_facts(client: TestClient)
     assert result["seed_facts"][0]["details"]["feature_summary"] == "上传页允许匿名用户选择图片并提交"
 
 
+def test_finish_fork_seed_job_with_bad_input_json_returns_422(client: TestClient) -> None:
+    parent_id = _create_recon(client)["project"]["id"]
+    snapshot = _create_snapshot(client, parent_id)
+    created = client.post(
+        f"/projects/{parent_id}/fork-vuln/seed-jobs",
+        json={"title": "seeded vuln", "snapshot_id": snapshot["id"], "auth_mode": "anonymous"},
+    )
+    assert created.status_code == 201, created.text
+    job_id = created.json()["job_id"]
+    assert client.post(f"/ephemeral-jobs/{job_id}/claim", json={"worker": "planner"}).status_code == 200
+    with db.get_conn() as conn:
+        conn.execute("UPDATE ephemeral_jobs SET input_json = 'not-json' WHERE id = ?", (job_id,))
+
+    response = client.post(
+        f"/ephemeral-jobs/{job_id}/finish-fork-seed",
+        json={
+            "worker": "planner",
+            "seed_facts": [
+                {
+                    "title": "Upload surface",
+                    "auth_scope": "anonymous",
+                    "candidate_type": "feature_surface",
+                    "derived_from": ["origin"],
+                    "description": "candidate_summary:\n- upload endpoint",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "input_json" in response.text
+
+
 def test_fork_seed_finish_rejects_unknown_parent_fact(client: TestClient) -> None:
     parent_id = _create_recon(client)["project"]["id"]
     snapshot = _create_snapshot(client, parent_id)
@@ -597,8 +820,47 @@ def test_recon_judgement_results_are_listed_without_snapshot_payload(client: Tes
     assert other_job_id not in [item["id"] for item in results]
 
 
-def test_conclude_finding_lifecycle_creates_followup_and_report_intents(client: TestClient) -> None:
+def test_recon_conclude_rejects_findings(client: TestClient) -> None:
     project_id = _create_recon(client)["project"]["id"]
+    client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin"], "description": "verify idor", "creator": "reasoner"},
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/intents/i001/conclude",
+        json={
+            "worker": "explorer",
+            "description": "recon fact",
+            "findings": [{"title": "recon should not write findings"}],
+        },
+    )
+
+    assert response.status_code == 400
+    detail = client.get(f"/projects/{project_id}").json()
+    assert detail["findings"] == []
+    assert detail["intents"][0]["to"] is None
+
+
+def test_recon_project_rejects_report_intents(client: TestClient) -> None:
+    project_id = _create_recon(client)["project"]["id"]
+
+    response = client.post(
+        f"/projects/{project_id}/intents",
+        json={
+            "from": ["origin"],
+            "description": "report should not exist on recon",
+            "creator": "dispatcher.finding_report",
+            "intent_kind": "report",
+            "finding_id": "v001",
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_conclude_finding_lifecycle_creates_followup_and_report_intents(client: TestClient) -> None:
+    project_id = _create_authenticated_vuln(client)["project"]["id"]
     client.post(
         f"/projects/{project_id}/intents",
         json={"from": ["origin"], "description": "verify idor", "creator": "reasoner", "worker": None, "auth_scope": "authenticated"},
@@ -644,3 +906,29 @@ def test_conclude_finding_lifecycle_creates_followup_and_report_intents(client: 
     detail = client.get(f"/projects/{project_id}").json()
     report_finding = next(item for item in detail["findings"] if item["title"] == "Reportable IDOR")
     assert report_finding["report_status"] == "drafted"
+
+
+def test_report_intent_cannot_use_fact_conclude_endpoint(client: TestClient) -> None:
+    project_id = _create_authenticated_vuln(client)["project"]["id"]
+    client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin"], "description": "verify idor", "creator": "reasoner", "auth_scope": "authenticated"},
+    )
+    client.post(
+        f"/projects/{project_id}/intents/i001/conclude",
+        json={
+            "worker": "explorer",
+            "description": "confirmed idor",
+            "findings": [{"title": "Reportable IDOR", "next_action": "report"}],
+        },
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/intents/i002/conclude",
+        json={"worker": "reporter", "description": "report intent should not write facts"},
+    )
+
+    assert response.status_code == 400
+    detail = client.get(f"/projects/{project_id}").json()
+    report_intent = next(intent for intent in detail["intents"] if intent["id"] == "i002")
+    assert report_intent["to"] is None

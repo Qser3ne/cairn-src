@@ -193,6 +193,7 @@ def configure(path: Path) -> None:
         _ensure_project_snapshots_table(conn)
         _ensure_ephemeral_jobs_table(conn)
         _ensure_finding_reports_table(conn)
+        _ensure_indexes(conn)
         _remove_goal_facts(conn)
 
 
@@ -589,6 +590,21 @@ def _ensure_finding_reports_table(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+
+def _ensure_indexes(conn: sqlite3.Connection) -> None:
+    for ddl in (
+        "CREATE INDEX IF NOT EXISTS idx_facts_project ON facts(project_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_intents_project_open_worker ON intents(project_id, concluded_at, worker, created_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_hints_project_created ON hints(project_id, created_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_findings_project_created ON findings(project_id, created_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_project_accounts_project ON project_accounts(project_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_project_snapshots_project_created ON project_snapshots(project_id, created_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_intent_sources_project_intent ON intent_sources(project_id, intent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ephemeral_jobs_queue ON ephemeral_jobs(status, job_type, created_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_finding_reports_project_created ON finding_reports(project_id, created_at, id)",
+    ):
+        conn.execute(ddl)
 
 
 def _remove_goal_facts(conn: sqlite3.Connection) -> None:

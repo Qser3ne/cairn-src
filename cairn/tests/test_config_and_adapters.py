@@ -44,6 +44,39 @@ def test_dispatch_config_defaults_container_init_and_allows_disable() -> None:
     assert DispatchConfig.model_validate(payload).container.init is False
 
 
+@pytest.mark.parametrize(
+    ("section", "field"),
+    [
+        ("runtime", "surprise"),
+        ("container", "surprise"),
+    ],
+)
+def test_dispatch_config_rejects_unknown_top_level_nested_fields(section: str, field: str) -> None:
+    payload = make_config().model_dump()
+    payload[section][field] = True
+
+    with pytest.raises(ValidationError):
+        DispatchConfig.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("task", "field"),
+    [
+        ("reason", "surprise"),
+        ("explore", "surprise"),
+        ("judge", "surprise"),
+        ("report", "surprise"),
+        ("fork_seed", "surprise"),
+    ],
+)
+def test_dispatch_config_rejects_unknown_task_fields(task: str, field: str) -> None:
+    payload = make_config().model_dump()
+    payload["tasks"][task][field] = True
+
+    with pytest.raises(ValidationError):
+        DispatchConfig.model_validate(payload)
+
+
 def test_dispatch_config_rejects_duplicate_workers_and_excess_project_parallelism() -> None:
     payload = make_config().model_dump()
     payload["workers"].append(dict(payload["workers"][0]))

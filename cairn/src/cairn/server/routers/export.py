@@ -5,7 +5,7 @@ import json
 import yaml
 
 from cairn.server.db import get_conn
-from cairn.server.services import expire_reason_leases, expire_workers, get_project_or_404
+from cairn.server.services import expire_reason_leases, expire_workers, get_project_or_404, safe_json_object
 
 router = APIRouter(tags=["export"])
 
@@ -61,10 +61,11 @@ def _load_project_data(conn, project_id: str):
     proj = get_project_or_404(conn, project_id)
 
     facts = conn.execute(
-        "SELECT * FROM facts WHERE project_id = ?", (project_id,)
+        "SELECT * FROM facts WHERE project_id = ? ORDER BY CASE WHEN id = 'origin' THEN 0 ELSE 1 END, id",
+        (project_id,),
     ).fetchall()
     hints = conn.execute(
-        "SELECT content, creator, created_at FROM hints WHERE project_id = ? ORDER BY created_at",
+        "SELECT id, content, creator, created_at FROM hints WHERE project_id = ? ORDER BY created_at, id",
         (project_id,),
     ).fetchall()
     findings = conn.execute(
@@ -76,7 +77,7 @@ def _load_project_data(conn, project_id: str):
         (project_id,),
     ).fetchall()
     intents = conn.execute(
-        "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at",
+        "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at, id",
         (project_id,),
     ).fetchall()
     reports = conn.execute(
@@ -85,12 +86,12 @@ def _load_project_data(conn, project_id: str):
     ).fetchall()
 
     sources_by_intent = {}
-    for i in intents:
-        rows = conn.execute(
-            "SELECT fact_id FROM intent_sources WHERE intent_id = ? AND project_id = ? ORDER BY rowid",
-            (i["id"], project_id),
-        ).fetchall()
-        sources_by_intent[i["id"]] = [r["fact_id"] for r in rows]
+    source_rows = conn.execute(
+        "SELECT intent_id, fact_id FROM intent_sources WHERE project_id = ? ORDER BY intent_id, rowid",
+        (project_id,),
+    ).fetchall()
+    for row in source_rows:
+        sources_by_intent.setdefault(row["intent_id"], []).append(row["fact_id"])
 
     return proj, facts, hints, findings, accounts, intents, sources_by_intent, reports
 
@@ -202,7 +203,7 @@ def _export_yaml(conn, project_id: str) -> str:
                 "finding_id": report["finding_id"],
                 "intent_id": report["intent_id"],
                 "report_markdown": report["report_markdown"],
-                "report_json": json.loads(report["report_json"] or "{}"),
+                "report_json": safe_json_object(report["report_json"]),
                 "created_at": format_export_timestamp(report["created_at"]),
             }
             for report in reports

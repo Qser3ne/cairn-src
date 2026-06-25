@@ -32,7 +32,7 @@ Recon 的目标是建立可用于漏洞验证的上下文：
 - 匿名与登录态认证边界。
 - 候选攻击面和噪声排除结论。
 
-Recon 不做漏洞验证，不创建 findings，不生成 report。
+Recon 不做漏洞验证，不创建 findings，不生成 report。Server 会拒绝 recon conclude 请求中的 `findings`，也会拒绝在 recon 项目中创建 `report` intent。
 
 ## Reason 与 Explore
 
@@ -117,7 +117,7 @@ Finding lifecycle 重点字段：
 - `report_status`: `not_started | queued | drafted | submitted | closed`
 - `report_intent_id`
 
-`next_action="follow_up"` 会自动创建 explore intent。`next_action="report"` 会自动创建 report intent，并把 `report_status` 置为 `queued`。
+`next_action="follow_up"` 会自动创建 explore intent。`next_action="report"` 会自动创建 report intent，并把 `report_status` 置为 `queued`。Report intent 只能存在于 vuln 项目，且必须通过 `/intents/{intent_id}/report` 写入草稿，不能通过普通 conclude 写成 fact。
 
 ## 账号池与 Auth Scope
 

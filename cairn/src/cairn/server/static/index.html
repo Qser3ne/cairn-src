@@ -1375,6 +1375,7 @@ function cairnApp() {
     selectedProjectId: '',
     polling: true,
     pollTimer: null,
+    pollGeneration: 0,
     cy: null,
     sideTab: 'detail',
     selectedNode: null,
@@ -1998,7 +1999,10 @@ function cairnApp() {
     },
 
     requestDeleteProject(projectId, projectTitle = '') {
-      if (!projectId) return;
+      if (!projectId) {
+        this.resumePolling();
+        return;
+      }
       this.deleteConfirm = { id: projectId, title: projectTitle };
       this.showDeleteModal = true;
     },
@@ -2073,37 +2077,49 @@ function cairnApp() {
       } catch(e) { console.error(e); }
     },
 
-    async loadProject(id) {
+    async loadProject(id, options = {}) {
+      const shouldApply = options.shouldApply || (() => true);
       try {
-        this.project = await this.api('GET', `/projects/${id}`);
-        await this.loadReconJudgements(id);
-        await this.loadForkSeedJobs(id);
-      } catch(e) { this.showToast(e.message, 'error'); }
-    },
-
-    async loadReconJudgements(id) {
-      if (!id || this.project?.project?.project_kind !== 'recon') {
-        this.reconJudgements = [];
-        return;
-      }
-      try {
-        this.reconJudgements = await this.api('GET', `/projects/${id}/recon/judgements`);
+        const project = await this.api('GET', `/projects/${id}`);
+        if (!shouldApply()) return false;
+        this.project = project;
+        await this.loadReconJudgements(id, { shouldApply });
+        if (!shouldApply()) return false;
+        await this.loadForkSeedJobs(id, { shouldApply });
+        return shouldApply();
       } catch(e) {
-        console.error(e);
-        this.reconJudgements = [];
+        this.showToast(e.message, 'error');
+        return false;
       }
     },
 
-    async loadForkSeedJobs(id) {
+    async loadReconJudgements(id, options = {}) {
+      const shouldApply = options.shouldApply || (() => true);
       if (!id || this.project?.project?.project_kind !== 'recon') {
-        this.forkSeedJobs = [];
+        if (shouldApply()) this.reconJudgements = [];
         return;
       }
       try {
-        this.forkSeedJobs = await this.api('GET', `/projects/${id}/fork-vuln/seed-jobs`);
+        const reconJudgements = await this.api('GET', `/projects/${id}/recon/judgements`);
+        if (shouldApply()) this.reconJudgements = reconJudgements;
       } catch(e) {
         console.error(e);
-        this.forkSeedJobs = [];
+        if (shouldApply()) this.reconJudgements = [];
+      }
+    },
+
+    async loadForkSeedJobs(id, options = {}) {
+      const shouldApply = options.shouldApply || (() => true);
+      if (!id || this.project?.project?.project_kind !== 'recon') {
+        if (shouldApply()) this.forkSeedJobs = [];
+        return;
+      }
+      try {
+        const forkSeedJobs = await this.api('GET', `/projects/${id}/fork-vuln/seed-jobs`);
+        if (shouldApply()) this.forkSeedJobs = forkSeedJobs;
+      } catch(e) {
+        console.error(e);
+        if (shouldApply()) this.forkSeedJobs = [];
       }
     },
 
@@ -2475,7 +2491,7 @@ function cairnApp() {
           sourceProject,
           timer: null,
         };
-        this.polling = false;
+        this.pausePolling();
         this.sideTab = 'log';
         this.selectedNode = null;
         this.selectedFacts = [];
@@ -2541,8 +2557,10 @@ function cairnApp() {
       };
       this._timelineEventsCacheProject = null;
       this._timelineEventsCache = [];
-      this.polling = true;
-      if (!projectId) return;
+      if (!projectId) {
+        this.resumePolling();
+        return;
+      }
       await this.loadProject(projectId);
       this.$nextTick(() => {
         this.teardownAutoFit();
@@ -2552,11 +2570,13 @@ function cairnApp() {
         }
         this.initGraph();
       });
+      this.resumePolling();
     },
 
 
     async openProject(id) {
-      if (this.replay.active) {
+      const resumeAfterReplay = this.replay.active;
+      if (resumeAfterReplay) {
         this.stopReplayTimer();
         this.replay.active = false;
         this.replay.playing = false;
@@ -2566,7 +2586,6 @@ function cairnApp() {
         this.replay.sourceProject = null;
         this._timelineEventsCacheProject = null;
         this._timelineEventsCache = [];
-        this.polling = true;
       }
       this.rememberProjectListScroll();
       this.selectedProjectId = id;
@@ -2575,6 +2594,7 @@ function cairnApp() {
       this.selectedTimelineEntryId = null;
       await this.loadProject(id);
       this.view = 'graph';
+      if (resumeAfterReplay) this.resumePolling();
       if (location.hash !== `#/projects/${id}`) location.hash = `/projects/${id}`;
       this.$nextTick(() => {
         const clampedWidth = this.clampPanelWidth(this.sidePanelWidth);
@@ -2589,7 +2609,8 @@ function cairnApp() {
     },
 
     backToList(fromRoute) {
-      if (this.replay.active) {
+      const resumeAfterReplay = this.replay.active;
+      if (resumeAfterReplay) {
         this.stopReplayTimer();
         this.replay.active = false;
         this.replay.playing = false;
@@ -2599,7 +2620,6 @@ function cairnApp() {
         this.replay.sourceProject = null;
         this._timelineEventsCacheProject = null;
         this._timelineEventsCache = [];
-        this.polling = true;
       }
       this.view = 'list';
       this.shouldRestoreProjectListScroll = true;
@@ -2611,19 +2631,53 @@ function cairnApp() {
       this.teardownAutoFit();
       if (this.cy) { this.cy.destroy(); this.cy = null; }
       if (!fromRoute) location.hash = '/';
-      this.loadProjects().then(() => this.restoreProjectListScroll());
+      this.loadProjects().then(() => {
+        this.restoreProjectListScroll();
+        if (resumeAfterReplay) this.resumePolling();
+      });
     },
 
     startPolling() {
-      this.pollTimer = setInterval(async () => {
-        if (!this.polling) return;
+      this.polling = true;
+      this.pollGeneration += 1;
+      if (this.pollTimer) clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+      this.pollOnce(this.pollGeneration);
+    },
+
+    pausePolling() {
+      this.polling = false;
+      this.pollGeneration += 1;
+      if (this.pollTimer) clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    },
+
+    resumePolling() {
+      if (!this.polling || !this.pollTimer) this.startPolling();
+    },
+
+    async pollOnce(generation = this.pollGeneration) {
+      if (!this.polling || generation !== this.pollGeneration) {
+        if (generation === this.pollGeneration) this.pollTimer = null;
+        return;
+      }
+      try {
         if (this.selectedProjectId && this.view === 'graph') {
-          await this.loadProject(this.selectedProjectId);
-          this.updateGraph();
+          const projectId = this.selectedProjectId;
+          const updated = await this.loadProject(projectId, {
+            shouldApply: () => this.polling && this.selectedProjectId === projectId && this.view === 'graph' && generation === this.pollGeneration,
+          });
+          if (updated) this.updateGraph();
         } else {
           await this.loadProjects();
         }
-      }, 5000);
+      } finally {
+        if (this.polling && generation === this.pollGeneration) {
+          this.pollTimer = setTimeout(() => this.pollOnce(generation), 5000);
+        } else if (generation === this.pollGeneration) {
+          this.pollTimer = null;
+        }
+      }
     },
 
     buildElements() {

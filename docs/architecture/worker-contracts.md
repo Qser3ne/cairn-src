@@ -2,6 +2,8 @@
 
 Dispatcher 只接受结构化 JSON 输出。自然语言可以用于人类可读字段，但协议字段名、枚举值和模板变量必须保持英文。
 
+契约校验失败会使当前 task/job 失败，而不是把不完整 payload 写回 Server。新 prompt 和 mock adapter 都应输出完整契约字段。
+
 ## 通用输出包装
 
 推荐输出：
@@ -145,7 +147,8 @@ Vuln explore 可以附带 findings：
 - Dispatcher 启动 worker 前先 heartbeat claim intent。
 - 成功后调用 `/intents/{intent_id}/conclude`。
 - Recon explore 越界返回 `findings` 时，Dispatcher 写回前丢弃 findings。
-- Vuln explore 可把合法 findings 传给 Server。
+- Server 也会拒绝 recon conclude 请求中的 `findings`，防止绕过 Dispatcher 写入漏洞验证结果。
+- Vuln explore 可把合法 findings 传给 Server；finding 必须包含完整必填字段，枚举字段必须取合法值。
 - Execute 超时或非 JSON 时，如 worker adapter 支持 session，Dispatcher 可运行 `explore_conclude` fallback。
 
 ## Judge
@@ -192,6 +195,13 @@ Judge 是 ephemeral job，不 claim project reason lease，不写 graph。
 - `clarify_scope`
 - `fix_account_access`
 - `stop_or_archive`
+
+Judge 校验规则：
+
+- `score` 和每个 checklist `score` 必须是整数，不能是布尔值或浮点数。
+- checklist 必须包含 `scope_clarity`、`feature_coverage`、`feature_api_mapping_quality`、`auth_boundary_coverage`、`candidate_surface_quality` 五个固定 key。
+- 每个 checklist 项都要提供 `score` 和非空 `evidence`。
+- `blocking_gaps` 和 `non_blocking_gaps` 必须是数组。
 
 写回规则：
 
@@ -246,7 +256,7 @@ Fork seed 是 ephemeral job，用于从 recon snapshot 生成 child vuln seed fa
 
 ## Report
 
-Report 消费 `intent_kind="report"` 的 intent。
+Report 消费 `vuln` 项目中 `intent_kind="report"` 的 intent。Server 不允许 recon 项目创建或完成 report intent。
 
 输入占位符：
 

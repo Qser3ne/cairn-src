@@ -213,6 +213,20 @@ Judge job ID 使用 `judge_###`，由当前 `ephemeral_jobs.id` 最大后缀加 
 | `counters` | legacy/global counter 支撑。 |
 | `scoped_counters` | 项目内 fact/intent/hint/account/snapshot/report ID 计数。 |
 
+## 主要索引
+
+Schema 初始化会创建项目详情、队列和导出常用路径的索引：
+
+- `idx_facts_project`
+- `idx_intents_project_open_worker`
+- `idx_intent_sources_project_intent`
+- `idx_hints_project_created`
+- `idx_findings_project_created`
+- `idx_project_accounts_project`
+- `idx_project_snapshots_project_created`
+- `idx_ephemeral_jobs_queue`
+- `idx_finding_reports_project_created`
+
 ## Legacy 迁移
 
 启动时迁移会处理旧 schema：

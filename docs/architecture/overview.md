@@ -99,6 +99,8 @@ Worker 不直接写 Cairn API，也不直接修改 graph。
 | `fork_seed` | `recon` | 从 recon snapshot 生成 child vuln seed facts。 | Child vuln project。 |
 | `report` | `vuln` | 从 finding 生成 SRC 报告草稿。 | Finding report draft。 |
 
+Server 会强制执行项目边界：`recon` conclude 请求不能包含 `findings`，`report` intent 和 report draft 写入只允许发生在 `vuln` 项目。
+
 ## 运行入口
 
 - Docker Compose：`docker compose up --build`。

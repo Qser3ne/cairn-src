@@ -35,6 +35,30 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert {"project_accounts", "project_snapshots", "ephemeral_jobs", "finding_reports"} <= tables
 
 
+def test_new_database_has_query_indexes(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "indexed.db"
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        indexes = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+        }
+
+    assert {
+        "idx_facts_project",
+        "idx_intents_project_open_worker",
+        "idx_hints_project_created",
+        "idx_findings_project_created",
+        "idx_project_accounts_project",
+        "idx_project_snapshots_project_created",
+        "idx_intent_sources_project_intent",
+        "idx_ephemeral_jobs_queue",
+        "idx_finding_reports_project_created",
+    } <= indexes
+
+
 def test_legacy_standard_project_blocks_startup(tmp_path, monkeypatch) -> None:
     path = tmp_path / "standard.db"
     with sqlite3.connect(path) as conn:

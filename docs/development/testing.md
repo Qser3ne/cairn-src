@@ -29,6 +29,10 @@ cairn/tests/
 python3 -m compileall -q cairn/src/cairn cairn/tests
 ```
 
+GitHub Actions：
+
+- `.github/workflows/python-ci.yml` 在 push 和 pull request 时安装 `uv`，同步 dev 依赖，并运行 `uv run --group dev pytest -s`。
+
 ## 测试覆盖矩阵
 
 | 测试文件 | 覆盖内容 |
@@ -56,6 +60,7 @@ python3 -m compileall -q cairn/src/cairn cairn/tests
 | Server API/model/db | 相关 server/db 测试 | 全量测试。 |
 | Dispatcher scheduler/runtime | 相关 scheduler/runtime 测试 | 全量测试。 |
 | Worker adapter/config | config/adapters、contracts 测试 | 全量测试。 |
+| CI workflow | workflow 语法与依赖安装路径检查 | 本地全量测试。 |
 | Container Dockerfile | smoke test | CI/GHCR 构建。 |
 
 ## 文档迁移检查
