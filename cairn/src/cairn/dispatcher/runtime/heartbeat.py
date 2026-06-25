@@ -61,11 +61,12 @@ class HeartbeatLease:
         client: CairnClient,
         project_id: str,
         worker_name: str,
+        task_mode: str,
         interval: int,
     ) -> "HeartbeatLease":
         return cls(
-            heartbeat=lambda: client.reason_heartbeat(project_id, worker_name),
-            scope=f"project={project_id} reason",
+            heartbeat=lambda: client.reason_heartbeat(project_id, worker_name, task_mode),
+            scope=f"project={project_id} reason task_mode={task_mode}",
             worker_name=worker_name,
             interval=interval,
         )

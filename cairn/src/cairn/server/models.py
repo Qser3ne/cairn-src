@@ -5,7 +5,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-ProjectKind = Literal["recon", "vuln"]
+ProjectKind = Literal["vuln"]
+TaskMode = Literal["collection", "validation", "report"]
 AuthMode = Literal["anonymous", "authenticated", "dual"]
 ProjectStatus = Literal["active", "stopped", "completed"]
 JudgeStatus = Literal["not_judged", "ready", "not_ready", "blocked"]
@@ -114,6 +115,7 @@ class Intent(BaseModel):
     created_at: str
     concluded_at: str | None = None
     intent_kind: IntentKind = "explore"
+    task_mode: TaskMode = "validation"
     finding_id: str | None = None
     auth_scope: AuthScope | None = None
 
@@ -186,6 +188,10 @@ class ProjectReason(BaseModel):
     last_heartbeat_at: str
 
 
+def empty_project_reasons() -> dict[TaskMode, ProjectReason | None]:
+    return {"collection": None, "validation": None, "report": None}
+
+
 class ProjectMeta(BaseModel):
     id: str
     title: str
@@ -196,11 +202,12 @@ class ProjectMeta(BaseModel):
     parent_snapshot_id: str | None = None
     created_at: str
     reason: ProjectReason | None = None
+    reasons: dict[TaskMode, ProjectReason | None] = Field(default_factory=empty_project_reasons)
     reason_pending: bool = False
-    recon_max_reason_rounds: int | None = None
-    recon_reason_rounds: int = 0
-    recon_explore_rounds: int = 0
-    recon_stable_rounds: int = 0
+    collection_max_reason_rounds: int | None = None
+    collection_reason_rounds: int = 0
+    collection_explore_rounds: int = 0
+    collection_stable_rounds: int = 0
     judge_status: JudgeStatus = "not_judged"
     judged_at: str | None = None
 
@@ -243,11 +250,11 @@ class CreateProjectRequest(BaseModel):
 
     title: str
     origin: str
-    project_kind: ProjectKind = "recon"
+    project_kind: ProjectKind = "vuln"
     auth_mode: AuthMode | None = None
     parent_project_id: str | None = None
     parent_snapshot_id: str | None = None
-    recon_max_reason_rounds: int | None = 8
+    collection_max_reason_rounds: int | None = 8
     hints: list[CreateHintInline] | None = None
     accounts: list[ProjectAccountCreate] | None = None
 
@@ -262,28 +269,14 @@ class CreateProjectRequest(BaseModel):
     @model_validator(mode="after")
     def validate_project_kind_and_accounts(self) -> "CreateProjectRequest":
         accounts = self.accounts or []
-        if self.project_kind == "recon":
-            if self.parent_project_id is not None or self.parent_snapshot_id is not None:
-                raise ValueError("recon project cannot have parent_project_id or parent_snapshot_id")
-            if self.auth_mode in ("anonymous", "authenticated"):
-                raise ValueError("recon project auth_mode is fixed to dual")
-            self.auth_mode = "dual"
-            if not accounts:
-                raise ValueError("recon project requires at least one cookie session")
-        if self.project_kind == "vuln":
-            if self.auth_mode is None:
-                self.auth_mode = "anonymous"
-            if self.auth_mode == "dual":
-                raise ValueError("vuln project auth_mode must be anonymous or authenticated")
-            if not self.parent_project_id:
-                raise ValueError("vuln project requires parent_project_id")
-            if not self.parent_snapshot_id:
-                raise ValueError("vuln project requires parent_snapshot_id")
-        if self.auth_mode != "authenticated" and accounts:
-            if self.project_kind != "recon":
-                raise ValueError("accounts are only supported for authenticated projects")
-        if self.auth_mode == "authenticated" and not accounts:
-            raise ValueError("authenticated projects require at least one cookie session")
+        if self.auth_mode is None:
+            self.auth_mode = "dual" if accounts else "anonymous"
+        if self.auth_mode == "anonymous" and accounts:
+            raise ValueError("anonymous projects cannot include accounts")
+        if self.auth_mode in ("authenticated", "dual") and not accounts:
+            raise ValueError(f"{self.auth_mode} projects require at least one cookie session")
+        if (self.parent_project_id is None) != (self.parent_snapshot_id is None):
+            raise ValueError("parent_project_id and parent_snapshot_id must be provided together")
         return self
 
 
@@ -308,6 +301,7 @@ class CreateIntentRequest(BaseModel):
     creator: str
     worker: str | None = None
     intent_kind: IntentKind = "explore"
+    task_mode: TaskMode | None = None
     finding_id: str | None = None
     auth_scope: AuthScope | None = None
 
@@ -354,8 +348,24 @@ class ReasonClaimRequest(BaseModel):
 
     worker: str
     trigger: str
+    task_mode: TaskMode
 
     @field_validator("worker", "trigger")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
+
+
+class ReasonHeartbeatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    worker: str
+    task_mode: TaskMode
+
+    @field_validator("worker")
     @classmethod
     def validate_non_empty_text(cls, value: str) -> str:
         text = value.strip()
@@ -418,7 +428,7 @@ class UpdateProjectTitleRequest(BaseModel):
         return text
 
 
-class ReconReasonRoundRequest(BaseModel):
+class CollectionReasonRoundRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stable: bool = False

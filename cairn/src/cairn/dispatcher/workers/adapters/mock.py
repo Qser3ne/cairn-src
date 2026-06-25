@@ -12,7 +12,16 @@ try:
     cfg=json.loads(sys.argv[1])
     prompt=json.loads(sys.argv[2])
     phase=prompt["phase"]
-    phase_cfg=cfg[phase]
+    task_mode=prompt.get("task_mode")
+    behavior_phase={
+        ("collection","reason"):"collection_reason",
+        ("validation","reason"):"validation_reason",
+        ("collection","explore_execute"):"collection_explore_execute",
+        ("validation","explore_execute"):"validation_explore_execute",
+        ("collection","explore_conclude"):"collection_explore_conclude",
+        ("validation","explore_conclude"):"validation_explore_conclude",
+    }.get((task_mode,phase),phase)
+    phase_cfg=cfg[behavior_phase]
 except Exception as exc:
     print(f"mock setup failed: {exc}", file=sys.stderr)
     raise SystemExit(1)
@@ -27,7 +36,7 @@ if phase=="reason":
         weights.pop("intent",None)
 choices=[(name,weight) for name,weight in weights.items() if weight>0]
 if not choices:
-    print(f"mock {phase} has no legal outcomes for prompt context", file=sys.stderr)
+    print(f"mock {behavior_phase} has no legal outcomes for prompt context", file=sys.stderr)
     raise SystemExit(2)
 
 def _rule_matches(rule, prompt):
@@ -63,7 +72,7 @@ else:
 if phase=="healthcheck":
     raise SystemExit(0 if outcome=="ok" else 1)
 if outcome=="command_fail":
-    print(f"mock {phase} command failed", file=sys.stderr)
+    print(f"mock {behavior_phase} command failed", file=sys.stderr)
     raise SystemExit(1)
 if outcome=="invalid_json":
     print("{invalid json")
@@ -71,21 +80,46 @@ if outcome=="invalid_json":
 if phase=="reason":
     fact_ids=prompt.get("fact_ids") or []
     max_i=prompt.get("max_intents",3)
-    project_kind=prompt.get("project_kind")
-    from_ids=[random.choice(fact_ids)] if fact_ids else []
+    task_mode=prompt.get("task_mode")
+    has_accounts=bool(prompt.get("has_accounts"))
+    collection_fact_ids=[fid for fid in fact_ids if fid!="origin"]
     if outcome=="intent":
-        initial_recon = project_kind=="recon" and len(fact_ids)==1 and not prompt.get("open_intents")
-        count=2 if initial_recon else random.randint(1,max(1,max_i))
-        intents=[]
-        for idx in range(count):
-            fi=[random.choice(fact_ids)] if fact_ids else []
-            intent={
-                "from":fi,
-                "description":f"模拟意图 {idx+1}：基于 {fi[0] if fi else 'none'} 收集新的高价值线索",
-            }
-            if project_kind=="recon":
-                intent["auth_scope"]="anonymous" if idx % 2 == 0 else "authenticated"
-            intents.append(intent)
+        initial_collection = task_mode=="collection" and len(fact_ids)==1 and not prompt.get("open_intents")
+        if initial_collection:
+            intents=[
+                {
+                    "from":["origin"],
+                    "task_mode":"collection",
+                    "auth_scope":"anonymous",
+                    "description":"Collect anonymous baseline features, APIs, and auth boundaries from the origin.",
+                },
+            ]
+            if has_accounts:
+                intents.append({
+                    "from":["origin"],
+                    "task_mode":"collection",
+                    "auth_scope":"authenticated",
+                    "description":"Collect authenticated baseline features, APIs, and auth boundaries from the origin.",
+                })
+        else:
+            source_pool=collection_fact_ids if task_mode=="validation" and collection_fact_ids else fact_ids
+            count=random.randint(1,max(1,max_i))
+            intents=[]
+            for idx in range(count):
+                source=source_pool[idx % len(source_pool)] if source_pool else None
+                fi=[source] if source else []
+                if task_mode=="validation":
+                    description=f"Validate vulnerability hypothesis from collection fact {source or 'none'}"
+                else:
+                    description=f"Collect more feature, API, and auth facts from {source or 'none'}"
+                intent={
+                    "from":fi,
+                    "task_mode":task_mode,
+                    "description":description,
+                }
+                if task_mode=="collection":
+                    intent["auth_scope"]="anonymous" if idx % 2 == 0 else "authenticated"
+                intents.append(intent)
         print(json.dumps({"accepted":True,"data":{"intents":intents}}, ensure_ascii=False))
     elif outcome=="noop":
         print(json.dumps({"accepted":True,"data":{"decision":"noop","intents":[]}}, ensure_ascii=False))
@@ -115,7 +149,8 @@ if phase=="judge":
 
 if phase=="report":
     if outcome=="draft":
-        print(json.dumps({"accepted":True,"data":{"report_markdown":"# 模拟报告\\n\\n已生成报告草稿。","report_json":{}}}, ensure_ascii=False))
+        intent_id=prompt.get("intent_id") or "unknown"
+        print(json.dumps({"accepted":True,"data":{"report_markdown":f"# Mock SRC Report\\n\\nDrafted report for {intent_id} from validated findings.","report_json":{"status":"draft","source_intent":intent_id}}}, ensure_ascii=False))
     elif outcome=="rejected":
         print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
     else:
@@ -124,7 +159,7 @@ if phase=="report":
 
 if phase=="fork_seed":
     if outcome=="seed":
-        print(json.dumps({"accepted":True,"data":{"seed_facts":[{"title":"模拟匿名攻击面","auth_scope":"anonymous","candidate_type":"auth_surface","derived_from":["f001"],"description":"基于 recon f001 生成的模拟 vuln seed fact。"}]}}, ensure_ascii=False))
+        print(json.dumps({"accepted":True,"data":{"seed_facts":[{"title":"模拟匿名攻击面","auth_scope":"anonymous","candidate_type":"auth_surface","derived_from":["f001"],"description":"基于 collection f001 生成的模拟 validation seed fact。"}]}}, ensure_ascii=False))
     elif outcome=="rejected":
         print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
     else:
@@ -133,7 +168,40 @@ if phase=="fork_seed":
 
 if outcome=="fact":
     label = prompt.get("intent_id") or phase
-    print(json.dumps({"accepted":True,"data":{"description":f"模拟事实：{label} 已产生一条增量观察。"}} , ensure_ascii=False))
+    task_mode = prompt.get("task_mode")
+    if task_mode=="collection":
+        print(json.dumps({"accepted":True,"data":{
+            "description":f"Collection fact from {label}: mapped feature surface, API route, and auth boundary.",
+            "fact_type":"feature_surface",
+            "title":f"Mock feature surface {label}",
+            "summary":"Feature/API/auth baseline fact for validation planning.",
+            "details":{
+                "features":["orders dashboard","order detail view"],
+                "apis":["GET /api/orders","GET /api/orders/{id}"],
+                "auth":{"scope":"anonymous_or_authenticated","boundary":"order ownership"},
+            },
+        }} , ensure_ascii=False))
+    elif task_mode=="validation":
+        finding={
+            "title":f"Mock IDOR finding from {label}",
+            "vulnerability_type":"idor",
+            "severity":"medium",
+            "target":"https://target.test",
+            "location":"GET /api/orders/{id}",
+            "impact":"An authenticated user may read another user's order data.",
+            "evidence":"Changing the order id returned a different account's order in the mock validation flow.",
+            "reproduction":"Authenticate as the leased user and request GET /api/orders/1002.",
+            "remediation":"Enforce object-level authorization on order resources.",
+            "status":"candidate",
+            "research_value":"medium",
+            "next_action":"report",
+        }
+        print(json.dumps({"accepted":True,"data":{
+            "description":f"Validation fact from {label}: confirmed reportable authorization weakness.",
+            "findings":[finding],
+        }} , ensure_ascii=False))
+    else:
+        print(json.dumps({"accepted":True,"data":{"description":f"模拟事实：{label} 已产生一条增量观察。"}} , ensure_ascii=False))
 elif outcome=="rejected":
     print(json.dumps({"accepted":False,"reason":"mock_rejected"}, ensure_ascii=False))
 else:

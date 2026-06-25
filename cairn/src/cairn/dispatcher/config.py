@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-TaskType = Literal["reason", "explore", "judge", "report", "fork_seed"]
+TaskType = Literal["collection_reason", "collection_explore", "validation_reason", "validation_explore", "report"]
 WorkerType = Literal["claudecode", "codex", "pi", "mock"]
 CompletedAction = Literal["remove", "stop"]
 WorkerHealthcheckMode = Literal["startup_and_task", "startup_only", "disabled"]
@@ -43,27 +43,27 @@ DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
 
 PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
     "mock": {
-        "reason.md": ("{project_kind}", "{fact_ids}", "{open_intents}", "{max_intents}"),
-        "explore.md": ("{intent_id}",),
-        "explore_conclude.md": ("{intent_id}",),
-        "judge.md": (),
+        "reason.md": ("{task_mode}", "{has_accounts}", "{fact_ids}", "{open_intents}", "{max_intents}"),
+        "explore.md": ("{task_mode}", "{intent_id}"),
+        "explore_conclude.md": ("{task_mode}", "{intent_id}"),
         "report.md": ("{intent_id}", "{intent_description}"),
-        "fork_seed.md": (),
     }
 }
 
-PROMPT_REQUIRED_TOKENS_BY_KIND: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
+PROMPT_REQUIRED_TOKENS_BY_TASK_MODE: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
     "default": {
-        "vuln": {
+        "collection": {
+            "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
             "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
             "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
-            "report.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
         },
-        "recon": {
+        "validation": {
+            "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
             "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
             "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
-            "judge.md": ("{graph_yaml}",),
-            "fork_seed.md": ("{graph_yaml}", "{max_seed_facts}"),
+        },
+        "report": {
+            "report.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
         }
     }
 }
@@ -71,11 +71,15 @@ PROMPT_REQUIRED_TOKENS_BY_KIND: dict[str, dict[str, dict[str, tuple[str, ...]]]]
 MOCK_ALLOWED_OUTCOMES: dict[str, frozenset[str]] = {
     "healthcheck": frozenset({"ok", "fail"}),
     "reason": frozenset({"intent", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "collection_reason": frozenset({"intent", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "validation_reason": frozenset({"intent", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "collection_explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "validation_explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "judge": frozenset({"ready", "not_ready", "blocked", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "collection_explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "validation_explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "report": frozenset({"draft", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "fork_seed": frozenset({"seed", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
 }
 
 MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
@@ -84,6 +88,30 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
         "outcomes": {"ok": "1.0", "fail": "0.0"},
     },
     "reason": {
+        "delay": [0.05, 0.3],
+        "outcomes": {
+            "intent": "1.0",
+            "noop": "0.0",
+            "stable": "0.0",
+            "rejected": "0.0",
+            "invalid_json": "0.0",
+            "invalid_payload": "0.0",
+            "command_fail": "0.0",
+        },
+    },
+    "collection_reason": {
+        "delay": [0.05, 0.3],
+        "outcomes": {
+            "intent": "1.0",
+            "noop": "0.0",
+            "stable": "0.0",
+            "rejected": "0.0",
+            "invalid_json": "0.0",
+            "invalid_payload": "0.0",
+            "command_fail": "0.0",
+        },
+    },
+    "validation_reason": {
         "delay": [0.05, 0.3],
         "outcomes": {
             "intent": "1.0",
@@ -105,6 +133,26 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
             "command_fail": "0.0",
         },
     },
+    "collection_explore_execute": {
+        "delay": [0.05, 0.3],
+        "outcomes": {
+            "fact": "1.0",
+            "rejected": "0.0",
+            "invalid_json": "0.0",
+            "invalid_payload": "0.0",
+            "command_fail": "0.0",
+        },
+    },
+    "validation_explore_execute": {
+        "delay": [0.05, 0.3],
+        "outcomes": {
+            "fact": "1.0",
+            "rejected": "0.0",
+            "invalid_json": "0.0",
+            "invalid_payload": "0.0",
+            "command_fail": "0.0",
+        },
+    },
     "explore_conclude": {
         "delay": [0.05, 0.3],
         "outcomes": {
@@ -115,12 +163,20 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
             "command_fail": "0.0",
         },
     },
-    "judge": {
+    "collection_explore_conclude": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "ready": "1.0",
-            "not_ready": "0.0",
-            "blocked": "0.0",
+            "fact": "1.0",
+            "rejected": "0.0",
+            "invalid_json": "0.0",
+            "invalid_payload": "0.0",
+            "command_fail": "0.0",
+        },
+    },
+    "validation_explore_conclude": {
+        "delay": [0.05, 0.3],
+        "outcomes": {
+            "fact": "1.0",
             "rejected": "0.0",
             "invalid_json": "0.0",
             "invalid_payload": "0.0",
@@ -131,16 +187,6 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
         "delay": [0.05, 0.3],
         "outcomes": {
             "draft": "1.0",
-            "rejected": "0.0",
-            "invalid_json": "0.0",
-            "invalid_payload": "0.0",
-            "command_fail": "0.0",
-        },
-    },
-    "fork_seed": {
-        "delay": [0.05, 0.3],
-        "outcomes": {
-            "seed": "1.0",
             "rejected": "0.0",
             "invalid_json": "0.0",
             "invalid_payload": "0.0",
@@ -328,13 +374,19 @@ def validate_prompt_resources(prompt_group: str) -> None:
     if not group_dir.is_dir():
         raise ValueError(f"missing prompt group: {prompt_group}")
     required_tokens = PROMPT_REQUIRED_TOKENS_BY_GROUP.get(prompt_group, DEFAULT_PROMPT_REQUIRED_TOKENS)
-    prompt_dirs = [group_dir.joinpath("recon"), group_dir.joinpath("vuln")]
-    if not all(path.is_dir() for path in prompt_dirs):
+    task_mode_tokens = PROMPT_REQUIRED_TOKENS_BY_TASK_MODE.get(prompt_group)
+    if task_mode_tokens is not None:
+        prompt_dirs = [group_dir.joinpath(task_mode) for task_mode in task_mode_tokens]
+    else:
         prompt_dirs = [group_dir]
     for prompt_dir in prompt_dirs:
+        if not prompt_dir.is_dir():
+            raise ValueError(f"missing prompt task mode: {prompt_group}/{prompt_dir.name}")
         label = f"{prompt_group}/{prompt_dir.name}" if prompt_dir != group_dir else prompt_group
-        kind_tokens = PROMPT_REQUIRED_TOKENS_BY_KIND.get(prompt_group, {}).get(prompt_dir.name, {})
-        merged_tokens = {**required_tokens, **kind_tokens}
+        if task_mode_tokens is not None:
+            merged_tokens = task_mode_tokens.get(prompt_dir.name, {})
+        else:
+            merged_tokens = required_tokens
         if prompt_dir == group_dir:
             merged_tokens = {
                 name: tokens

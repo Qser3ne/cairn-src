@@ -52,14 +52,17 @@ class InProcessClient:
     def heartbeat(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
         return self._post(f"/projects/{project_id}/intents/{intent_id}/heartbeat", {"worker": worker})
 
-    def claim_reason(self, project_id: str, worker: str, trigger: str) -> ApiResult:
-        return self._post(f"/projects/{project_id}/reason/claim", {"worker": worker, "trigger": trigger})
+    def claim_reason(self, project_id: str, worker: str, trigger: str, task_mode: str) -> ApiResult:
+        return self._post(
+            f"/projects/{project_id}/reason/claim",
+            {"worker": worker, "trigger": trigger, "task_mode": task_mode},
+        )
 
-    def reason_heartbeat(self, project_id: str, worker: str) -> ApiResult:
-        return self._post(f"/projects/{project_id}/reason/heartbeat", {"worker": worker})
+    def reason_heartbeat(self, project_id: str, worker: str, task_mode: str) -> ApiResult:
+        return self._post(f"/projects/{project_id}/reason/heartbeat", {"worker": worker, "task_mode": task_mode})
 
-    def release_reason(self, project_id: str, worker: str) -> ApiResult:
-        return self._post(f"/projects/{project_id}/reason/release", {"worker": worker})
+    def release_reason(self, project_id: str, worker: str, task_mode: str) -> ApiResult:
+        return self._post(f"/projects/{project_id}/reason/release", {"worker": worker, "task_mode": task_mode})
 
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
         return self._post(f"/projects/{project_id}/intents/{intent_id}/release", {"worker": worker})
@@ -99,6 +102,7 @@ class InProcessClient:
         intent_kind: str = "explore",
         finding_id: str | None = None,
         auth_scope: str | None = None,
+        task_mode: str | None = None,
     ) -> ApiResult:
         body = {
             "from": from_ids,
@@ -110,12 +114,14 @@ class InProcessClient:
         }
         if auth_scope is not None:
             body["auth_scope"] = auth_scope
+        if task_mode is not None:
+            body["task_mode"] = task_mode
         return self._post(f"/projects/{project_id}/intents", body)
 
-    def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:
+    def record_collection_reason_round(self, project_id: str, stable: bool) -> ApiResult:
         return self._post(f"/projects/{project_id}/recon/reason-round", {"stable": stable})
 
-    def record_recon_explore_round(self, project_id: str) -> ApiResult:
+    def record_collection_explore_round(self, project_id: str) -> ApiResult:
         return self._post(f"/projects/{project_id}/recon/explore-round", {})
 
     def list_queued_ephemeral_jobs(self, job_type: str = "judge") -> list[EphemeralJob]:
@@ -131,6 +137,19 @@ class InProcessClient:
 
     def fail_ephemeral_job(self, job_id: str, worker: str, error: str) -> ApiResult:
         return self._post(f"/ephemeral-jobs/{job_id}/fail", {"worker": worker, "error": error})
+
+    def conclude_report(
+        self,
+        project_id: str,
+        intent_id: str,
+        worker: str,
+        report_markdown: str,
+        report_json: dict[str, Any],
+    ) -> ApiResult:
+        return self._post(
+            f"/projects/{project_id}/intents/{intent_id}/report",
+            {"worker": worker, "report_markdown": report_markdown, "report_json": report_json},
+        )
 
     def _post(self, path: str, payload: dict[str, Any]) -> ApiResult:
         response = self.http.post(path, json=payload)
@@ -250,14 +269,23 @@ def _config(
     *,
     reason: str,
     explore: str | None = None,
-    judge: str | None = None,
+    collection_reason: str | None = None,
+    validation_reason: str | None = None,
+    collection_explore: str | None = None,
+    validation_explore: str | None = None,
+    report: str | None = None,
     task_types: list[str] | None = None,
 ) -> DispatchConfig:
+    explore_phase = explore or _phase("fact")
     env = {
         "MOCK_HEALTHCHECK": _phase("ok"),
         "MOCK_REASON": reason,
-        "MOCK_EXPLORE_EXECUTE": explore or _phase("fact"),
-        "MOCK_JUDGE": judge or _phase("ready"),
+        "MOCK_COLLECTION_REASON": collection_reason or reason,
+        "MOCK_VALIDATION_REASON": validation_reason or reason,
+        "MOCK_EXPLORE_EXECUTE": explore_phase,
+        "MOCK_COLLECTION_EXPLORE_EXECUTE": collection_explore or explore_phase,
+        "MOCK_VALIDATION_EXPLORE_EXECUTE": validation_explore or explore_phase,
+        "MOCK_REPORT": report or _phase("draft"),
     }
     return DispatchConfig.model_validate(
         {
@@ -285,7 +313,8 @@ def _config(
                 {
                     "name": "mock-worker",
                     "type": "mock",
-                    "task_types": task_types or ["reason", "explore", "judge"],
+                    "task_types": task_types
+                    or ["collection_reason", "collection_explore", "validation_reason", "validation_explore", "report"],
                     "max_running": 1,
                     "priority": 0,
                     "env": env,
@@ -305,6 +334,7 @@ def _loop(config: DispatchConfig, client: InProcessClient, containers: LocalCont
     loop.futures = {}
     loop.cleanup_futures = {}
     loop.reason_checkpoints = {}
+    loop.collection_expansion_requests = {}
     loop.authenticated_wait_queues = {}
     loop.account_leases = {}
     loop.runtime_project_ids = set()
@@ -353,7 +383,7 @@ def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client
 
     try:
         _dispatch_and_wait(loop)
-        assert loop.reason_checkpoints[project_id] == ReasonCheckpoint(
+        assert loop.reason_checkpoints[(project_id, "collection")] == ReasonCheckpoint(
             fact_count=1,
             hint_count=0,
             open_intent_count=2,
@@ -365,18 +395,47 @@ def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client
         loop.close()
 
     assert project.project.status == "active"
-    assert project.project.recon_reason_rounds == 1
-    assert project.project.recon_explore_rounds == 2
+    assert project.project.collection_reason_rounds == 1
+    assert project.project.collection_explore_rounds == 2
     assert [fact.id for fact in project.facts] == ["origin", "f001", "f002"]
-    assert [(intent.id, intent.auth_scope, intent.to) for intent in project.intents] == [
-        ("i001", "anonymous", "f001"),
-        ("i002", "authenticated", "f002"),
-    ]
+    assert {intent.auth_scope for intent in project.intents} == {"anonymous", "authenticated"}
+    assert {intent.task_mode for intent in project.intents} == {"collection"}
+    assert {intent.to for intent in project.intents} == {"f001", "f002"}
     assert any("/reason_execute-" in path for _, path, _ in containers.writes)
     assert any("/explore_execute-" in path for _, path, _ in containers.writes)
 
 
-def test_mock_scheduler_recon_stable_can_stop_at_reason_limit(http_client: TestClient) -> None:
+def test_project_reason_leases_are_independent_by_task_mode(http_client: TestClient) -> None:
+    project_id = _create_project(http_client)
+
+    collection = http_client.post(
+        f"/projects/{project_id}/reason/claim",
+        json={"worker": "collection-worker", "trigger": "initial", "task_mode": "collection"},
+    )
+    validation = http_client.post(
+        f"/projects/{project_id}/reason/claim",
+        json={"worker": "validation-worker", "trigger": "stable", "task_mode": "validation"},
+    )
+    blocked = http_client.post(
+        f"/projects/{project_id}/reason/claim",
+        json={"worker": "other-worker", "trigger": "again", "task_mode": "collection"},
+    )
+    release_collection = http_client.post(
+        f"/projects/{project_id}/reason/release",
+        json={"worker": "collection-worker", "task_mode": "collection"},
+    )
+    project = ProjectDetail.model_validate(http_client.get(f"/projects/{project_id}").json())
+
+    assert collection.status_code == 200, collection.text
+    assert validation.status_code == 200, validation.text
+    assert blocked.status_code == 409, blocked.text
+    assert release_collection.status_code == 200, release_collection.text
+    assert project.project.reasons["collection"] is None
+    assert project.project.reasons["validation"] is not None
+    assert project.project.reasons["validation"].worker == "validation-worker"
+
+
+def test_mock_scheduler_collection_stable_does_not_stop_project(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
     containers = LocalContainerManager()
     loop = _loop(
@@ -391,7 +450,7 @@ def test_mock_scheduler_recon_stable_can_stop_at_reason_limit(http_client: TestC
         client,
         containers,
     )
-    project_id = _create_project(http_client, recon_max_reason_rounds=2)
+    project_id = _create_project(http_client, collection_max_reason_rounds=2)
 
     try:
         _dispatch_and_wait(loop)
@@ -402,19 +461,40 @@ def test_mock_scheduler_recon_stable_can_stop_at_reason_limit(http_client: TestC
     finally:
         loop.close()
 
-    assert project.project.status == "stopped"
-    assert project.project.recon_reason_rounds == 2
-    assert project.project.recon_stable_rounds == 1
+    assert project.project.status == "active"
+    assert project.project.collection_reason_rounds == 2
 
 
-def test_mock_scheduler_processes_recon_judge_job(http_client: TestClient) -> None:
+def test_mock_scheduler_validation_reason_creates_validation_intents(http_client: TestClient) -> None:
     project_id = _create_project(http_client)
-    response = http_client.post(f"/projects/{project_id}/recon/judgements")
-    assert response.status_code == 201
+    seed = http_client.post(
+        f"/projects/{project_id}/intents",
+        json={
+            "from": ["origin"],
+            "description": "validate candidate issue",
+            "creator": "seed",
+            "worker": "seed",
+            "task_mode": "validation",
+            "auth_scope": "anonymous",
+        },
+    )
+    assert seed.status_code == 201, seed.text
+    conclusion = http_client.post(
+        f"/projects/{project_id}/intents/{seed.json()['id']}/conclude",
+        json={
+            "worker": "seed",
+            "description": "candidate finding fact",
+            "findings": [{"title": "candidate finding"}],
+        },
+    )
+    assert conclusion.status_code == 200, conclusion.text
     client = InProcessClient(http_client)
     containers = LocalContainerManager()
     loop = _loop(
-        _config(reason=_phase("stable", zero_outcomes=["intent"]), judge=_phase("ready"), task_types=["judge"]),
+        _config(
+            reason=_phase("intent"),
+            task_types=["validation_reason"],
+        ),
         client,
         containers,
     )
@@ -425,6 +505,85 @@ def test_mock_scheduler_processes_recon_judge_job(http_client: TestClient) -> No
     finally:
         loop.close()
 
-    assert project.project.judge_status == "ready"
-    assert len(project.facts) == 1
-    assert any("/judge_execute-" in path for _, path, _ in containers.writes)
+    created_validation = [intent for intent in project.intents if intent.creator == "mock-worker"]
+    assert created_validation
+    assert {intent.task_mode for intent in created_validation} == {"validation"}
+    assert any("/reason_execute-" in path for _, path, _ in containers.writes)
+
+
+def test_mock_scheduler_exercises_collection_validation_report_flow(http_client: TestClient) -> None:
+    client = InProcessClient(http_client)
+    containers = LocalContainerManager()
+    loop = _loop(
+        _config(
+            reason=_phase("intent"),
+            collection_reason=_phase(
+                "intent",
+                rules=[{"fact_ids_gte": 3, "open_intents_empty": True, "force": "stable"}],
+            ),
+            validation_reason=_phase("intent"),
+        ),
+        client,
+        containers,
+    )
+    project_id = _create_project(http_client)
+
+    try:
+        _dispatch_and_wait(loop)
+        project = client.get_project(project_id)
+        baseline_intents = [intent for intent in project.intents if intent.creator == "mock-worker"]
+        assert {intent.task_mode for intent in baseline_intents} == {"collection"}
+        assert {intent.auth_scope for intent in baseline_intents} == {"anonymous", "authenticated"}
+        assert {intent.from_[0] for intent in baseline_intents} == {"origin"}
+
+        _dispatch_and_wait(loop)
+        _dispatch_and_wait(loop)
+        project = client.get_project(project_id)
+        collection_facts = [fact for fact in project.facts if fact.id != "origin"]
+        assert len(collection_facts) == 2
+        assert {fact.fact_type for fact in collection_facts} == {"feature_surface"}
+        assert all(fact.details.get("features") for fact in collection_facts)
+        assert all(fact.details.get("apis") for fact in collection_facts)
+        assert all(fact.details.get("auth") for fact in collection_facts)
+        assert project.findings == []
+
+        collection_fact_id = collection_facts[0].id
+        seed = http_client.post(
+            f"/projects/{project_id}/intents",
+            json={
+                "from": [collection_fact_id],
+                "description": "validate mock collection surface",
+                "creator": "seed",
+                "worker": None,
+                "task_mode": "validation",
+                "auth_scope": "anonymous",
+            },
+        )
+        assert seed.status_code == 201, seed.text
+
+        _dispatch_and_wait(loop)
+        project = client.get_project(project_id)
+        assert len(project.findings) == 1
+        finding = project.findings[0]
+        assert finding.next_action == "report"
+        assert finding.report_status == "queued"
+        assert finding.report_intent_id is not None
+
+        _dispatch_and_wait(loop)
+        project = client.get_project(project_id)
+        finding = project.findings[0]
+        assert finding.report_status == "drafted"
+
+        _dispatch_and_wait(loop)
+        project = client.get_project(project_id)
+    finally:
+        loop.close()
+
+    validation_intents = [
+        intent
+        for intent in project.intents
+        if intent.creator == "mock-worker" and intent.task_mode == "validation" and intent.to is None
+    ]
+    assert validation_intents
+    assert any(collection_fact_id in intent.from_ for intent in validation_intents)
+    assert any("/report_execute-" in path for _, path, _ in containers.writes)

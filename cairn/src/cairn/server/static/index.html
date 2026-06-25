@@ -372,7 +372,7 @@
               <button type="button" @click.stop="viewProjectYaml(p.id, p.title)"
                 class="px-2 py-1 rounded-lg border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center gap-1">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M14.25 3H7.5A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h9a2.25 2.25 0 0 0 2.25-2.25V8.25L14.25 3Z"/><path d="M14.25 3v5.25h4.5"/><path d="M8.25 12h7.5M8.25 15h5.25"/></svg>
-                Snapshot
+                Export
               </button>
               <template x-if="p.status !== 'completed'">
                 <button type="button" @click.stop="toggleProjectStopById(p.id, p.status)"
@@ -465,7 +465,7 @@
       </template>
       <button @click="viewProjectYaml(selectedProjectId, project.project.title)" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center gap-1.5">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M14.25 3H7.5A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h9a2.25 2.25 0 0 0 2.25-2.25V8.25L14.25 3Z"/><path d="M14.25 3v5.25h4.5"/><path d="M8.25 12h7.5M8.25 15h5.25"/></svg>
-        Snapshot
+        Export
       </button>
       <template x-if="!replay.active && project.project.status !== 'completed'">
         <button @click="toggleProjectStop()"
@@ -552,23 +552,6 @@
             Intent
           </button>
         </div>
-        <div class="flex gap-1.5" x-show="project?.project?.project_kind === 'recon' && !replay.active">
-          <button @click="evaluateRecon()"
-            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-sky-200 text-sky-600 rounded-lg shadow-sm text-xs font-medium hover:bg-sky-50 transition flex items-center gap-1">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
-            Evaluate
-          </button>
-          <button @click="createReconSnapshot()"
-            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-indigo-200 text-indigo-600 rounded-lg shadow-sm text-xs font-medium hover:bg-indigo-50 transition flex items-center gap-1">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.25 3H7.5A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h9a2.25 2.25 0 0 0 2.25-2.25V8.25L14.25 3Z"/><path d="M14.25 3v5.25h4.5"/></svg>
-            Snapshot
-          </button>
-          <button @click="prepareForkVulnFromSelectedProject()"
-            class="px-3 py-1.5 bg-white/90 backdrop-blur border border-rose-200 text-rose-600 rounded-lg shadow-sm text-xs font-medium hover:bg-rose-50 transition flex items-center gap-1">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 3v6a3 3 0 0 0 3 3h6"/><path d="M6 21v-6a3 3 0 0 1 3-3"/><path d="m15 8 4 4-4 4"/></svg>
-            Fork Vuln
-          </button>
-        </div>
         <div class="flex gap-1.5" x-show="projectCanWriteHints()">
           <button @click="openHintModal()"
             class="px-3 py-1.5 bg-white/90 backdrop-blur border border-amber-200 text-amber-600 rounded-lg shadow-sm text-xs font-medium hover:bg-amber-50 transition flex items-center gap-1">
@@ -623,158 +606,32 @@
       <div x-show="sideTab === 'detail'" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/40">
         <template x-if="!selectedNode">
           <div class="space-y-4">
-            <template x-if="project.project.project_kind === 'recon'">
-              <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+            <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+                <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">Task Modes</p>
+                <p class="mt-1 text-sm text-slate-500">Collection feeds validation; validated findings can queue reports.</p>
+              </div>
+              <div class="p-4 grid grid-cols-1 gap-2 text-xs">
+                <div class="rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
                   <div class="flex items-center justify-between gap-3">
-                    <div>
-                      <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">Evaluate Recon</p>
-                      <p class="mt-1 text-sm font-medium text-slate-700" x-text="latestReconJudgement() ? `Latest ${latestReconJudgement().id}` : 'No judgement result yet'"></p>
-                    </div>
-                    <span class="shrink-0 rounded-md border px-2 py-1 text-[11px] font-semibold uppercase"
-                      :class="latestReconJudgement() ? judgementStatusClass(latestReconJudgement()) : 'bg-slate-50 text-slate-500 border-slate-200'"
-                      x-text="latestReconJudgement() ? judgementVerdictLabel(latestReconJudgement()) : project.project.judge_status"></span>
+                    <p class="text-[10px] font-semibold uppercase tracking-widest text-sky-500">Collection Coverage</p>
+                    <span class="rounded bg-white/80 px-1.5 py-0.5 font-mono text-[10px] text-sky-700" x-text="collectionRoundSummary()"></span>
                   </div>
+                  <p class="mt-1 text-slate-600" x-text="collectionCoverageSummary()"></p>
                 </div>
-                <div class="p-4 space-y-4">
-                  <template x-if="!latestReconJudgement()">
-                    <p class="text-sm text-slate-500 leading-relaxed">Run Evaluate Recon to get a readiness score, recommended next action, and remaining gaps.</p>
-                  </template>
-                  <template x-if="latestReconJudgement()">
-                    <div class="space-y-4">
-                      <div class="grid grid-cols-2 gap-2 text-xs">
-                        <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                          <p class="text-[10px] uppercase tracking-widest text-slate-400">Score</p>
-                          <p class="mt-1 text-lg font-semibold text-slate-700" x-text="judgementScoreLabel(latestReconJudgement())"></p>
-                        </div>
-                        <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                          <p class="text-[10px] uppercase tracking-widest text-slate-400">Action</p>
-                          <p class="mt-1 text-sm font-medium text-slate-700 break-words" x-text="judgementRecommendedAction(latestReconJudgement())"></p>
-                        </div>
-                      </div>
-                      <div class="grid grid-cols-2 gap-2 text-xs">
-                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="latestReconJudgement().worker || '—'"></span></div>
-                        <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Finished</span><span class="text-slate-600 text-right break-words" x-text="formatTime(latestReconJudgement().finished_at || latestReconJudgement().created_at)"></span></div>
-                      </div>
-                      <template x-if="latestReconJudgement().error">
-                        <div class="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
-                          <p class="text-xs text-rose-700 whitespace-pre-wrap break-words" x-text="latestReconJudgement().error"></p>
-                        </div>
-                      </template>
-                      <template x-if="judgementChecklist(latestReconJudgement()).length > 0">
-                        <div class="pt-3 border-t border-slate-100">
-                          <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-2">Checklist</p>
-                          <div class="space-y-1.5">
-                            <template x-for="item in judgementChecklist(latestReconJudgement())" :key="item.key">
-                              <div class="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2 text-xs">
-                                <div class="flex items-start justify-between gap-3">
-                                  <span class="text-slate-600 break-words" x-text="formatJudgementKey(item.key)"></span>
-                                  <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                                    :class="item.value ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'"
-                                    x-text="judgementChecklistScore(item.value)"></span>
-                                </div>
-                                <p x-show="judgementChecklistEvidence(item.value)" class="mt-1.5 text-[11px] leading-relaxed text-slate-500 break-words" x-text="judgementChecklistEvidence(item.value)"></p>
-                              </div>
-                            </template>
-                          </div>
-                        </div>
-                      </template>
-                      <template x-if="judgementGaps(latestReconJudgement(), 'blocking_gaps').length > 0">
-                        <div class="pt-3 border-t border-slate-100">
-                          <p class="text-[10px] font-semibold uppercase tracking-widest text-rose-400 mb-2">Blocking Gaps</p>
-                          <ul class="space-y-2">
-                            <template x-for="gap in judgementGaps(latestReconJudgement(), 'blocking_gaps')" :key="gap">
-                              <li class="text-xs text-slate-600 leading-relaxed break-words" x-text="gap"></li>
-                            </template>
-                          </ul>
-                        </div>
-                      </template>
-                      <template x-if="judgementGaps(latestReconJudgement(), 'non_blocking_gaps').length > 0">
-                        <div class="pt-3 border-t border-slate-100">
-                          <p class="text-[10px] font-semibold uppercase tracking-widest text-amber-500 mb-2">Non-blocking Gaps</p>
-                          <ul class="space-y-2">
-                            <template x-for="gap in judgementGaps(latestReconJudgement(), 'non_blocking_gaps')" :key="gap">
-                              <li class="text-xs text-slate-600 leading-relaxed break-words" x-text="gap"></li>
-                            </template>
-                          </ul>
-                        </div>
-                      </template>
-                    </div>
-                  </template>
+                <div class="rounded-xl border border-rose-100 bg-rose-50/60 px-3 py-2">
+                  <p class="text-[10px] font-semibold uppercase tracking-widest text-rose-500">Validation Work</p>
+                  <p class="mt-1 text-slate-600" x-text="validationWorkSummary()"></p>
                 </div>
-              </section>
-            </template>
-            <template x-if="reconJudgements.length > 1">
-              <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
-                  <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">Evaluate History</p>
+                <div class="rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2">
+                  <p class="text-[10px] font-semibold uppercase tracking-widest text-violet-500">Report Queue</p>
+                  <p class="mt-1 text-slate-600" x-text="reportQueueSummary()"></p>
                 </div>
-                <div class="divide-y divide-slate-100">
-                  <template x-for="job in reconJudgements.slice(1, 6)" :key="job.id">
-                    <div class="px-4 py-3 text-xs">
-                      <div class="flex items-center justify-between gap-3">
-                        <span class="font-mono text-slate-500" x-text="job.id"></span>
-                        <span class="rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase"
-                          :class="judgementStatusClass(job)" x-text="judgementVerdictLabel(job)"></span>
-                      </div>
-                      <div class="mt-1 flex items-center justify-between gap-3 text-slate-400">
-                        <span x-text="`score ${judgementScoreLabel(job)}`"></span>
-                        <span x-text="formatTime(job.finished_at || job.created_at)"></span>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-              </section>
-            </template>
-            <template x-if="forkSeedJobs.length > 0">
-              <section class="rounded-2xl border border-rose-100 bg-white shadow-sm overflow-hidden">
-                <div class="px-4 py-3 border-b border-rose-50 bg-rose-50/70">
-                  <div class="flex items-center justify-between gap-3">
-                    <div>
-                      <p class="text-xs font-semibold uppercase tracking-widest text-rose-400">AI Seeded Fork</p>
-                      <p class="mt-1 text-sm font-medium text-slate-700" x-text="latestForkSeedJob() ? `Latest ${latestForkSeedJob().id}` : 'No fork job yet'"></p>
-                    </div>
-                    <span class="rounded-md border px-2 py-1 text-[11px] font-semibold uppercase"
-                      :class="forkSeedStatusClass(latestForkSeedJob())"
-                      x-text="latestForkSeedJob()?.status || 'unknown'"></span>
-                  </div>
-                </div>
-                <div class="p-4 space-y-3 text-xs">
-                  <template x-if="latestForkSeedJob()?.worker">
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="latestForkSeedJob().worker"></span></div>
-                  </template>
-                  <template x-if="latestForkSeedJob()?.result?.child_project_id">
-                    <button type="button" @click="openProject(latestForkSeedJob().result.child_project_id)" class="w-full rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-left text-rose-700 hover:bg-rose-100 transition">
-                      <span class="block text-[10px] uppercase tracking-widest opacity-70">Child Vuln Project</span>
-                      <span class="mt-1 block font-mono" x-text="latestForkSeedJob().result.child_project_id"></span>
-                    </button>
-                  </template>
-                  <template x-if="latestForkSeedJob()?.error">
-                    <div class="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-rose-700 whitespace-pre-wrap break-words" x-text="latestForkSeedJob().error"></div>
-                  </template>
-                  <div class="flex items-center justify-between gap-3 text-slate-400">
-                    <span x-text="formatTime(latestForkSeedJob().finished_at || latestForkSeedJob().started_at || latestForkSeedJob().created_at)"></span>
-                    <span x-show="latestForkSeedJob()?.result?.seed_fact_ids" x-text="`${latestForkSeedJob().result.seed_fact_ids.length} seed facts`"></span>
-                  </div>
-                  <template x-if="forkSeedFacts(latestForkSeedJob()).length > 0">
-                    <div class="pt-3 border-t border-rose-50 space-y-2">
-                      <template x-for="fact in forkSeedFacts(latestForkSeedJob()).slice(0, 4)" :key="fact.id">
-                        <button type="button" @click="openProject(latestForkSeedJob().result.child_project_id)" class="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left hover:bg-white transition">
-                          <div class="flex items-start justify-between gap-3">
-                            <span class="font-medium text-slate-700 break-words" x-text="factTitle(fact) || fact.id"></span>
-                            <span class="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 font-mono text-[10px] text-brand-700" x-text="fact.id"></span>
-                          </div>
-                          <p class="mt-1 text-[11px] leading-relaxed text-slate-500 break-words" x-text="factSummary(fact) || fact.description"></p>
-                        </button>
-                      </template>
-                    </div>
-                  </template>
-                </div>
-              </section>
-            </template>
+              </div>
+            </section>
             <div class="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-5 py-8 text-center shadow-sm">
               <p class="text-sm text-slate-400">Click a node or edge</p>
-              <p class="text-xs text-slate-300 mt-1">Fork Vuln uses AI seeded facts from snapshots</p>
+              <p class="text-xs text-slate-300 mt-1">Intent details include collection, validation, and report task modes</p>
             </div>
           </div>
         </template>
@@ -884,6 +741,9 @@
               <div class="flex items-center gap-2">
                 <span class="px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-[10px] font-mono font-bold" x-text="selectedIntentId()"></span>
                 <span class="text-[11px] font-medium" :class="intentStatusClass(selectedIntentRecord())" x-text="intentStatusLabel(selectedIntentRecord())"></span>
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.12em]"
+                  :class="intentTaskModeBadgeClass(selectedIntentRecord().task_mode)"
+                  x-text="intentTaskModeLabel(selectedIntentRecord().task_mode)"></span>
                 <template x-if="selectedIntentRecord().auth_scope">
                   <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.12em]"
                     :class="intentAuthScopeBadgeClass(selectedIntentRecord().auth_scope)"
@@ -896,6 +756,7 @@
               <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().from.join(', ')"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().to || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Task Mode</span><span class="text-slate-600 text-right break-all" x-text="intentTaskModeLabel(selectedIntentRecord().task_mode)"></span></div>
                 <template x-if="selectedIntentRecord().auth_scope">
                   <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Auth Scope</span><span class="text-slate-600 text-right break-all" x-text="intentAuthScopeLabel(selectedIntentRecord().auth_scope)"></span></div>
                 </template>
@@ -1044,52 +905,13 @@
     <h3 class="text-base font-semibold text-slate-700 mb-4">New Project</h3>
     <div class="space-y-3">
       <input x-model="newProject.title" placeholder="Project title" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
-      <div class="grid grid-cols-2 gap-2">
-        <button type="button" @click="setNewProjectKind('recon')"
-          class="rounded-xl border px-3 py-2 text-left transition"
-          :class="newProject.project_kind === 'recon' ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'">
-          <span class="block text-sm font-medium">Recon</span>
-          <span class="block text-[11px] opacity-70">collect and judge targets</span>
-        </button>
-        <button type="button" @click="setNewProjectKind('vuln')"
-          class="rounded-xl border px-3 py-2 text-left transition"
-          :class="newProject.project_kind === 'vuln' ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'">
-          <span class="block text-sm font-medium">Vulnerability</span>
-          <span class="block text-[11px] opacity-70">forked from recon snapshot</span>
-        </button>
-      </div>
       <textarea x-model="newProject.origin" placeholder="Origin — starting point" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <div x-show="newProject.project_kind === 'recon'" class="space-y-1">
-        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Max reason rounds</label>
-        <input type="number" min="1" x-model.number="newProject.recon_max_reason_rounds" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-      </div>
-      <div x-show="newProject.project_kind === 'vuln'" class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Parent recon project</label>
-          <select x-model="newProject.parent_project_id" @change="loadNewProjectSnapshots()" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-            <option value="">Select recon project</option>
-            <template x-for="p in reconProjects()" :key="`parent-${p.id}`">
-              <option :value="p.id" x-text="projectLabel(p.id, p.title)"></option>
-            </template>
-          </select>
-        </div>
-        <div>
-          <label class="text-[11px] text-slate-400 mb-1 block font-medium">Parent snapshot</label>
-          <select x-model="newProject.parent_snapshot_id" :disabled="!newProject.parent_project_id || newProjectSnapshotsLoading" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition disabled:opacity-50">
-            <option value="" x-text="newProjectSnapshotsLoading ? 'Loading snapshots...' : 'Select snapshot'"></option>
-            <template x-for="snapshot in newProjectSnapshots" :key="snapshot.id">
-              <option :value="snapshot.id" x-text="`${snapshot.id} · ${formatDate(snapshot.created_at)}`"></option>
-            </template>
-          </select>
-        </div>
-        <p x-show="newProject.parent_project_id && !newProjectSnapshotsLoading && newProjectSnapshots.length === 0" class="text-[11px] text-rose-500">Create a recon snapshot before forking a vulnerability project.</p>
+      <div class="space-y-1">
+        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Collection max reason rounds</label>
+        <input type="number" min="1" x-model.number="newProject.collection_max_reason_rounds" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
       </div>
       <div class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-        <div x-show="newProject.project_kind === 'recon'" class="space-y-1">
-          <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Recon auth model</span>
-          <div class="mt-2 inline-flex rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-indigo-700">Dual</div>
-        </div>
-        <div x-show="newProject.project_kind === 'vuln'">
+        <div>
           <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Auth mode</span>
           <div class="grid grid-cols-2 gap-2 mt-2">
             <button type="button" @click="setNewProjectAuthMode('anonymous')"
@@ -1127,7 +949,7 @@
               </template>
             </div>
           </template>
-          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500" x-text="newProject.project_kind === 'recon' ? 'Recon projects require at least one cookie session.' : 'Authenticated projects require at least one cookie session.'"></p>
+          <p x-show="!newProjectAccountsValid()" class="text-[11px] text-red-500">Authenticated projects require at least one cookie session.</p>
         </div>
       </div>
 
@@ -1167,7 +989,24 @@
     </div>
     <div class="space-y-3">
       <textarea x-model="intentForm.description" placeholder="What will you explore?" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <div x-show="project?.project?.project_kind === 'recon'" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+      <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Task Mode</span>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          <button type="button" @click="intentForm.task_mode = 'collection'"
+            class="rounded-lg border px-3 py-2 text-left transition"
+            :class="intentForm.task_mode === 'collection' ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'">
+            <span class="block text-sm font-medium">Collection</span>
+            <span class="block text-[11px] opacity-70">map reachable surface</span>
+          </button>
+          <button type="button" @click="intentForm.task_mode = 'validation'"
+            class="rounded-lg border px-3 py-2 text-left transition"
+            :class="intentForm.task_mode === 'validation' ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'">
+            <span class="block text-sm font-medium">Validation</span>
+            <span class="block text-[11px] opacity-70">verify vulnerability</span>
+          </button>
+        </div>
+      </div>
+      <div x-show="intentForm.task_mode === 'collection'" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
         <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Auth scope</span>
         <div class="grid grid-cols-2 gap-2 mt-2">
           <button type="button" @click="intentForm.auth_scope = 'anonymous'"
@@ -1199,11 +1038,11 @@
 <!-- Conclude -->
 <div x-show="showConcludeModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showConcludeModal = false">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200/60" @click.stop>
-    <h3 class="text-base font-semibold text-slate-700 mb-1">Conclude Intent</h3>
+    <h3 class="text-base font-semibold text-slate-700 mb-1" x-text="concludeFormIsReport() ? 'Submit Report' : 'Conclude Intent'"></h3>
     <p class="text-xs text-slate-400 mb-4 font-mono" x-text="concludeForm.intentId"></p>
     <div class="space-y-3">
-      <textarea x-model="concludeForm.description" placeholder="What did you find? (new fact)" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <textarea x-model="concludeForm.findingsJson" placeholder='Optional findings JSON array with lifecycle fields' rows="4" class="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      <textarea x-model="concludeForm.description" :placeholder="concludeFormIsReport() ? 'Report markdown' : 'What did you find? (new fact)'" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
+      <textarea x-model="concludeForm.findingsJson" :placeholder="concludeFormIsReport() ? 'Optional report JSON object' : 'Optional findings JSON array with lifecycle fields'" rows="4" class="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-xs focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
       <div class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
         Actor: <span class="font-medium text-slate-700" x-text="actorName()"></span>
       </div>
@@ -1211,7 +1050,7 @@
     <div class="flex justify-end gap-2 mt-5">
       <button @click="showConcludeModal = false" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-50 rounded-xl transition">Cancel</button>
       <button @click="concludeIntent()" :disabled="!concludeForm.description"
-        class="px-5 py-2 text-sm bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition disabled:opacity-30 shadow-sm shadow-teal-200">Conclude</button>
+        class="px-5 py-2 text-sm bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition disabled:opacity-30 shadow-sm shadow-teal-200" x-text="concludeFormIsReport() ? 'Submit Report' : 'Conclude'"></button>
     </div>
   </div>
 </div>
@@ -1370,8 +1209,6 @@ function cairnApp() {
     view: 'list',
     projects: [],
     project: null,
-    reconJudgements: [],
-    forkSeedJobs: [],
     selectedProjectId: '',
     polling: true,
     pollTimer: null,
@@ -1400,18 +1237,13 @@ function cairnApp() {
     newProject: {
       title: '',
       origin: '',
-      project_kind: 'recon',
       auth_mode: 'anonymous',
-      parent_project_id: '',
-      parent_snapshot_id: '',
-      recon_max_reason_rounds: 8,
+      collection_max_reason_rounds: 8,
       accounts: [{ label: '', cookies: [{ name: '', value: '' }] }],
       hints: [{ content: '' }],
     },
-    newProjectSnapshots: [],
-    newProjectSnapshotsLoading: false,
-    intentForm: { description: '', auth_scope: 'anonymous' },
-    concludeForm: { description: '', intentId: '', findingsJson: '' },
+    intentForm: { description: '', task_mode: 'validation', auth_scope: 'anonymous' },
+    concludeForm: { description: '', intentId: '', findingsJson: '', intentKind: '', taskMode: '' },
     hintForm: { content: '' },
     renameForm: { projectId: '', originalTitle: '', title: '' },
     localPrefs: { actor_name: 'Human', layout_mode: 'dagre_tb' },
@@ -1578,13 +1410,11 @@ function cairnApp() {
     },
 
     projectKindLabel(kind) {
-      return kind === 'recon' ? 'Recon' : 'Vuln';
+      return 'Vuln';
     },
 
     projectKindBadgeClass(kind) {
-      return kind === 'recon'
-        ? 'border-sky-200 bg-sky-50 text-sky-700'
-        : 'border-rose-200 bg-rose-50 text-rose-700';
+      return 'border-rose-200 bg-rose-50 text-rose-700';
     },
 
     projectAuthModeLabel(mode) {
@@ -1618,32 +1448,11 @@ function cairnApp() {
       this.newProject = {
         title: '',
         origin: '',
-        project_kind: 'recon',
         auth_mode: 'anonymous',
-        parent_project_id: '',
-        parent_snapshot_id: '',
-        recon_max_reason_rounds: 8,
+        collection_max_reason_rounds: 8,
         accounts: [this.blankNewProjectAccount()],
         hints: [{ content: '' }],
       };
-      this.newProjectSnapshots = [];
-      this.newProjectSnapshotsLoading = false;
-    },
-
-    setNewProjectKind(kind) {
-      this.newProject.project_kind = kind === 'vuln' ? 'vuln' : 'recon';
-      if (kind === 'vuln') {
-        this.newProject.parent_project_id ||= this.reconProjects()[0]?.id || '';
-        if (this.newProject.parent_project_id) this.loadNewProjectSnapshots();
-      }
-      if (kind === 'recon') {
-        this.newProject.parent_project_id = '';
-        this.newProject.parent_snapshot_id = '';
-        this.newProjectSnapshots = [];
-        if (this.newProject.accounts.length === 0) {
-          this.newProject.accounts.push(this.blankNewProjectAccount());
-        }
-      }
     },
 
     setNewProjectAuthMode(mode) {
@@ -1706,50 +1515,14 @@ function cairnApp() {
     },
 
     newProjectNeedsAccounts() {
-      return this.newProject.project_kind === 'recon' || this.newProject.auth_mode === 'authenticated';
+      return this.newProject.auth_mode === 'authenticated';
     },
 
     newProjectCanCreate() {
       if (!this.newProject.title?.trim()) return false;
-      if (this.newProject.project_kind === 'recon' && !this.newProject.origin?.trim()) return false;
+      if (!this.newProject.origin?.trim()) return false;
       if (!this.newProjectAccountsValid()) return false;
-      if (this.newProject.project_kind === 'vuln') {
-        return Boolean(this.newProject.parent_project_id && this.newProject.parent_snapshot_id);
-      }
       return true;
-    },
-
-    reconProjects() {
-      return this.projects.filter(project => project.project_kind === 'recon');
-    },
-
-    async loadNewProjectSnapshots() {
-      this.newProject.parent_snapshot_id = '';
-      this.newProjectSnapshots = [];
-      if (!this.newProject.parent_project_id) return;
-      this.newProjectSnapshotsLoading = true;
-      try {
-        this.newProjectSnapshots = await this.api('GET', `/projects/${this.newProject.parent_project_id}/snapshots`);
-        if (this.newProjectSnapshots.length > 0) {
-          this.newProject.parent_snapshot_id = this.newProjectSnapshots[0].id;
-        }
-      } catch (e) {
-        this.showToast(e.message, 'error');
-      } finally {
-        this.newProjectSnapshotsLoading = false;
-      }
-    },
-
-    async prepareForkVulnFromSelectedProject() {
-      if (!this.project || this.project.project.project_kind !== 'recon') return;
-      this.resetNewProjectForm();
-      this.newProject.project_kind = 'vuln';
-      this.newProject.parent_project_id = this.project.project.id;
-      this.newProject.title = `${this.project.project.title} vulnerability validation`;
-      const origin = this.getFactRecord('origin');
-      this.newProject.origin = origin?.description || this.project.project.title;
-      await this.loadNewProjectSnapshots();
-      this.showNewProject = true;
     },
 
     reasonBadgeText(reason, compact = false) {
@@ -1768,7 +1541,34 @@ function cairnApp() {
     },
 
     openIntentNodeLabel(intent) {
-      return intent.intent_kind === 'report' ? 'R' : '?';
+      if (intent.intent_kind === 'report') return 'R';
+      return intent.task_mode === 'collection' ? 'C' : 'V';
+    },
+
+    isReportIntent(intent) {
+      return intent?.intent_kind === 'report' || intent?.task_mode === 'report';
+    },
+
+    concludeFormIsReport() {
+      return this.concludeForm.intentKind === 'report' || this.concludeForm.taskMode === 'report';
+    },
+
+    intentTaskModeLabel(mode) {
+      if (mode === 'collection') return 'Collection';
+      if (mode === 'report') return 'Report';
+      return 'Validation';
+    },
+
+    intentTaskModeShortLabel(mode) {
+      if (mode === 'collection') return 'collect';
+      if (mode === 'report') return 'report';
+      return 'validate';
+    },
+
+    intentTaskModeBadgeClass(mode) {
+      if (mode === 'collection') return 'bg-sky-50 text-sky-700';
+      if (mode === 'report') return 'bg-violet-50 text-violet-700';
+      return 'bg-rose-50 text-rose-700';
     },
 
     intentAuthScopeLabel(scope) {
@@ -1791,7 +1591,9 @@ function cairnApp() {
 
     intentGraphLabel(intent) {
       const scope = this.intentAuthScopeShortLabel(intent.auth_scope);
-      return scope ? `[${scope}] ${intent.description}` : intent.description;
+      const mode = this.intentTaskModeShortLabel(intent.task_mode);
+      const prefix = [mode, scope].filter(Boolean).join('/');
+      return prefix ? `[${prefix}] ${intent.description}` : intent.description;
     },
 
     openIntentNodeSize(intent) {
@@ -1804,6 +1606,34 @@ function cairnApp() {
 
     countProjectsByStatus(status) {
       return this.projects.filter(project => project.status === status).length;
+    },
+
+    intentsByTaskMode(mode) {
+      return (this.project?.intents || []).filter(intent => intent.task_mode === mode);
+    },
+
+    collectionRoundSummary() {
+      const project = this.project?.project || {};
+      const max = project.collection_max_reason_rounds ?? '∞';
+      return `${project.collection_reason_rounds || 0}/${max}`;
+    },
+
+    collectionCoverageSummary() {
+      const project = this.project?.project || {};
+      const count = this.intentsByTaskMode('collection').length;
+      return `${count} collection intents · ${project.collection_explore_rounds || 0} explore rounds · ${project.collection_stable_rounds || 0} stable rounds`;
+    },
+
+    validationWorkSummary() {
+      const count = this.intentsByTaskMode('validation').length;
+      const findings = (this.project?.findings || []).length;
+      return `${count} validation intents · ${findings} findings`;
+    },
+
+    reportQueueSummary() {
+      const reports = this.intentsByTaskMode('report').length;
+      const queued = (this.project?.findings || []).filter(finding => finding.report_status === 'queued').length;
+      return `${reports} report intents · ${queued} queued findings`;
     },
 
     hasActiveProjects() {
@@ -2083,43 +1913,10 @@ function cairnApp() {
         const project = await this.api('GET', `/projects/${id}`);
         if (!shouldApply()) return false;
         this.project = project;
-        await this.loadReconJudgements(id, { shouldApply });
-        if (!shouldApply()) return false;
-        await this.loadForkSeedJobs(id, { shouldApply });
         return shouldApply();
       } catch(e) {
         this.showToast(e.message, 'error');
         return false;
-      }
-    },
-
-    async loadReconJudgements(id, options = {}) {
-      const shouldApply = options.shouldApply || (() => true);
-      if (!id || this.project?.project?.project_kind !== 'recon') {
-        if (shouldApply()) this.reconJudgements = [];
-        return;
-      }
-      try {
-        const reconJudgements = await this.api('GET', `/projects/${id}/recon/judgements`);
-        if (shouldApply()) this.reconJudgements = reconJudgements;
-      } catch(e) {
-        console.error(e);
-        if (shouldApply()) this.reconJudgements = [];
-      }
-    },
-
-    async loadForkSeedJobs(id, options = {}) {
-      const shouldApply = options.shouldApply || (() => true);
-      if (!id || this.project?.project?.project_kind !== 'recon') {
-        if (shouldApply()) this.forkSeedJobs = [];
-        return;
-      }
-      try {
-        const forkSeedJobs = await this.api('GET', `/projects/${id}/fork-vuln/seed-jobs`);
-        if (shouldApply()) this.forkSeedJobs = forkSeedJobs;
-      } catch(e) {
-        console.error(e);
-        if (shouldApply()) this.forkSeedJobs = [];
       }
     },
 
@@ -2310,6 +2107,7 @@ function cairnApp() {
           title: sourceIntent?.description || event.title,
           meta: [
             sourceIntent?.id || event.intentId,
+            this.intentTaskModeLabel(sourceIntent?.task_mode),
             sourceIntent?.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null,
             `from ${(sourceIntent?.from || event.sourceFactIds || []).join(', ')}`,
           ].filter(Boolean),
@@ -2328,7 +2126,7 @@ function cairnApp() {
           timestamp: sourceIntent.last_heartbeat_at || sourceIntent.created_at,
           actor: sourceIntent.worker,
           title: sourceIntent.description,
-          meta: [sourceIntent.id, sourceIntent.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null, `worker ${sourceIntent.worker}`].filter(Boolean),
+          meta: [sourceIntent.id, this.intentTaskModeLabel(sourceIntent.task_mode), sourceIntent.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null, `worker ${sourceIntent.worker}`].filter(Boolean),
           targetType: 'intent',
           targetId: sourceIntent.id,
           order: `${event.order}.run`,
@@ -2399,6 +2197,7 @@ function cairnApp() {
             last_heartbeat_at: null,
             created_at: sourceIntent.created_at,
             concluded_at: null,
+            task_mode: sourceIntent.task_mode,
             auth_scope: sourceIntent.auth_scope || null,
           });
         }
@@ -2698,11 +2497,12 @@ function cairnApp() {
       }
       for (const intent of this.project.intents) {
         const lbl = this.intentGraphLabel(intent);
-        if (intent.to) {
+        const targetFact = intent.to ? this.getFactRecord(intent.to) : null;
+        if (targetFact) {
           for (const src of intent.from) {
             edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: intent.to, intentId: intent.id, label: lbl, authScope: intent.auth_scope || '', status: 'concluded' }});
           }
-        } else {
+        } else if (!intent.to) {
           const phId = `_ph_${intent.id}`;
           const nodeSize = this.openIntentNodeSize(intent);
           const nodeType = this.openIntentNodeType(intent);
@@ -2749,8 +2549,8 @@ function cairnApp() {
       return [
         { selector: 'node[nodeType="origin"]', style: { ...common, shape:'round-rectangle','background-color':'#14b8a6',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="fact"]', style: { ...common, shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
-        { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'ellipse','background-color':'#f59e0b','background-opacity':0.8,label:'?',color:'#fff','font-size':'11px','font-weight':'bold',width:22,height:22,'border-width':2,'border-color':'#d97706' }},
-        { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'ellipse','background-color':'#cbd5e1','background-opacity':0.5,label:'?',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:20,height:20,'border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
+        { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'ellipse','background-color':'#f59e0b','background-opacity':0.8,label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#d97706' }},
+        { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'ellipse','background-color':'#cbd5e1','background-opacity':0.5,label:'data(label)',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
         { selector: 'edge[status="concluded"]', style: { width:2,'line-color':'#6ee7b7','target-arrow-color':'#6ee7b7','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
         { selector: 'edge[status="in_progress"]', style: { width:2,'line-color':'#fbbf24','line-style':'dashed','line-dash-pattern':[8,4],'line-dash-offset':0,'target-arrow-color':'#fbbf24','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#b45309','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#fffbeb','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
         { selector: 'edge[status="unclaimed"]', style: { width:1.5,'line-color':'#cbd5e1','line-style':'dashed','line-dash-pattern':[5,5],'target-arrow-color':'#cbd5e1','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.7 }},
@@ -2824,7 +2624,7 @@ function cairnApp() {
       };
     },
 
-    snapshotNodePositions() {
+    currentNodePositions() {
       const positions = new Map();
       if (!this.cy) return positions;
       this.cy.nodes().forEach(node => {
@@ -2892,7 +2692,7 @@ function cairnApp() {
       const { nodes, edges } = this.buildElements();
       const wantNodes = new Set(nodes.map(n => n.data.id));
       const wantEdges = new Set(edges.map(e => e.data.id));
-      const previousPositions = this.snapshotNodePositions();
+      const previousPositions = this.currentNodePositions();
       let changed = false;
 
       this.cy.nodes().forEach(n => { if (!wantNodes.has(n.id())) { n.remove(); changed = true; } });
@@ -3272,8 +3072,9 @@ function cairnApp() {
     },
 
     collectIntentElements(intent, nodeIds, edgeIds) {
-      if (intent.to) nodeIds.add(intent.to);
-      else nodeIds.add(`_ph_${intent.id}`);
+      const targetFact = intent.to ? this.getFactRecord(intent.to) : null;
+      if (targetFact) nodeIds.add(intent.to);
+      else if (!intent.to) nodeIds.add(`_ph_${intent.id}`);
       for (const sourceId of intent.from) {
         nodeIds.add(sourceId);
         edgeIds.add(`${intent.id}_${sourceId}`);
@@ -3396,6 +3197,10 @@ function cairnApp() {
       return this.project ? this.project.facts.find(f => f.id === fid) || null : null;
     },
 
+    getFindingRecord(findingId) {
+      return this.project ? (this.project.findings || []).find(finding => finding.id === findingId) || null : null;
+    },
+
     intentDotClass(i) {
       if (i.to) return 'bg-teal-400';
       return i.worker ? 'bg-amber-400' : 'bg-slate-300';
@@ -3408,76 +3213,6 @@ function cairnApp() {
       if (i.to) return 'Concluded';
       if (i.intent_kind === 'report') return i.worker ? 'Report Running' : 'Report Queued';
       return i.worker ? 'In Progress' : 'Unclaimed';
-    },
-
-    latestReconJudgement() {
-      return this.reconJudgements?.[0] || null;
-    },
-
-    latestForkSeedJob() {
-      return this.forkSeedJobs?.[0] || null;
-    },
-
-    forkSeedStatusClass(job) {
-      const status = job?.status;
-      if (status === 'succeeded') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-      if (status === 'failed' || status === 'expired') return 'bg-rose-50 text-rose-700 border-rose-200';
-      if (status === 'running') return 'bg-amber-50 text-amber-700 border-amber-200';
-      return 'bg-slate-50 text-slate-600 border-slate-200';
-    },
-
-    judgementResult(job) {
-      return job?.result || {};
-    },
-
-    judgementVerdictLabel(job) {
-      return this.judgementResult(job).verdict || job?.status || 'pending';
-    },
-
-    judgementScoreLabel(job) {
-      const score = this.judgementResult(job).score;
-      return score === undefined || score === null ? '—' : String(score);
-    },
-
-    judgementRecommendedAction(job) {
-      return this.judgementResult(job).recommended_action || '—';
-    },
-
-    judgementChecklist(job) {
-      const checklist = this.judgementResult(job).checklist || {};
-      return Object.entries(checklist).map(([key, value]) => ({ key, value }));
-    },
-
-    judgementChecklistScore(value) {
-      if (value && typeof value === 'object' && 'score' in value) return `${value.score}/20`;
-      return value ? 'yes' : 'no';
-    },
-
-    judgementChecklistEvidence(value) {
-      if (value && typeof value === 'object') return value.evidence || '';
-      return '';
-    },
-
-    judgementGaps(job, key) {
-      const value = this.judgementResult(job)[key];
-      return Array.isArray(value) ? value : [];
-    },
-
-    judgementStatusClass(job) {
-      const verdict = this.judgementResult(job).verdict || job?.status;
-      if (verdict === 'ready' || job?.status === 'succeeded') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-      if (verdict === 'not_ready') return 'bg-amber-50 text-amber-700 border-amber-200';
-      if (verdict === 'blocked' || job?.status === 'failed') return 'bg-rose-50 text-rose-700 border-rose-200';
-      return 'bg-slate-50 text-slate-600 border-slate-200';
-    },
-
-    formatJudgementKey(key) {
-      return String(key || '').replace(/_/g, ' ');
-    },
-
-    forkSeedFacts(job) {
-      const seedFacts = job?.result?.seed_facts;
-      return Array.isArray(seedFacts) ? seedFacts : [];
     },
 
     factDetails(fact) {
@@ -3558,7 +3293,7 @@ function cairnApp() {
           timestamp: intent.created_at,
           actor: intent.creator,
           title: intent.description,
-          meta: [intent.id, intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `from ${intent.from.join(', ')}`].filter(Boolean),
+          meta: [intent.id, this.intentTaskModeLabel(intent.task_mode), intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `from ${intent.from.join(', ')}`].filter(Boolean),
           targetType: 'intent',
           targetId: intent.id,
           order: order++,
@@ -3569,14 +3304,35 @@ function cairnApp() {
 
         if (!intent.concluded_at || !intent.to) continue;
 
+        const reportFinding = this.isReportIntent(intent) ? this.getFindingRecord(intent.to) : null;
+        if (this.isReportIntent(intent)) {
+          events.push({
+            id: `intent-concluded-${intent.id}`,
+            type: 'intent_concluded',
+            timestamp: intent.concluded_at,
+            actor: intent.worker || intent.creator,
+            title: reportFinding ? `Report drafted for ${reportFinding.title}` : intent.description,
+            meta: [intent.id, this.intentTaskModeLabel(intent.task_mode), reportFinding ? `finding ${reportFinding.id}` : null, `reported ${intent.to}`, `from ${intent.from.join(', ')}`].filter(Boolean),
+            targetType: 'intent',
+            targetId: intent.id,
+            order: order++,
+            intentId: intent.id,
+            producedFactId: null,
+            reportedFindingId: intent.to,
+            sourceFactIds: [...intent.from],
+          });
+          continue;
+        }
+
         const fact = this.getFactRecord(intent.to);
+        if (!fact) continue;
         events.push({
           id: `intent-concluded-${intent.id}`,
           type: 'intent_concluded',
           timestamp: intent.concluded_at,
           actor: intent.worker || intent.creator,
           title: fact ? fact.description : intent.description,
-          meta: [intent.id, intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `produced ${intent.to}`, `from ${intent.from.join(', ')}`].filter(Boolean),
+          meta: [intent.id, this.intentTaskModeLabel(intent.task_mode), intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `produced ${intent.to}`, `from ${intent.from.join(', ')}`].filter(Boolean),
           targetType: 'fact',
           targetId: intent.to,
           order: order++,
@@ -3684,6 +3440,7 @@ function cairnApp() {
     },
 
     timelineEventBadge(entry) {
+      if (entry.type === 'intent_concluded' && entry.reportedFindingId) return 'Report';
       const labels = {
         project_created: 'Project',
         hint_added: 'Hint',
@@ -3697,6 +3454,7 @@ function cairnApp() {
     },
 
     timelineEventBadgeClass(entry) {
+      if (entry.type === 'intent_concluded' && entry.reportedFindingId) return 'bg-violet-50 text-violet-700';
       const classes = {
         project_created: 'bg-slate-100 text-slate-600',
         hint_added: 'bg-amber-50 text-amber-700',
@@ -3718,6 +3476,7 @@ function cairnApp() {
     },
 
     timelineEventDotClass(entry) {
+      if (entry.type === 'intent_concluded' && entry.reportedFindingId) return 'bg-violet-400';
       const classes = {
         project_created: 'bg-slate-400',
         hint_added: 'bg-amber-400',
@@ -3894,34 +3653,13 @@ function cairnApp() {
       try {
         const actor = this.actorName();
         const hintContents = this.newProject.hints.filter(h => h.content?.trim());
-        if (this.newProject.project_kind === 'vuln') {
-          const body = {
-            title: this.newProject.title.trim(),
-            snapshot_id: this.newProject.parent_snapshot_id,
-            auth_mode: this.newProject.auth_mode,
-          };
-          if (body.auth_mode === 'authenticated') {
-            body.accounts = this.cleanedNewProjectAccounts();
-          }
-          const data = await this.api('POST', `/projects/${this.newProject.parent_project_id}/fork-vuln/seed-jobs`, body);
-          const parentId = this.newProject.parent_project_id;
-          this.showNewProject = false;
-          this.resetNewProjectForm();
-          await this.loadProjects();
-          if (this.selectedProjectId === parentId) {
-            await this.loadProject(parentId);
-            this.sideTab = 'detail';
-          }
-          this.showToast(`AI seeded fork queued: ${data.job_id}`);
-          return;
-        }
         const body = {
           title: this.newProject.title.trim(),
           origin: this.newProject.origin.trim(),
-          project_kind: this.newProject.project_kind,
+          auth_mode: this.newProject.auth_mode,
+          collection_max_reason_rounds: Number(this.newProject.collection_max_reason_rounds) || 8,
         };
-        if (this.newProject.project_kind === 'recon') {
-          body.recon_max_reason_rounds = Number(this.newProject.recon_max_reason_rounds) || 8;
+        if (this.newProject.auth_mode === 'authenticated') {
           body.accounts = this.cleanedNewProjectAccounts();
         }
         const hints = hintContents.map(h => ({ content: h.content.trim(), creator: actor }));
@@ -3935,38 +3673,15 @@ function cairnApp() {
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
-    async evaluateRecon() {
-      if (!this.selectedProjectId || this.project?.project?.project_kind !== 'recon') return;
-      try {
-        const data = await this.api('POST', `/projects/${this.selectedProjectId}/recon/judgements`);
-        await this.loadProject(this.selectedProjectId);
-        await this.loadProjects();
-        this.sideTab = 'detail';
-        this.clearGraphSelection(true);
-        this.showToast(`Recon judgement queued: ${data.job_id}`);
-      } catch (e) {
-        this.showToast(e.message, 'error');
-      }
-    },
-
-    async createReconSnapshot() {
-      if (!this.selectedProjectId || this.project?.project?.project_kind !== 'recon') return;
-      try {
-        const snapshot = await this.api('POST', `/projects/${this.selectedProjectId}/snapshots`, {
-          snapshot_type: 'recon_fork',
-          selected_fact_ids: [],
-        });
-        await this.loadNewProjectSnapshots();
-        this.showToast(`AI fork snapshot created: ${snapshot.id}`);
-      } catch (e) {
-        this.showToast(e.message, 'error');
-      }
-    },
-
     openCreateIntent() {
       if (!this.canActOnSelectedFacts()) return;
-      this.intentForm = { description:'', auth_scope:'anonymous' };
+      this.intentForm = { description:'', task_mode:'validation', auth_scope:this.defaultIntentAuthScope() };
       this.showIntentModal = true;
+    },
+
+    defaultIntentAuthScope() {
+      const mode = this.project?.project?.auth_mode;
+      return mode === 'authenticated' ? 'authenticated' : 'anonymous';
     },
 
     async createIntent(claim = false) {
@@ -3978,8 +3693,11 @@ function cairnApp() {
           creator: actor,
           worker: claim ? actor : null,
         };
-        if (this.project?.project?.project_kind === 'recon') {
+        body.task_mode = this.intentForm.task_mode === 'collection' ? 'collection' : 'validation';
+        if (body.task_mode === 'collection') {
           body.auth_scope = this.intentForm.auth_scope === 'authenticated' ? 'authenticated' : 'anonymous';
+        } else {
+          body.auth_scope = this.defaultIntentAuthScope();
         }
         await this.api('POST', `/projects/${this.selectedProjectId}/intents`, body);
         this.showIntentModal = false;
@@ -4014,11 +3732,36 @@ function cairnApp() {
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
-    openConclude(intent) { this.concludeForm = { description:'', intentId: intent.id, findingsJson: '' }; this.showConcludeModal = true; },
+    openConclude(intent) {
+      this.concludeForm = {
+        description: '',
+        intentId: intent.id,
+        findingsJson: '',
+        intentKind: intent.intent_kind || '',
+        taskMode: intent.task_mode || '',
+      };
+      this.showConcludeModal = true;
+    },
 
     async concludeIntent() {
       try {
         const actor = this.actorName();
+        if (this.concludeFormIsReport()) {
+          const body = { worker: actor, report_markdown: this.concludeForm.description };
+          if (this.concludeForm.findingsJson.trim()) {
+            const reportJson = JSON.parse(this.concludeForm.findingsJson);
+            if (!reportJson || Array.isArray(reportJson) || typeof reportJson !== 'object') throw new Error('Report JSON must be an object');
+            body.report_json = reportJson;
+          }
+          await this.api('POST', `/projects/${this.selectedProjectId}/intents/${this.concludeForm.intentId}/report`, body);
+          this.showConcludeModal = false;
+          this.selectedNode = null;
+          await this.loadProject(this.selectedProjectId);
+          this.updateGraph();
+          this.showToast('Report submitted');
+          return;
+        }
+
         const body = { worker: actor, description: this.concludeForm.description };
         if (this.concludeForm.findingsJson.trim()) {
           const findings = JSON.parse(this.concludeForm.findingsJson);

@@ -26,7 +26,7 @@ from cairn.dispatcher.tasks.common import (
     write_graph_snapshot_reference,
 )
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.server.models import ProjectDetail
+from cairn.server.models import ProjectDetail, TaskMode
 
 LOG = logging.getLogger(__name__)
 
@@ -38,12 +38,13 @@ def run_reason_task(
     project: ProjectDetail,
     export_yaml: str,
     worker: WorkerConfig,
+    task_mode: TaskMode,
     cancellation: TaskCancellation,
 ) -> str:
     driver = get_driver(worker.type)
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
-    lease = HeartbeatLease.for_reason(client, project.project.id, worker.name, config.runtime.interval)
+    lease = HeartbeatLease.for_reason(client, project.project.id, worker.name, task_mode, config.runtime.interval)
     lease.start()
     try:
         container_name = container_manager.ensure_running(project.project.id)
@@ -97,18 +98,24 @@ def run_reason_task(
                 "description": intent.description,
                 "worker": intent.worker,
                 "auth_scope": intent.auth_scope,
+                "task_mode": intent.task_mode,
             }
             for intent in project.intents
-            if intent.to is None
+            if intent.to is None and intent.task_mode == task_mode
         ]
         allowed_fact_ids = [fact.id for fact in project.facts]
-        is_initial_recon = (
-            project.project.project_kind == "recon"
+        is_initial_collection = (
+            task_mode == "collection"
             and len(project.facts) == 1
             and project.facts[0].id == "origin"
             and not open_intents
         )
-        max_intents = max(config.tasks.reason.max_intents, 2) if is_initial_recon else config.tasks.reason.max_intents
+        initial_collection_scopes = {"anonymous", "authenticated"} if project.accounts else {"anonymous"}
+        max_intents = (
+            max(config.tasks.reason.max_intents, len(initial_collection_scopes))
+            if is_initial_collection
+            else config.tasks.reason.max_intents
+        )
         LOG.debug(
             "reason context prepared project=%s worker=%s facts=%s allowed_fact_ids=%s hints=%s open_intents=%s",
             project.project.id,
@@ -119,7 +126,7 @@ def run_reason_task(
             len(open_intents),
         )
         prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "reason.md", project.project.project_kind),
+            load_prompt(config.runtime.prompt_group, "reason.md", task_mode),
             {
                 "graph_yaml": write_graph_snapshot_reference(
                     container_manager,
@@ -131,6 +138,8 @@ def run_reason_task(
                 "open_intents": format_open_intents(open_intents),
                 "max_intents": str(max_intents),
                 "project_kind": project.project.project_kind,
+                "task_mode": task_mode,
+                "has_accounts": "true" if project.accounts else "false",
             },
         )
 
@@ -199,16 +208,18 @@ def run_reason_task(
                 payload,
                 open_intents_empty=not open_intents,
                 max_intents=max_intents,
-                require_auth_scope=project.project.project_kind == "recon",
+                task_mode=task_mode,
+                require_auth_scope=task_mode == "collection",
             )
-            if is_initial_recon:
+            if is_initial_collection:
                 scopes = {
                     intent.get("auth_scope")
                     for intent in data
-                    if isinstance(intent, dict)
+                    if isinstance(intent, dict) and intent.get("task_mode") == "collection"
                 } if kind == "intents" and isinstance(data, list) else set()
-                if scopes != {"anonymous", "authenticated"}:
-                    raise ValueError("initial recon requires anonymous and authenticated baseline intents")
+                if scopes != initial_collection_scopes:
+                    expected = " and ".join(sorted(initial_collection_scopes))
+                    raise ValueError(f"initial collection requires {expected} baseline intents")
         except Exception as exc:
             LOG.warning(
                 "reason parse failed project=%s worker=%s error=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -240,6 +251,7 @@ def run_reason_task(
                     intent_data["description"],
                     worker.name,
                     auth_scope=intent_data.get("auth_scope"),
+                    task_mode=intent_data.get("task_mode", task_mode),
                 )
                 if response.status_code == 403:
                     LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)
@@ -281,11 +293,11 @@ def run_reason_task(
                 execute_ms,
                 total_ms,
             )
-            if project.project.project_kind == "recon":
-                response = client.record_recon_reason_round(project.project.id, stable=False)
+            if task_mode == "collection":
+                response = client.record_collection_reason_round(project.project.id, stable=False)
                 if not response.ok and response.status_code not in (403, 409):
                     LOG.warning(
-                        "recon reason round update failed project=%s worker=%s status=%s body=%s",
+                        "collection reason round update failed project=%s worker=%s status=%s body=%s",
                         project.project.id,
                         worker.name,
                         response.status_code,
@@ -293,11 +305,11 @@ def run_reason_task(
                     )
             return "success"
         if kind in ("noop", "stable"):
-            if project.project.project_kind == "recon":
-                response = client.record_recon_reason_round(project.project.id, stable=(kind == "stable"))
+            if task_mode == "collection":
+                response = client.record_collection_reason_round(project.project.id, stable=(kind == "stable"))
                 if not response.ok and response.status_code not in (403, 409):
                     LOG.warning(
-                        "recon reason round update failed project=%s worker=%s status=%s body=%s",
+                        "collection reason round update failed project=%s worker=%s status=%s body=%s",
                         project.project.id,
                         worker.name,
                         response.status_code,
@@ -313,4 +325,4 @@ def run_reason_task(
         return "success"
     finally:
         lease.stop()
-        best_effort_release_reason(client, project.project.id, worker.name)
+        best_effort_release_reason(client, project.project.id, worker.name, task_mode)

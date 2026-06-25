@@ -160,22 +160,24 @@ def project_allows_conclude_fallback(client: CairnClient, project_id: str, *, wo
     return False
 
 
-def best_effort_release_reason(client: CairnClient, project_id: str, worker_name: str) -> None:
-    response = client.release_reason(project_id, worker_name)
+def best_effort_release_reason(client: CairnClient, project_id: str, worker_name: str, task_mode: str) -> None:
+    response = client.release_reason(project_id, worker_name, task_mode)
     if not response.ok and response.status_code not in (403, 409):
         LOG.warning(
-            "reason release failed project=%s worker=%s status=%s",
+            "reason release failed project=%s worker=%s task_mode=%s status=%s",
             project_id,
             worker_name,
+            task_mode,
             response.status_code,
         )
     elif response.ok:
-        LOG.info("released reason project=%s worker=%s", project_id, worker_name)
+        LOG.info("released reason project=%s worker=%s task_mode=%s", project_id, worker_name, task_mode)
     else:
         LOG.info(
-            "reason release skipped project=%s worker=%s status=%s",
+            "reason release skipped project=%s worker=%s task_mode=%s status=%s",
             project_id,
             worker_name,
+            task_mode,
             response.status_code,
         )
 

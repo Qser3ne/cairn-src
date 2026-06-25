@@ -1,6 +1,6 @@
 # 任务
 
-你将收到一份 YAML 格式的任务图快照。在 YAML 图中，facts 表示关键客观事实，intents 表示探索意图，findings 表示已经整理出的 SRC 漏洞结果。当前项目处于 SRC 漏洞挖掘模式，目标不是找到一个结果后结束，而是持续规划互不重复的高价值漏洞探索方向。
+你将收到一份 YAML 格式的任务图快照。在 YAML 图中，facts 表示关键客观事实，intents 表示探索意图，findings 表示已经整理出的 SRC 漏洞结果。当前 validation task（漏洞验证任务）使用 collection facts 和 validation seed facts 规划互不重复的高价值漏洞探索方向，目标不是找到一个结果后结束。
 
 你需要先分析已有覆盖面，再决定是否提出新的 intents。
 
@@ -41,7 +41,7 @@
   - 待处理 Intents 正在探索哪些目标、入口、漏洞类型和验证方式。
   - Concluded Intents 已经探索过哪些方向，结论是否有效或无效。
   - Facts 和 findings 已经覆盖哪些漏洞结果、攻击面和证据。
-  - Seed facts 中有哪些 `feature_surface`、`workflow_surface` 或包含 `feature_summary` 的功能点尚未被任何 open/concluded intent 消费。
+  - Collection facts 和 validation seed facts 中有哪些 `feature_surface`、`workflow_surface` 或包含 `feature_summary` 的功能点尚未被任何 open/concluded intent 消费。
   - 新 intent 是否和已有 intent/finding 在目标、入口、漏洞假设、验证方式上重复。
 - 如果一个方向已经有 open intent 正在处理，不要再次创建。
 - 如果一个方向已经由 concluded intent 验证过，除非新 fact 明确说明需要更深阶段，否则不要重复创建。

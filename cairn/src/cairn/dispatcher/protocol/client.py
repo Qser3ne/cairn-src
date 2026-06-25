@@ -79,25 +79,25 @@ class CairnClient:
             json={"worker": worker},
         )
 
-    def claim_reason(self, project_id: str, worker: str, trigger: str) -> ApiResult:
+    def claim_reason(self, project_id: str, worker: str, trigger: str, task_mode: str) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/reason/claim",
-            json={"worker": worker, "trigger": trigger},
+            json={"worker": worker, "trigger": trigger, "task_mode": task_mode},
         )
 
-    def reason_heartbeat(self, project_id: str, worker: str) -> ApiResult:
+    def reason_heartbeat(self, project_id: str, worker: str, task_mode: str) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/reason/heartbeat",
-            json={"worker": worker},
+            json={"worker": worker, "task_mode": task_mode},
         )
 
-    def release_reason(self, project_id: str, worker: str) -> ApiResult:
+    def release_reason(self, project_id: str, worker: str, task_mode: str) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/reason/release",
-            json={"worker": worker},
+            json={"worker": worker, "task_mode": task_mode},
         )
 
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
@@ -139,14 +139,14 @@ class CairnClient:
             json=body,
         )
 
-    def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:
+    def record_collection_reason_round(self, project_id: str, stable: bool) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/recon/reason-round",
             json={"stable": stable},
         )
 
-    def record_recon_explore_round(self, project_id: str) -> ApiResult:
+    def record_collection_explore_round(self, project_id: str) -> ApiResult:
         return self._request_json(
             "POST",
             f"/projects/{project_id}/recon/explore-round",
@@ -161,6 +161,7 @@ class CairnClient:
         creator: str,
         *,
         intent_kind: str = "explore",
+        task_mode: str | None = None,
         finding_id: str | None = None,
         auth_scope: str | None = None,
     ) -> ApiResult:
@@ -174,6 +175,8 @@ class CairnClient:
         }
         if auth_scope is not None:
             body["auth_scope"] = auth_scope
+        if task_mode is not None:
+            body["task_mode"] = task_mode
         return self._request_json("POST", f"/projects/{project_id}/intents", json=body)
 
     def conclude_report(

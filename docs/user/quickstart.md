@@ -23,9 +23,9 @@ cp dispatch.example.yaml dispatch.yaml
 
 - `server` 指向 Cairn Server API。
 - `runtime` 控制调度间隔、全局并发、项目并发、worker healthcheck 和 prompt group。
-- `tasks` 控制 `reason`、`explore`、`judge`、`fork_seed`、`report` 的超时与上限。
+- `tasks` 控制 reason、explore 和 report 的超时与上限。
 - `container` 控制动态 worker 容器的镜像、网络、init 和完成后动作。
-- `workers` 配置 worker 名称、类型、支持的任务、优先级、并发和后端环境变量。
+- `workers` 配置 worker 名称、类型、支持的任务、优先级、并发和后端环境变量；`task_types` 使用 `collection_reason`、`collection_explore`、`validation_reason`、`validation_explore` 和 `report` 区分 collection、validation 与 report worker 能力。
 
 不要把真实 `dispatch.yaml` 提交到仓库；它已在 `.gitignore` 中。
 
@@ -72,13 +72,13 @@ uv run --project cairn cairn dispatch --config dispatch.yaml --startup-healthche
 
 ## 最小使用流程
 
-1. 创建 `recon` 项目，提供 `title`、`origin`、必要 hints 和至少一个 Cookie session。
-2. Dispatcher 调度 `reason` 生成 anonymous/authenticated 两条基线 intent。
-3. Dispatcher 调度 `explore` 写入已确认 facts。
-4. 在 UI 或 API 中触发 Evaluate Recon，生成 `judge` ephemeral job。
-5. 创建 recon snapshot。
-6. 触发 AI seeded fork，生成 child `vuln` 项目和 seed facts。
-7. 在 `vuln` 项目中继续执行漏洞验证、finding 生命周期和 report 生成。
+1. 创建 `vuln` 项目，提供 `title`、`origin`、必要 hints 和可选 accounts。
+2. Dispatcher 调度 `collection_reason` 启动 collection baseline；有 accounts 时会区分 anonymous/authenticated collection intents。
+3. Dispatcher 调度 `collection_explore` 收集功能、API、认证边界和候选验证种子 facts。
+4. Collection facts 和 validation seed intents 触发 `validation_reason` 规划漏洞验证方向。
+5. Dispatcher 调度 `validation_explore` 验证漏洞，写入验证 facts 和 findings。
+6. Finding 的 `next_action="report"` 会创建 report intent。
+7. `report` task 从 finding 生成 SRC 报告草稿，并更新 finding report state。
 
 ## 测试
 

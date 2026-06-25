@@ -100,12 +100,13 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
         project,
         graph_yaml,
         config.workers[0],
+        "validation",
         TaskCancellation(),
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker", None)]
-    assert client.recon_reason_rounds == []
+    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker", None, "validation")]
+    assert client.collection_reason_rounds == []
     assert client.released_reasons == [("proj_001", "test-worker")]
     assert lease.started and lease.stopped
     container_name, path, content = containers.writes[0]
@@ -117,10 +118,9 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
     assert path in driver.execute_prompts[0]
 
 
-def test_recon_reason_stable_records_stable_round(monkeypatch) -> None:
+def test_collection_reason_stable_records_stable_round(monkeypatch) -> None:
     config = make_config()
     project = make_project()
-    project.project.project_kind = "recon"
     client = FakeClient(project)
     containers = FakeContainerManager()
     lease = FakeLease()
@@ -145,17 +145,60 @@ def test_recon_reason_stable_records_stable_round(monkeypatch) -> None:
         project,
         "graph",
         config.workers[0],
+        "collection",
         TaskCancellation(),
     )
 
     assert outcome == "success"
-    assert client.recon_reason_rounds == [("proj_001", True)]
+    assert client.collection_reason_rounds == [("proj_001", True)]
 
 
-def test_initial_recon_reason_requires_dual_baseline_intents(monkeypatch) -> None:
+def test_reason_uses_explicit_collection_task_mode_for_vuln_project(monkeypatch) -> None:
     config = make_config()
     project = make_project()
-    project.project.project_kind = "recon"
+    project.project.project_kind = "vuln"
+    project.project.auth_mode = "dual"
+    project.accounts = [make_account()]
+    project.facts = project.facts[:1]
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"intents":[{"from":["origin"],"auth_scope":"anonymous","description":"public baseline"},{"from":["origin"],"auth_scope":"authenticated","description":"session baseline"}]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "collection",
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.created_intents == [
+        ("proj_001", ["origin"], "public baseline", "test-worker", "anonymous", "collection"),
+        ("proj_001", ["origin"], "session baseline", "test-worker", "authenticated", "collection"),
+    ]
+    assert client.collection_reason_rounds == [("proj_001", False)]
+
+
+def test_initial_collection_reason_allows_anonymous_only_without_accounts(monkeypatch) -> None:
+    config = make_config()
+    project = make_project()
     project.facts = project.facts[:1]
     client = FakeClient(project)
     containers = FakeContainerManager()
@@ -181,11 +224,166 @@ def test_initial_recon_reason_requires_dual_baseline_intents(monkeypatch) -> Non
         project,
         "graph",
         config.workers[0],
+        "collection",
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.created_intents == [
+        ("proj_001", ["origin"], "public baseline", "test-worker", "anonymous", "collection")
+    ]
+    assert client.collection_reason_rounds == [("proj_001", False)]
+
+
+def test_initial_collection_reason_requires_dual_baseline_intents(monkeypatch) -> None:
+    config = make_config()
+    project = make_project()
+    project.project.auth_mode = "dual"
+    project.accounts = [make_account()]
+    project.facts = project.facts[:1]
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"intents":[{"from":["origin"],"auth_scope":"anonymous","description":"public baseline"}]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "collection",
         TaskCancellation(),
     )
 
     assert outcome == "failed"
     assert client.created_intents == []
+
+
+def test_initial_collection_reason_ignores_open_validation_intents_for_baseline(monkeypatch) -> None:
+    config = make_config()
+    validation_intent = make_intent()
+    validation_intent.task_mode = "validation"
+    project = make_project(intents=[validation_intent])
+    project.project.auth_mode = "dual"
+    project.accounts = [make_account()]
+    project.facts = project.facts[:1]
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"intents":[{"from":["origin"],"auth_scope":"anonymous","description":"public baseline"}]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "collection",
+        TaskCancellation(),
+    )
+
+    assert outcome == "failed"
+    assert client.created_intents == []
+
+
+def test_collection_reason_creates_explicit_validation_seed_intent(monkeypatch) -> None:
+    config = make_config()
+    project = make_project()
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"task_mode":"validation","description":"validate IDOR hypothesis on order API"}]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "collection",
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.created_intents == [
+        ("proj_001", ["f001"], "validate IDOR hypothesis on order API", "test-worker", None, "validation")
+    ]
+    assert client.collection_reason_rounds == [("proj_001", False)]
+
+
+def test_validation_stable_reason_succeeds_without_collection_round_update(monkeypatch) -> None:
+    config = make_config()
+    project = make_project()
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"decision":"no_new_high_value","intents":[]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "validation",
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.collection_reason_rounds == []
 
 
 def test_reason_complete_payload_is_invalid(monkeypatch) -> None:
@@ -215,6 +413,7 @@ def test_reason_complete_payload_is_invalid(monkeypatch) -> None:
         project,
         "graph",
         config.workers[0],
+        "validation",
         TaskCancellation(),
     )
 
@@ -267,8 +466,8 @@ def test_explore_early_plain_text_exit_uses_conclude_fallback(monkeypatch) -> No
 def test_recon_explore_success_does_not_record_round_in_worker(monkeypatch) -> None:
     config = make_config()
     intent = make_intent()
+    intent.task_mode = "collection"
     project = make_project(intents=[intent])
-    project.project.project_kind = "recon"
     client = FakeClient(project)
     containers = FakeContainerManager()
     lease = FakeLease()
@@ -294,14 +493,45 @@ def test_recon_explore_success_does_not_record_round_in_worker(monkeypatch) -> N
     )
 
     assert outcome == "success"
-    assert client.recon_explore_rounds == []
+    assert client.collection_explore_rounds == []
 
 
-def test_recon_explore_ignores_findings_from_model(monkeypatch) -> None:
+def test_report_intent_is_rejected_before_explore_execution(monkeypatch) -> None:
     config = make_config()
     intent = make_intent()
+    intent.intent_kind = "report"
+    intent.task_mode = "report"
     project = make_project(intents=[intent])
-    project.project.project_kind = "recon"
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+
+    monkeypatch.setattr(
+        explore,
+        "get_driver",
+        lambda _name: (_ for _ in ()).throw(AssertionError("report intent must not reach explore driver")),
+    )
+
+    outcome = explore.run_explore_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "failed"
+    assert containers.writes == []
+    assert client.concluded == []
+
+
+def test_collection_explore_ignores_findings_from_model(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    intent.task_mode = "collection"
+    project = make_project(intents=[intent])
     client = FakeClient(project)
     containers = FakeContainerManager()
     lease = FakeLease()
@@ -315,7 +545,7 @@ def test_recon_explore_ignores_findings_from_model(monkeypatch) -> None:
         lambda *_args, **_kwargs: ProcessResult(
             0,
             (
-                '{"accepted":true,"data":{"description":"recon fact",'
+                '{"accepted":true,"data":{"description":"collection fact",'
                 '"findings":[{"title":"should not be written"}]}}'
             ),
             "",
@@ -334,26 +564,26 @@ def test_recon_explore_ignores_findings_from_model(monkeypatch) -> None:
     )
 
     assert outcome == "success"
-    assert client.concluded == [("proj_001", "i001", "test-worker", "recon fact")]
+    assert client.concluded == [("proj_001", "i001", "test-worker", "collection fact")]
     assert client.concluded_findings == [None]
 
 
-def test_recon_explore_conclude_fallback_ignores_findings_from_model(monkeypatch) -> None:
+def test_collection_explore_conclude_fallback_ignores_findings_from_model(monkeypatch) -> None:
     config = make_config()
     intent = make_intent()
+    intent.task_mode = "collection"
     project = make_project(intents=[intent])
-    project.project.project_kind = "recon"
     client = FakeClient(project)
     containers = FakeContainerManager()
     driver = FakeDriver()
     lease = FakeLease()
     results: Iterator[ProcessResult] = iter(
         [
-            ProcessResult(0, "Need summarize current recon observations.", ""),
+            ProcessResult(0, "Need summarize current collection observations.", ""),
             ProcessResult(
                 0,
                 (
-                    '{"accepted":true,"data":{"description":"fallback recon fact",'
+                    '{"accepted":true,"data":{"description":"fallback collection fact",'
                     '"findings":[{"title":"fallback should not be written"}]}}'
                 ),
                 "",
@@ -378,9 +608,69 @@ def test_recon_explore_conclude_fallback_ignores_findings_from_model(monkeypatch
     )
 
     assert outcome == "success"
-    assert client.concluded == [("proj_001", "i001", "test-worker", "fallback recon fact")]
+    assert client.concluded == [("proj_001", "i001", "test-worker", "fallback collection fact")]
     assert client.concluded_findings == [None]
     assert len(driver.conclude_prompts) == 1
+
+
+def test_collection_explore_validates_with_collection_mode_and_drops_findings(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    intent.task_mode = "collection"
+    project = make_project(intents=[intent])
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+    seen_task_modes = []
+
+    def validate_payload(payload: dict, *, task_mode: str):
+        seen_task_modes.append(task_mode)
+        assert "findings" not in payload["data"]
+        return "fact", {
+            "description": payload["data"]["description"],
+            "fact_type": "observation",
+            "title": None,
+            "summary": None,
+            "details": {},
+        }
+
+    monkeypatch.setattr(explore, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(explore.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(explore, "run_healthcheck", _healthy)
+    monkeypatch.setattr(explore, "validate_explore_payload", validate_payload)
+    monkeypatch.setattr(
+        explore,
+        "_run_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            json.dumps(
+                {
+                    "accepted": True,
+                    "data": {
+                        "description": "collection fact",
+                        "findings": [{"title": "must not persist"}],
+                    },
+                }
+            ),
+            "",
+        ),
+    )
+
+    outcome = explore.run_explore_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert seen_task_modes == ["collection"]
+    assert client.concluded == [("proj_001", "i001", "test-worker", "collection fact")]
+    assert client.concluded_findings == [None]
 
 
 def test_vuln_explore_passes_findings_from_model(monkeypatch) -> None:
@@ -418,6 +708,47 @@ def test_vuln_explore_passes_findings_from_model(monkeypatch) -> None:
 
     assert outcome == "success"
     assert client.concluded == [("proj_001", "i001", "test-worker", "vuln fact")]
+    assert client.concluded_findings == [[finding]]
+
+
+def test_validation_explore_passes_followup_finding_from_model(monkeypatch) -> None:
+    config = make_config()
+    intent = make_intent()
+    intent.task_mode = "validation"
+    finding = _finding_payload("follow-up issue")
+    finding["next_action"] = "follow_up"
+    finding["followup_intent_description"] = "Validate adjacent order export IDOR"
+    project = make_project(intents=[intent])
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(explore, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(explore.HeartbeatLease, "for_intent", _lease_factory(lease))
+    monkeypatch.setattr(explore, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        explore,
+        "_run_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            json.dumps({"accepted": True, "data": {"description": "validated fact", "findings": [finding]}}),
+            "",
+        ),
+    )
+
+    outcome = explore.run_explore_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        intent,
+        config.workers[0],
+        TaskCancellation(),
+    )
+
+    assert outcome == "success"
+    assert client.concluded == [("proj_001", "i001", "test-worker", "validated fact")]
     assert client.concluded_findings == [[finding]]
 
 
@@ -486,11 +817,12 @@ def test_reason_startup_only_mode_skips_task_healthcheck(monkeypatch) -> None:
         project,
         "graph",
         config.workers[0],
+        "validation",
         TaskCancellation(),
     )
 
     assert outcome == "success"
-    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker", None)]
+    assert client.created_intents == [("proj_001", ["f001"], "next", "test-worker", None, "validation")]
 
 
 def test_authenticated_explore_prompt_includes_leased_account(monkeypatch) -> None:
@@ -568,42 +900,7 @@ class FakeEphemeralClient:
         return ApiResult(200, {})
 
 
-def test_judge_task_finishes_ephemeral_job_without_graph_writes(monkeypatch) -> None:
-    config = make_config()
-    client = FakeEphemeralClient()
-    containers = FakeContainerManager()
-    driver = FakeDriver()
-    job = EphemeralJob(
-        id="job_001",
-        project_id="proj_001",
-        job_type="judge",
-        status="queued",
-        input_snapshot_yaml="project:\n  project_kind: recon\n",
-        created_at="2026-01-01T00:00:00Z",
-        expires_at="2026-01-02T00:00:00Z",
-    )
-
-    monkeypatch.setattr(judge, "get_driver", lambda _name: driver)
-    monkeypatch.setattr(judge, "run_healthcheck", _healthy)
-    monkeypatch.setattr(
-        judge,
-        "run_worker_process",
-        lambda *_args, **_kwargs: ProcessResult(
-            0,
-            _judge_payload(),
-            "",
-        ),
-    )
-
-    outcome = judge.run_judge_task(config, client, containers, job, config.workers[0], TaskCancellation())
-
-    assert outcome == "success"
-    assert client.claimed == [("job_001", "test-worker")]
-    assert client.finished == [("job_001", "test-worker", json.loads(_judge_payload())["data"])]
-    assert containers.writes[0][1].startswith("/tmp/cairn-prompts/judge_execute-")
-
-
-def test_judge_task_marks_cancelled_ephemeral_job_failed(monkeypatch) -> None:
+def test_judge_task_fails_legacy_job_without_worker_execution() -> None:
     config = make_config()
     client = FakeEphemeralClient()
     containers = FakeContainerManager()
@@ -617,82 +914,44 @@ def test_judge_task_marks_cancelled_ephemeral_job_failed(monkeypatch) -> None:
         expires_at="2026-01-02T00:00:00Z",
     )
 
-    monkeypatch.setattr(judge, "get_driver", lambda _name: FakeDriver())
-    monkeypatch.setattr(judge, "run_healthcheck", _healthy)
-    monkeypatch.setattr(
-        judge,
-        "run_worker_process",
-        lambda *_args, **_kwargs: ProcessResult(1, "", "", cancelled=True, cancel_reason="stopped"),
-    )
-
     outcome = judge.run_judge_task(config, client, containers, job, config.workers[0], TaskCancellation())
 
-    assert outcome == "cancelled"
-    assert client.claimed == [("job_001", "test-worker")]
-    assert client.failed == [("job_001", "test-worker", "judge cancelled: stopped")]
+    assert outcome == "failed"
+    assert client.claimed == []
     assert client.finished == []
+    assert client.failed == [("job_001", "test-worker", "judge jobs have been retired")]
+    assert containers.writes == []
 
 
-def test_fork_seed_task_finishes_with_seed_facts(monkeypatch) -> None:
+def test_fork_seed_task_fails_legacy_job_without_worker_execution() -> None:
     config = make_config()
     client = FakeEphemeralClient()
     containers = FakeContainerManager()
-    driver = FakeDriver()
     job = EphemeralJob(
         id="fork_001",
         project_id="proj_001",
         job_type="fork_seed",
         status="queued",
-        input_snapshot_yaml="project:\n  project_kind: recon\nfacts:\n- id: origin\n  description: https://target.test\n- id: f001\n  description: upload endpoint\n",
+        input_snapshot_yaml="project:\n  project_kind: recon\nfacts:\n- id: origin\n  description: https://target.test\n",
         created_at="2026-01-01T00:00:00Z",
         expires_at="2026-01-02T00:00:00Z",
     )
 
-    monkeypatch.setattr(fork_seed, "get_driver", lambda _name: driver)
-    monkeypatch.setattr(fork_seed, "run_healthcheck", _healthy)
-    monkeypatch.setattr(
-        fork_seed,
-        "run_worker_process",
-        lambda *_args, **_kwargs: ProcessResult(
-            0,
-            '{"accepted":true,"data":{"seed_facts":[{"title":"Upload surface","auth_scope":"anonymous","candidate_type":"api_surface","derived_from":["f001"],"description":"candidate_summary:\\n- upload endpoint"}]}}',
-            "",
-        ),
-    )
-
     outcome = fork_seed.run_fork_seed_task(config, client, containers, job, config.workers[0], TaskCancellation())
 
-    assert outcome == "success"
-    assert client.claimed == [("fork_001", "test-worker")]
-    assert client.finished_fork_seed == [
-        (
-            "fork_001",
-            "test-worker",
-            [
-                {
-                    "title": "Upload surface",
-                    "auth_scope": "anonymous",
-                    "candidate_type": "api_surface",
-                    "derived_from": ["f001"],
-                    "description": "candidate_summary:\n- upload endpoint",
-                    "feature_summary": None,
-                    "user_actions": [],
-                    "routes": [],
-                    "apis": [],
-                    "vuln_validation_focus": [],
-                    "known_constraints": [],
-                    "evidence_refs": [],
-                }
-            ],
-        )
-    ]
-    assert containers.writes[0][1].startswith("/tmp/cairn-prompts/fork_seed_execute-")
+    assert outcome == "failed"
+    assert client.claimed == []
+    assert client.finished == []
+    assert client.finished_fork_seed == []
+    assert client.failed == [("fork_001", "test-worker", "fork_seed jobs have been retired")]
+    assert containers.writes == []
 
 
 def test_report_task_writes_report_artifact(monkeypatch) -> None:
     config = make_config()
     intent = make_intent()
     intent.intent_kind = "report"
+    intent.task_mode = "report"
     project = make_project(intents=[intent])
     client = FakeClient(project)
     containers = FakeContainerManager()

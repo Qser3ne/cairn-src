@@ -11,7 +11,8 @@ from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.dispatcher.scheduler.worker_select import choose_worker
-from cairn.server.models import EphemeralJob, Fact, ProjectSummary
+from cairn.dispatcher.tasks.explore import format_auth_context
+from cairn.server.models import EphemeralJob, Fact, ProjectSummary, TaskMode
 
 from conftest import make_account, make_config, make_intent, make_project
 
@@ -19,6 +20,7 @@ from conftest import make_account, make_config, make_intent, make_project
 def _loop() -> DispatcherLoop:
     loop = DispatcherLoop.__new__(DispatcherLoop)
     loop.reason_checkpoints = {}
+    loop.collection_expansion_requests = {}
     loop.authenticated_wait_queues = {}
     loop.account_leases = {}
     loop.runtime_project_ids = set()
@@ -38,7 +40,7 @@ def _summary(project_id: str, status: str) -> ProjectSummary:
         id=project_id,
         title=project_id,
         status=status,
-        project_kind="recon",
+        project_kind="vuln",
         auth_mode="anonymous",
         parent_project_id=None,
         parent_snapshot_id=None,
@@ -112,7 +114,8 @@ def _prepare_real_dispatch(loop: DispatcherLoop, project, *, task_types: list[st
     worker = config.workers[0].model_copy(
         update={
             "max_running": 3,
-            "task_types": task_types or ["reason", "explore", "judge", "report"],
+            "task_types": task_types
+            or ["collection_reason", "collection_explore", "validation_reason", "validation_explore", "report"],
         }
     )
     config = config.model_copy(
@@ -135,7 +138,7 @@ def _prepare_real_dispatch(loop: DispatcherLoop, project, *, task_types: list[st
             "heartbeat": lambda _self, _project_id, _intent_id, _worker: ApiResult(200, {}),
         },
     )()
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(
         fact_count=len(project.facts),
         hint_count=len(project.hints),
         open_intent_count=len([intent for intent in project.intents if intent.to is None]),
@@ -146,24 +149,44 @@ def _prepare_real_dispatch(loop: DispatcherLoop, project, *, task_types: list[st
 def test_reason_trigger_detects_new_facts_and_open_intent_completion() -> None:
     loop = _loop()
     project = make_project(intents=[make_intent()])
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(2, 1, 1)
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(2, 1, 1)
     project.facts.append(Fact(id="f002", description="new"))
     project.intents = []
 
-    assert loop._reason_trigger(project) == "facts:2->3,open_intents:1->0"
+    assert loop._reason_trigger(project, "collection") == "facts:2->3,open_intents:1->0"
 
 
 def test_reason_trigger_detects_pending_reason_signal() -> None:
     loop = _loop()
     project = make_project()
     project.project.reason_pending = True
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(
         fact_count=len(project.facts),
         hint_count=len(project.hints),
         open_intent_count=0,
     )
 
-    assert loop._reason_trigger(project) == "pending"
+    assert loop._reason_trigger(project, "collection") == "pending"
+
+
+def test_reason_trigger_uses_independent_mode_checkpoints() -> None:
+    loop = _loop()
+    project = make_project()
+    project.facts.append(Fact(id="f002", description="new collection fact"))
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(
+        fact_count=2,
+        hint_count=len(project.hints),
+        open_intent_count=0,
+    )
+    loop.reason_checkpoints[("proj_001", "validation")] = ReasonCheckpoint(
+        fact_count=len(project.facts),
+        hint_count=len(project.hints),
+        open_intent_count=0,
+        task_mode="validation",
+    )
+
+    assert loop._reason_trigger(project, "collection") == "facts:2->3"
+    assert loop._reason_trigger(project, "validation") is None
 
 
 def test_reason_success_checkpoint_uses_latest_project_detail() -> None:
@@ -175,10 +198,10 @@ def test_reason_success_checkpoint_uses_latest_project_detail() -> None:
     done: Future[str] = Future()
     done.set_result("success")
     loop.futures = {
-        done: RunningTask(
-            "proj_001",
-            "reason",
-            "worker",
+            done: RunningTask(
+                "proj_001",
+                "collection_reason",
+                "worker",
             TaskCancellation(),
             reason_trigger="facts:1->2",
             reason_start_fact_count=len(started_project.facts),
@@ -190,7 +213,7 @@ def test_reason_success_checkpoint_uses_latest_project_detail() -> None:
 
     loop._reap_futures()
 
-    assert loop.reason_checkpoints["proj_001"] == ReasonCheckpoint(
+    assert loop.reason_checkpoints[("proj_001", "collection")] == ReasonCheckpoint(
         fact_count=3,
         hint_count=2,
         open_intent_count=0,
@@ -202,10 +225,10 @@ def test_reason_success_checkpoint_falls_back_to_start_counts_when_refresh_fails
     done: Future[str] = Future()
     done.set_result("success")
     loop.futures = {
-        done: RunningTask(
-            "proj_001",
-            "reason",
-            "worker",
+            done: RunningTask(
+                "proj_001",
+                "collection_reason",
+                "worker",
             TaskCancellation(),
             reason_trigger="open_intents:1->0",
             reason_start_fact_count=2,
@@ -223,7 +246,7 @@ def test_reason_success_checkpoint_falls_back_to_start_counts_when_refresh_fails
     with caplog.at_level(logging.WARNING, logger="cairn.dispatcher.scheduler.loop"):
         loop._reap_futures()
 
-    assert loop.reason_checkpoints["proj_001"] == ReasonCheckpoint(
+    assert loop.reason_checkpoints[("proj_001", "collection")] == ReasonCheckpoint(
         fact_count=2,
         hint_count=1,
         open_intent_count=1,
@@ -351,7 +374,7 @@ def test_unclaimed_explore_dispatches_before_new_reason_trigger() -> None:
     project = make_project(intents=[make_intent()])
     project.intents[0].worker = None
     project.facts.append(Fact(id="f002", description="new"))
-    loop.reason_checkpoints["proj_001"] = ReasonCheckpoint(2, 1, 1)
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(2, 1, 1)
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
     loop.client = type(
         "Client",
@@ -362,7 +385,7 @@ def test_unclaimed_explore_dispatches_before_new_reason_trigger() -> None:
         },
     )()
     dispatched: list[tuple[str, str]] = []
-    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
+    loop._dispatch_reason = lambda _project, _graph, trigger, task_mode: dispatched.append(("reason", trigger)) or True
     loop._dispatch_explore = lambda *_args: dispatched.append(("explore", "")) or True
 
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
@@ -385,10 +408,255 @@ def test_initial_project_dispatches_reason_directly() -> None:
         },
     )()
     dispatched: list[tuple[str, str]] = []
-    loop._dispatch_reason = lambda _project, _graph, trigger: dispatched.append(("reason", trigger)) or True
+    loop._dispatch_reason = lambda _project, _graph, trigger, task_mode: dispatched.append(("reason", f"{task_mode}:{trigger}")) or True
 
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
-    assert dispatched == [("reason", "initial")]
+    assert dispatched == [("reason", "collection:initial")]
+
+
+def test_dual_vuln_project_without_accounts_dispatches_collection_baseline() -> None:
+    loop = _loop()
+    project = make_project()
+    project.project.auth_mode = "dual"
+    project.accounts = []
+    loop.config = make_config()
+    loop.futures = {}
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_reason = lambda _project, _graph, trigger, task_mode: dispatched.append((task_mode, trigger)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("collection", "initial")]
+
+
+def test_report_validation_collection_intents_dispatch_in_required_order() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    loop.futures = {}
+    collection = make_intent("i001")
+    collection.worker = None
+    collection.task_mode = "collection"
+    collection.created_at = "2026-01-01T00:00:03Z"
+    validation = make_intent("i002")
+    validation.worker = None
+    validation.task_mode = "validation"
+    validation.created_at = "2026-01-01T00:00:02Z"
+    report = make_intent("i003")
+    report.worker = None
+    report.intent_kind = "report"
+    report.task_mode = "report"
+    report.created_at = "2026-01-01T00:00:01Z"
+    project = make_project(intents=[collection, validation, report])
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+
+    def dispatch_report(_project, _graph, intent):  # noqa: ANN001
+        dispatched.append(("report", intent.id))
+        intent.worker = "worker"
+        return True
+
+    def dispatch_explore(_project, _graph, intent):  # noqa: ANN001
+        dispatched.append((intent.task_mode, intent.id))
+        intent.worker = "worker"
+        return True
+
+    loop._dispatch_report = dispatch_report
+    loop._dispatch_explore = dispatch_explore
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("report", "i003"), ("validation", "i002"), ("collection", "i001")]
+
+
+def test_validation_convergence_schedules_collection_reason_without_collection_delta() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    validation_intent = make_intent("i001")
+    validation_intent.task_mode = "validation"
+    validation_intent.to = "f001"
+    validation_intent.concluded_at = "2026-01-01T00:00:03Z"
+    project = make_project(intents=[validation_intent])
+    loop.reason_checkpoints[("proj_001", "validation")] = ReasonCheckpoint(
+        fact_count=len(project.facts),
+        hint_count=len(project.hints),
+        open_intent_count=0,
+        task_mode="validation",
+    )
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(
+        fact_count=len(project.facts),
+        hint_count=len(project.hints),
+        open_intent_count=0,
+    )
+    done: Future[str] = Future()
+    done.set_result("success")
+    loop.futures = {
+        done: RunningTask(
+            "proj_001",
+            "validation_reason",
+            "worker",
+            TaskCancellation(),
+            reason_trigger="noop",
+            reason_task_mode="validation",
+            reason_start_fact_count=len(project.facts),
+            reason_start_hint_count=len(project.hints),
+            reason_start_open_intent_count=0,
+        )
+    }
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[TaskMode, str]] = []
+    loop._dispatch_reason = lambda _project, _graph, trigger, task_mode: dispatched.append((task_mode, trigger)) or True
+
+    loop._reap_futures()
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("collection", "validation_converged")]
+
+
+def test_collection_expansion_request_survives_failed_collection_reason() -> None:
+    loop = _loop()
+    loop.collection_expansion_requests["proj_001"] = "validation_converged"
+    failed: Future[str] = Future()
+    failed.set_result("failed")
+    loop.futures = {
+        failed: RunningTask(
+            "proj_001",
+            "collection_reason",
+            "worker",
+            TaskCancellation(),
+            reason_trigger="validation_converged",
+            reason_task_mode="collection",
+            reason_start_fact_count=1,
+            reason_start_hint_count=0,
+            reason_start_open_intent_count=0,
+        )
+    }
+
+    loop._reap_futures()
+
+    assert loop.collection_expansion_requests == {"proj_001": "validation_converged"}
+
+
+def test_collection_expansion_request_clears_after_successful_collection_reason() -> None:
+    loop = _loop()
+    project = make_project()
+    loop.collection_expansion_requests["proj_001"] = "validation_converged"
+    succeeded: Future[str] = Future()
+    succeeded.set_result("success")
+    loop.futures = {
+        succeeded: RunningTask(
+            "proj_001",
+            "collection_reason",
+            "worker",
+            TaskCancellation(),
+            reason_trigger="validation_converged",
+            reason_task_mode="collection",
+            reason_start_fact_count=1,
+            reason_start_hint_count=0,
+            reason_start_open_intent_count=0,
+        )
+    }
+    loop.client = type("Client", (), {"get_project": lambda _self, _project_id: project})()
+
+    loop._reap_futures()
+
+    assert loop.collection_expansion_requests == {}
+
+
+def test_running_validation_explore_does_not_block_collection_reason_when_capacity_allows() -> None:
+    loop = _loop()
+    config = make_config()
+    loop.config = config.model_copy(
+        update={"runtime": config.runtime.model_copy(update={"max_workers": 2, "max_project_workers": 2})}
+    )
+    loop.futures = {
+        Future(): RunningTask("proj_001", "validation_explore", "test-worker", TaskCancellation(), intent_id="i001")
+    }
+    project = make_project()
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(
+        fact_count=len(project.facts),
+        hint_count=len(project.hints),
+        open_intent_count=1,
+    )
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[TaskMode, str]] = []
+    loop._dispatch_reason = lambda _project, _graph, trigger, task_mode: dispatched.append((task_mode, trigger)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("collection", "open_intents:1->0")]
+
+
+def test_dispatch_reason_uses_collection_reason_capability_and_passes_task_mode() -> None:
+    loop = _loop()
+    config = make_config()
+    executor = _RecordingExecutor()
+    project = make_project()
+    project.project.project_kind = "vuln"
+    project.project.judge_status = "not_judged"
+    loop.config = config
+    loop.executor = executor
+    loop.futures = {}
+    loop.container_manager = _RecordingContainerManager()
+    loop.client = type(
+        "Client",
+        (),
+        {"claim_reason": lambda _self, _project_id, _worker, _trigger, _task_mode: ApiResult(200, {})},
+    )()
+
+    assert loop._dispatch_reason(project, "graph", "initial")
+
+    assert executor.submissions
+    assert loop.futures[executor.futures[0]].task_type == "collection_reason"
+    assert loop.futures[executor.futures[0]].reason_task_mode == "collection"
+    assert executor.submissions[0][1][6] == "collection"
+
+
+def test_dispatch_explore_uses_validation_explore_capability() -> None:
+    loop = _loop()
+    project = make_project(intents=[make_intent()])
+    project.intents[0].worker = None
+    project.intents[0].task_mode = "validation"
+    executor = _prepare_real_dispatch(loop, project, task_types=["validation_explore"])
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert executor.submissions
+    assert loop.futures[executor.futures[0]].task_type == "validation_explore"
 
 
 def test_authenticated_project_dispatches_with_available_accounts() -> None:
@@ -406,6 +674,21 @@ def test_authenticated_project_dispatches_with_available_accounts() -> None:
     assert [task.account.id for task in loop.futures.values()] == ["a001", "a002"]
 
 
+def test_collection_authenticated_intent_dispatches_with_account_lease() -> None:
+    loop = _loop()
+    project = _authenticated_project(intent_count=1, account_count=1)
+    project.intents[0].task_mode = "collection"
+    executor = _prepare_real_dispatch(loop, project)
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    submitted_args = executor.submissions[0][1]
+    assert loop.futures[executor.futures[0]].task_type == "collection_explore"
+    assert loop.account_leases == {"proj_001": {"a001": "i001"}}
+    assert loop.futures[executor.futures[0]].account == project.accounts[0]
+    assert submitted_args[8] == project.accounts[0]
+
+
 def test_anonymous_intent_dispatches_without_account_lease() -> None:
     loop = _loop()
     project = _authenticated_project(intent_count=1, account_count=1)
@@ -418,6 +701,25 @@ def test_anonymous_intent_dispatches_without_account_lease() -> None:
     assert loop.account_leases == {}
     assert loop.authenticated_wait_queues == {}
     assert loop.futures[executor.futures[0]].account is None
+
+
+def test_collection_anonymous_intent_dispatches_without_account_lease_and_anonymous_context() -> None:
+    loop = _loop()
+    project = _authenticated_project(intent_count=1, account_count=1)
+    project.project.auth_mode = "dual"
+    project.intents[0].auth_scope = "anonymous"
+    project.intents[0].task_mode = "collection"
+    executor = _prepare_real_dispatch(loop, project)
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    submitted_args = executor.submissions[0][1]
+    assert loop.futures[executor.futures[0]].task_type == "collection_explore"
+    assert loop.account_leases == {}
+    assert loop.authenticated_wait_queues == {}
+    assert loop.futures[executor.futures[0]].account is None
+    assert submitted_args[8] is None
+    assert "Current intent auth_scope is anonymous" in format_auth_context(project, project.intents[0], submitted_args[8])
 
 
 def test_authenticated_intent_logs_missing_accounts(caplog) -> None:
@@ -446,7 +748,7 @@ def test_authenticated_intent_releases_account_when_worker_unavailable(caplog) -
     loop.config = loop.config.model_copy(
         update={"workers": [loop.config.workers[0].model_copy(update={"max_running": 1})]}
     )
-    loop.futures = {Future(): RunningTask("other", "explore", "test-worker", TaskCancellation(), intent_id="busy")}
+    loop.futures = {Future(): RunningTask("other", "validation_explore", "test-worker", TaskCancellation(), intent_id="busy")}
 
     with caplog.at_level(logging.INFO, logger="cairn.dispatcher.scheduler.loop"):
         assert not loop._try_dispatch_project(_summary("proj_001", "active"))
@@ -455,7 +757,7 @@ def test_authenticated_intent_releases_account_when_worker_unavailable(caplog) -
     assert loop.authenticated_wait_queues == {}
     messages = [record.getMessage() for record in caplog.records]
     assert any(
-        "no worker available for explore project=proj_001 intent=i001 queued_authenticated_intents=0 busy_accounts=0 total_accounts=1"
+            "no worker available for validation_explore project=proj_001 intent=i001 queued_authenticated_intents=0 busy_accounts=0 total_accounts=1"
         in message
         and "blocked_busy=['test-worker(1/1)']" in message
         for message in messages
@@ -468,9 +770,9 @@ def test_authenticated_intent_queues_when_all_accounts_are_busy() -> None:
     executor = _prepare_real_dispatch(loop, project)
     loop.account_leases = {"proj_001": {"a001": "i004", "a002": "i003", "a003": "i002"}}
     loop.futures = {
-        Future(): RunningTask("proj_001", "explore", "worker-a", TaskCancellation(), intent_id="i004", account=project.accounts[0]),
-        Future(): RunningTask("proj_001", "explore", "worker-b", TaskCancellation(), intent_id="i003", account=project.accounts[1]),
-        Future(): RunningTask("proj_001", "explore", "worker-c", TaskCancellation(), intent_id="i002", account=project.accounts[2]),
+            Future(): RunningTask("proj_001", "validation_explore", "worker-a", TaskCancellation(), intent_id="i004", account=project.accounts[0]),
+            Future(): RunningTask("proj_001", "validation_explore", "worker-b", TaskCancellation(), intent_id="i003", account=project.accounts[1]),
+            Future(): RunningTask("proj_001", "validation_explore", "worker-c", TaskCancellation(), intent_id="i002", account=project.accounts[2]),
     }
 
     assert not loop._try_dispatch_project(_summary("proj_001", "active"))
@@ -607,7 +909,7 @@ def test_report_intent_dispatches_report_task() -> None:
     assert loop.futures[executor.futures[0]].task_type == "report"
 
 
-def test_dispatch_judge_jobs_uses_ephemeral_job_queue() -> None:
+def test_dispatch_judge_jobs_ignores_legacy_ephemeral_job_queue() -> None:
     loop = _loop()
     config = make_config()
     executor = _RecordingExecutor()
@@ -628,12 +930,11 @@ def test_dispatch_judge_jobs_uses_ephemeral_job_queue() -> None:
 
     loop._dispatch_judge_jobs()
 
-    assert executor.submissions
-    assert loop.futures[executor.futures[0]].task_type == "judge"
-    assert loop.futures[executor.futures[0]].intent_id == "job_001"
+    assert executor.submissions == []
+    assert loop.futures == {}
 
 
-def test_dispatch_fork_seed_jobs_uses_ephemeral_job_queue() -> None:
+def test_dispatch_fork_seed_jobs_ignores_legacy_ephemeral_job_queue() -> None:
     loop = _loop()
     config = make_config()
     executor = _RecordingExecutor()
@@ -654,35 +955,28 @@ def test_dispatch_fork_seed_jobs_uses_ephemeral_job_queue() -> None:
 
     loop._dispatch_fork_seed_jobs()
 
-    assert executor.submissions
-    assert loop.futures[executor.futures[0]].task_type == "fork_seed"
-    assert loop.futures[executor.futures[0]].intent_id == "fork_001"
-
-
-def test_dispatch_judge_jobs_waits_for_pending_container_cleanup() -> None:
-    loop = _loop()
-    config = make_config()
-    executor = _RecordingExecutor()
-    job = EphemeralJob(
-        id="job_001",
-        project_id="proj_001",
-        job_type="judge",
-        status="queued",
-        input_snapshot_yaml="project: {}",
-        created_at="2026-01-01T00:00:00Z",
-        expires_at="2026-01-02T00:00:00Z",
-    )
-    loop.config = config
-    loop.executor = executor
-    loop.futures = {}
-    loop.client = type("Client", (), {"list_queued_ephemeral_jobs": lambda _self, _job_type: [job]})()
-    loop.container_manager = _RecordingContainerManager()
-    loop._cleanup_pending = {"container-proj_001"}
-
-    loop._dispatch_judge_jobs()
-
     assert executor.submissions == []
     assert loop.futures == {}
+
+
+def test_dispatcher_run_once_does_not_call_legacy_ephemeral_dispatchers() -> None:
+    loop = _loop()
+    config = make_config()
+    loop.config = config
+    loop.client = type("Client", (), {"list_projects": lambda _self: []})()
+    loop.container_manager = _RecordingContainerManager()
+    loop.executor = _RecordingExecutor()
+    loop.cleanup_executor = _RecordingExecutor()
+    loop._settings_checked = True
+    loop._startup_healthchecks_checked = True
+    called: list[str] = []
+    loop._dispatch_judge_jobs = lambda: called.append("judge")
+    loop._dispatch_fork_seed_jobs = lambda: called.append("fork_seed")
+    loop.close = lambda: None
+
+    loop.run(once=True)
+
+    assert called == []
 
 
 def test_cancel_inactive_tasks_marks_stopped_and_deleted_projects() -> None:
@@ -700,7 +994,7 @@ def test_cancel_inactive_tasks_marks_stopped_and_deleted_projects() -> None:
     assert deleted.reason == "deleted"
 
 
-def test_cancel_inactive_tasks_keeps_stopped_judge_running() -> None:
+def test_cancel_inactive_tasks_cancels_legacy_ephemeral_tasks() -> None:
     loop = _loop()
     stopped_judge = TaskCancellation()
     stopped_explore = TaskCancellation()
@@ -715,13 +1009,13 @@ def test_cancel_inactive_tasks_keeps_stopped_judge_running() -> None:
 
     loop._cancel_inactive_tasks([_summary("stopped", "stopped"), _summary("completed", "completed")])
 
-    assert stopped_judge.reason is None
+    assert stopped_judge.reason == "stopped"
     assert stopped_explore.reason == "stopped"
     assert completed_judge.reason == "completed"
     assert deleted_judge.reason == "deleted"
 
 
-def test_cleanup_stopped_containers_skips_project_with_running_judge() -> None:
+def test_cleanup_stopped_containers_does_not_treat_legacy_judge_as_active_blocker() -> None:
     loop = _loop()
     containers = _RecordingContainerManager()
     executor = _RecordingExecutor()
@@ -731,36 +1025,72 @@ def test_cleanup_stopped_containers_skips_project_with_running_judge() -> None:
 
     loop._cleanup_stopped_containers([_summary("proj_001", "stopped")])
 
-    assert containers.needs_stopped_cleanup_calls == []
-    assert executor.submissions == []
+    assert containers.needs_stopped_cleanup_calls == ["proj_001"]
+    assert len(executor.submissions) == 1
 
 
 def test_initialize_reason_checkpoint_only_for_active_projects_with_open_intents() -> None:
     loop = _loop()
     active = _summary("active", "active")
     active.unclaimed_intent_count = 1
+    collection_intent = make_intent("i001")
+    collection_intent.task_mode = "collection"
+    project = make_project(intents=[collection_intent])
+    project.project.id = "active"
+    active.fact_count = len(project.facts)
+    active.hint_count = len(project.hints)
+    loop.client = type("Client", (), {"get_project": lambda _self, _project_id: project})()
 
     loop._initialize_reason_checkpoints([active, _summary("idle", "active"), _summary("stopped", "stopped")])
 
     assert loop.reason_checkpoints == {
-        "active": ReasonCheckpoint(fact_count=1, hint_count=0, open_intent_count=1)
+        ("active", "collection"): ReasonCheckpoint(fact_count=2, hint_count=1, open_intent_count=1),
+        ("active", "validation"): ReasonCheckpoint(
+            fact_count=2,
+            hint_count=1,
+            open_intent_count=0,
+            task_mode="validation",
+        ),
     }
+
+
+def test_initialize_reason_checkpoint_does_not_create_collection_delta_for_validation_work() -> None:
+    loop = _loop()
+    active = _summary("proj_001", "active")
+    active.working_intent_count = 1
+    validation_intent = make_intent("i001")
+    validation_intent.task_mode = "validation"
+    project = make_project(intents=[validation_intent])
+    active.fact_count = len(project.facts)
+    active.hint_count = len(project.hints)
+    loop.client = type("Client", (), {"get_project": lambda _self, _project_id: project})()
+
+    loop._initialize_reason_checkpoints([active])
+
+    assert loop.reason_checkpoints[("proj_001", "collection")].open_intent_count == 0
+    assert loop.reason_checkpoints[("proj_001", "validation")].open_intent_count == 1
+
+    validation_intent.to = "f001"
+    validation_intent.concluded_at = "2026-01-01T00:00:03Z"
+
+    assert loop._reason_trigger(project, "collection") is None
+    assert loop._reason_trigger(project, "validation") == "open_intents:1->0"
 
 
 def test_select_worker_reports_busy_unhealthy_rejected_and_unsupported_workers(monkeypatch) -> None:
     loop = _loop()
     base = make_config()
-    busy = base.workers[0].model_copy(update={"name": "busy", "task_types": ["reason"]})
-    unhealthy = base.workers[0].model_copy(update={"name": "unhealthy", "task_types": ["reason"]})
-    rejected = base.workers[0].model_copy(update={"name": "rejected", "task_types": ["reason"]})
-    unsupported = base.workers[0].model_copy(update={"name": "unsupported", "task_types": ["explore"]})
+    busy = base.workers[0].model_copy(update={"name": "busy", "task_types": ["collection_reason"]})
+    unhealthy = base.workers[0].model_copy(update={"name": "unhealthy", "task_types": ["collection_reason"]})
+    rejected = base.workers[0].model_copy(update={"name": "rejected", "task_types": ["collection_reason"]})
+    unsupported = base.workers[0].model_copy(update={"name": "unsupported", "task_types": ["validation_explore"]})
     loop.config = base.model_copy(update={"workers": [busy, unhealthy, rejected, unsupported]})
-    loop.futures = {Future(): RunningTask("proj", "reason", "busy", TaskCancellation())}
+    loop.futures = {Future(): RunningTask("proj", "collection_reason", "busy", TaskCancellation())}
     loop.worker_unhealthy_until = {"unhealthy": 110.0}
-    loop.worker_rejected_until = {("proj", "reason", "rejected"): 120.0}
+    loop.worker_rejected_until = {("proj", "collection_reason", "rejected"): 120.0}
     monkeypatch.setattr("cairn.dispatcher.scheduler.loop.time.time", lambda: 100.0)
 
-    selection = loop._select_worker("proj", "reason")
+    selection = loop._select_worker("proj", "collection_reason")
 
     assert selection.worker is None
     assert selection.blocked_busy == ["busy(1/1)"]
@@ -789,10 +1119,10 @@ def test_select_worker_prunes_expired_cooldowns(monkeypatch) -> None:
     loop = _loop()
     loop.config = make_config()
     loop.worker_unhealthy_until = {"test-worker": 90.0}
-    loop.worker_rejected_until = {("proj", "reason", "test-worker"): 95.0}
+    loop.worker_rejected_until = {("proj", "collection_reason", "test-worker"): 95.0}
     monkeypatch.setattr("cairn.dispatcher.scheduler.loop.time.time", lambda: 100.0)
 
-    selection = loop._select_worker("proj", "reason")
+    selection = loop._select_worker("proj", "collection_reason")
 
     assert selection.worker is not None
     assert selection.worker.name == "test-worker"

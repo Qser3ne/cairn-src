@@ -35,13 +35,14 @@ def test_reason_payload_limits_number_of_intents() -> None:
         },
         open_intents_empty=True,
         max_intents=1,
+        task_mode="validation",
     )
 
     assert kind == "intents"
-    assert intents == [{"from": ["f001"], "description": "one"}]
+    assert intents == [{"from": ["f001"], "description": "one", "task_mode": "validation"}]
 
 
-def test_recon_reason_payload_requires_auth_scope() -> None:
+def test_collection_reason_payload_requires_auth_scope() -> None:
     with pytest.raises(ValueError, match="auth_scope is required"):
         validate_reason_payload(
             {
@@ -51,10 +52,11 @@ def test_recon_reason_payload_requires_auth_scope() -> None:
             open_intents_empty=True,
             max_intents=2,
             require_auth_scope=True,
+            task_mode="collection",
         )
 
 
-def test_vuln_reason_payload_allows_missing_auth_scope() -> None:
+def test_validation_reason_payload_defaults_intents_to_validation_task_mode() -> None:
     kind, intents = validate_reason_payload(
         {
             "accepted": True,
@@ -62,16 +64,143 @@ def test_vuln_reason_payload_allows_missing_auth_scope() -> None:
         },
         open_intents_empty=True,
         max_intents=2,
+        task_mode="validation",
     )
 
     assert kind == "intents"
-    assert intents == [{"from": ["f001"], "description": "verify upload"}]
+    assert intents == [{"from": ["f001"], "description": "verify upload", "task_mode": "validation"}]
+
+
+def test_collection_reason_payload_defaults_intents_to_collection_task_mode() -> None:
+    kind, intents = validate_reason_payload(
+        {
+            "accepted": True,
+            "data": {
+                "intents": [
+                    {
+                        "from": ["origin"],
+                        "auth_scope": "anonymous",
+                        "description": "[feature_mapping] anonymous baseline",
+                    }
+                ]
+            },
+        },
+        open_intents_empty=True,
+        max_intents=2,
+        require_auth_scope=True,
+        task_mode="collection",
+    )
+
+    assert kind == "intents"
+    assert intents == [
+        {
+            "from": ["origin"],
+            "auth_scope": "anonymous",
+            "description": "[feature_mapping] anonymous baseline",
+            "task_mode": "collection",
+        }
+    ]
+
+
+def test_collection_reason_payload_accepts_validation_seed_intent() -> None:
+    kind, intents = validate_reason_payload(
+        {
+            "accepted": True,
+            "data": {
+                "intents": [
+                    {
+                        "from": ["f001"],
+                        "task_mode": "validation",
+                        "description": "validate IDOR hypothesis on order API",
+                    }
+                ]
+            },
+        },
+        open_intents_empty=False,
+        max_intents=2,
+        require_auth_scope=True,
+        task_mode="collection",
+    )
+
+    assert kind == "intents"
+    assert intents == [
+        {
+            "from": ["f001"],
+            "task_mode": "validation",
+            "description": "validate IDOR hypothesis on order API",
+        }
+    ]
+
+
+def test_collection_reason_payload_rejects_validation_seed_without_validation_focus() -> None:
+    with pytest.raises(ValueError, match="validation-focused"):
+        validate_reason_payload(
+            {
+                "accepted": True,
+                "data": {
+                    "intents": [
+                        {
+                            "from": ["f001"],
+                            "task_mode": "validation",
+                            "description": "map order API routes",
+                        }
+                    ]
+                },
+            },
+            open_intents_empty=False,
+            max_intents=2,
+            require_auth_scope=True,
+            task_mode="collection",
+        )
+
+
+def test_reason_payload_rejects_unknown_task_mode() -> None:
+    with pytest.raises(ValueError, match="unknown task_mode"):
+        validate_reason_payload(
+            {
+                "accepted": True,
+                "data": {
+                    "intents": [
+                        {
+                            "from": ["f001"],
+                            "task_mode": "exploit",
+                            "description": "validate IDOR hypothesis on order API",
+                        }
+                    ]
+                },
+            },
+            open_intents_empty=False,
+            max_intents=2,
+            task_mode="validation",
+        )
+
+
+@pytest.mark.parametrize("intent_task_mode", ["", None, False, 0])
+def test_reason_payload_rejects_explicit_falsy_task_mode(intent_task_mode: object) -> None:
+    with pytest.raises(ValueError, match="unknown task_mode"):
+        validate_reason_payload(
+            {
+                "accepted": True,
+                "data": {
+                    "intents": [
+                        {
+                            "from": ["f001"],
+                            "task_mode": intent_task_mode,
+                            "description": "validate IDOR hypothesis on order API",
+                        }
+                    ]
+                },
+            },
+            open_intents_empty=False,
+            max_intents=2,
+            task_mode="validation",
+        )
 
 
 def test_fork_seed_payload_requires_existing_source_fact() -> None:
     graph_yaml = """
 project:
-  project_kind: recon
+  project_kind: vuln
 facts:
 - id: origin
   description: https://target.test
@@ -186,6 +315,16 @@ def test_judge_payload_accepts_documented_shape() -> None:
     assert data == _valid_judge_data()
 
 
+def test_judge_payload_accepts_collection_recommended_action() -> None:
+    payload = _valid_judge_data()
+    payload["recommended_action"] = "continue_anonymous_collection"
+
+    kind, data = validate_judge_payload({"accepted": True, "data": payload})
+
+    assert kind == "judge"
+    assert data["recommended_action"] == "continue_anonymous_collection"
+
+
 @pytest.mark.parametrize(
     "missing_field",
     ["score", "recommended_action", "checklist", "blocking_gaps", "non_blocking_gaps"],
@@ -266,12 +405,13 @@ def test_reason_payload_requires_intent_when_none_are_open() -> None:
             {"accepted": True, "data": {}},
             open_intents_empty=True,
             max_intents=3,
+            task_mode="validation",
         )
 
 
 def test_explore_payload_rejects_planning_text() -> None:
     with pytest.raises(ValueError):
-        validate_explore_payload(parse_json_output("Need inspect files and keep working."))
+        validate_explore_payload(parse_json_output("Need inspect files and keep working."), task_mode="validation")
 
 
 def test_explore_payload_accepts_feature_surface_metadata() -> None:
@@ -290,7 +430,8 @@ def test_explore_payload_accepts_feature_surface_metadata() -> None:
                 },
                 "findings": [_valid_finding()],
             },
-        }
+        },
+        task_mode="validation",
     )
 
     assert kind == "fact"
@@ -304,6 +445,42 @@ def test_explore_payload_accepts_feature_surface_metadata() -> None:
             "routes": ["/upload"],
             "apis": ["POST /api/upload"],
         },
+    }
+
+
+def test_collection_explore_payload_rejects_findings() -> None:
+    with pytest.raises(ValueError, match="collection"):
+        validate_explore_payload(
+            {
+                "accepted": True,
+                "data": {
+                    "description": "intent_summary: map upload feature",
+                    "findings": [_valid_finding()],
+                },
+            },
+            task_mode="collection",
+        )
+
+
+def test_validation_explore_payload_accepts_findings() -> None:
+    kind, data = validate_explore_payload(
+        {
+            "accepted": True,
+            "data": {
+                "description": "intent_summary: validate upload feature",
+                "findings": [_valid_finding()],
+            },
+        },
+        task_mode="validation",
+    )
+
+    assert kind == "fact"
+    assert data == {
+        "description": "intent_summary: validate upload feature",
+        "fact_type": "observation",
+        "title": None,
+        "summary": None,
+        "details": {},
     }
 
 
@@ -336,7 +513,8 @@ def test_explore_payload_rejects_incomplete_findings(missing_field: str) -> None
                     "description": "intent_summary: validate upload feature",
                     "findings": [finding],
                 },
-            }
+            },
+            task_mode="validation",
         )
 
 

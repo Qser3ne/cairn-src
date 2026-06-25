@@ -1,11 +1,11 @@
 project:
-  title: Example recon initial origin
+  title: Example collection initial origin
   origin: https://app.example.test/
-  project_kind: recon
+  project_kind: vuln
   auth_mode: dual
   parent_project_id: null
   parent_snapshot_id: null
-recon:
+collection:
   max_reason_rounds: 5
   reason_rounds: 0
   explore_rounds: 0
@@ -14,4 +14,4 @@ recon:
   judged_at: null
 facts:
   - id: origin
-    description: "Origin target is https://app.example.test/ for an authorized synthetic recon fixture."
+    description: "Origin target is https://app.example.test/ for an authorized synthetic collection fixture."

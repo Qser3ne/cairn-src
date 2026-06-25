@@ -1,5 +1,5 @@
 # Cairn SRC
-### Authorized SRC recon and vulnerability workflow engine
+### Authorized SRC vulnerability workflow engine
 
 This repository, `Qser3ne/cairn-src`, is a modified version of
 [oritera/Cairn](https://github.com/oritera/Cairn). It is maintained by
@@ -10,34 +10,41 @@ vulnerability research workflows.
 
 Cairn is a fact-graph based collaborative exploration protocol. This fork keeps
 the blackboard-style fact/intent graph and narrows the current product surface
-to an SRC-only workflow:
+to a vuln-only SRC workflow:
 
-- `recon` projects collect attack-surface facts, authentication boundaries,
-  endpoints, assets, and candidate leads.
-- `vuln` projects are AI-seeded from recon snapshots and focus on validating,
-  following up, and reporting vulnerabilities.
+- `vuln` projects start from an `origin` fact and optional account pool.
+- `collection` tasks map features, APIs, authentication boundaries, and
+  candidate validation seeds without writing findings.
+- `validation` tasks verify vulnerability hypotheses, write evidence-backed
+  findings, and queue follow-up validation or reports.
+- `report` tasks draft SRC submission reports from confirmed findings.
 - workers never decide that a project is complete on their own. `completed` is
   a manual archive state.
 
 The generic Standard/bootstrap flow from upstream has been removed in this
-fork. New projects start from an `origin` fact and grow through model-generated
-intents, confirmed facts, human hints, findings, snapshots, and report drafts.
+fork. New projects grow through model-generated intents, confirmed facts, human
+hints, findings, and report drafts. Legacy recon snapshots and fork jobs are
+kept only for migration/history handling and are not part of the active
+workflow.
 
 ## Current workflow
 
-1. Create a `recon` project with a title, origin, hints, and at least one
-   cookie session. Recon always uses `auth_mode="dual"` so the system can
-   explore both anonymous and authenticated attack surface.
-2. The dispatcher schedules `reason` tasks to propose non-duplicate intents and
-   `explore` tasks to execute one claimed intent at a time.
-3. Recon `explore` tasks write confirmed facts. Recon can be evaluated by a
-   `judge` task, which records an ephemeral readiness judgement without writing
-   to the graph.
-4. Create a recon snapshot, then start an AI seeded fork from that snapshot.
-   The fork planner reads the snapshot graph and creates child vuln seed facts.
-5. Vuln `explore` tasks can write facts and findings. Findings can create
-   follow-up explore intents or report intents.
-6. `report` tasks draft SRC submission reports and update finding report state.
+1. Create a `vuln` project with a title, origin, optional hints, and optional
+   accounts. Projects with accounts may use `auth_mode="dual"` or
+   `auth_mode="authenticated"`; projects without accounts run anonymously.
+2. The dispatcher starts collection baseline work by scheduling
+   `collection_reason`, which proposes anonymous and authenticated collection
+   intents when the project has accounts.
+3. `collection_explore` tasks collect feature, API, route, auth-boundary, and
+   candidate-surface facts. These facts may include validation seed intent
+   suggestions, but collection does not write findings.
+4. Collection facts and validation seed intents feed `validation_reason`, which
+   proposes focused vulnerability validation intents.
+5. `validation_explore` tasks validate vulnerabilities, write evidence-backed
+   findings, and create follow-up validation or report intents through finding
+   lifecycle fields.
+6. `report` tasks draft SRC submission reports from findings and update finding
+   report state.
 
 The cookie session pool is intent-scoped. Anonymous explore intents do not
 lease a session. Authenticated explore intents lease one cookie session,
@@ -51,8 +58,8 @@ ends.
 | Fact | A confirmed observation written to the project graph |
 | Intent | A declared direction of exploration that has not been executed yet |
 | Hint | Human guidance injected into the graph for future worker reads |
-| Finding | A vuln-project vulnerability candidate with lifecycle state |
-| Snapshot | A recon graph capture used to fork a vuln project |
+| Finding | A vulnerability candidate with lifecycle state |
+| Validation seed | A collection-derived fact or intent that focuses validation work |
 | Report | A drafted SRC report generated from a finding |
 
 ## Architecture
@@ -63,7 +70,7 @@ Browser / API client
         v
 Cairn Server
   FastAPI + SQLite + static UI
-  Projects / Facts / Intents / Hints / Findings / Snapshots / Jobs
+  Projects / Facts / Intents / Hints / Findings / Reports / Legacy Jobs
         ^
         | HTTP protocol
         v
@@ -86,20 +93,20 @@ dispatcher to validate and write back.
 The Chinese documentation set lives under [`docs/`](./docs/):
 
 - [`docs/user/quickstart.md`](./docs/user/quickstart.md) for local setup and first run.
-- [`docs/user/src-workflow.md`](./docs/user/src-workflow.md) for the recon-to-vuln workflow.
+- [`docs/user/src-workflow.md`](./docs/user/src-workflow.md) for the collection/validation/report workflow.
 - [`docs/architecture/`](./docs/architecture/) for server, dispatcher, data model, worker contracts, and prompt design.
 - [`docs/ops/`](./docs/ops/) for configuration safety, worker containers, deployment, and release notes.
 - [`docs/development/testing.md`](./docs/development/testing.md) for the test and quality gate matrix.
 
 ## Task types
 
-| Task | Project kind | Purpose | Writes |
+| Task | Task mode | Purpose | Writes |
 | --- | --- | --- | --- |
-| `reason` | `recon`, `vuln` | Read graph state and propose useful next intents | Intents or no-op round state |
-| `explore` | `recon`, `vuln` | Claim and execute one intent | Facts, optional vuln findings |
-| `judge` | `recon` | Evaluate recon readiness for vuln fork | Ephemeral job result |
-| `fork_seed` | `recon` | Generate child vuln seed facts from a recon snapshot | Child vuln project |
-| `report` | `vuln` | Draft an SRC report from a finding | Finding report draft |
+| `collection_reason` | `collection` | Propose collection or validation seed intents | Collection intents, validation seed intents, or no-op round state |
+| `collection_explore` | `collection` | Collect feature/API/auth facts | Facts only |
+| `validation_reason` | `validation` | Propose vulnerability validation intents | Validation intents or no-op round state |
+| `validation_explore` | `validation` | Validate vulnerabilities and write findings | Facts and optional findings |
+| `report` | `report` | Draft an SRC report from a finding | Finding report draft |
 
 Supported worker backends are Claude Code, Codex, Pi, and the mock adapter used
 by tests.

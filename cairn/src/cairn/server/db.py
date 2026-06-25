@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
-    project_kind TEXT NOT NULL DEFAULT 'recon',
+    project_kind TEXT NOT NULL DEFAULT 'vuln',
     auth_mode TEXT NOT NULL DEFAULT 'anonymous',
     parent_project_id TEXT REFERENCES projects(id) ON DELETE RESTRICT,
     parent_snapshot_id TEXT,
@@ -31,10 +31,10 @@ CREATE TABLE IF NOT EXISTS projects (
     reason_started_at TEXT,
     reason_last_heartbeat_at TEXT,
     reason_pending INTEGER NOT NULL DEFAULT 0,
-    recon_max_reason_rounds INTEGER,
-    recon_reason_rounds INTEGER NOT NULL DEFAULT 0,
-    recon_explore_rounds INTEGER NOT NULL DEFAULT 0,
-    recon_stable_rounds INTEGER NOT NULL DEFAULT 0,
+    collection_max_reason_rounds INTEGER,
+    collection_reason_rounds INTEGER NOT NULL DEFAULT 0,
+    collection_explore_rounds INTEGER NOT NULL DEFAULT 0,
+    collection_stable_rounds INTEGER NOT NULL DEFAULT 0,
     judge_status TEXT NOT NULL DEFAULT 'not_judged',
     judged_at TEXT
 );
@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS intents (
     created_at TEXT NOT NULL,
     concluded_at TEXT,
     intent_kind TEXT NOT NULL DEFAULT 'explore',
+    task_mode TEXT NOT NULL DEFAULT 'validation',
     finding_id TEXT,
     auth_scope TEXT,
     PRIMARY KEY (id, project_id)
@@ -147,6 +148,16 @@ CREATE TABLE IF NOT EXISTS ephemeral_jobs (
     expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS project_reason_leases (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_mode TEXT NOT NULL,
+    worker TEXT NOT NULL,
+    trigger TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    last_heartbeat_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, task_mode)
+);
+
 CREATE TABLE IF NOT EXISTS finding_reports (
     id TEXT NOT NULL,
     project_id TEXT NOT NULL,
@@ -188,10 +199,12 @@ def configure(path: Path) -> None:
         _ensure_src_only_project_columns(conn)
         _ensure_fact_structure_columns(conn)
         _migrate_intent_table(conn)
+        _migrate_recon_projects_to_vuln(conn)
         _ensure_project_accounts_table(conn)
         _ensure_findings_table(conn)
         _ensure_project_snapshots_table(conn)
         _ensure_ephemeral_jobs_table(conn)
+        _ensure_project_reason_leases_table(conn)
         _ensure_finding_reports_table(conn)
         _ensure_indexes(conn)
         _remove_goal_facts(conn)
@@ -240,18 +253,26 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
     if "parent_snapshot_id" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN parent_snapshot_id TEXT")
         columns.add("parent_snapshot_id")
-    if "recon_max_reason_rounds" not in columns:
-        conn.execute("ALTER TABLE projects ADD COLUMN recon_max_reason_rounds INTEGER")
-        columns.add("recon_max_reason_rounds")
-    if "recon_reason_rounds" not in columns:
-        conn.execute("ALTER TABLE projects ADD COLUMN recon_reason_rounds INTEGER NOT NULL DEFAULT 0")
-        columns.add("recon_reason_rounds")
-    if "recon_explore_rounds" not in columns:
-        conn.execute("ALTER TABLE projects ADD COLUMN recon_explore_rounds INTEGER NOT NULL DEFAULT 0")
-        columns.add("recon_explore_rounds")
-    if "recon_stable_rounds" not in columns:
-        conn.execute("ALTER TABLE projects ADD COLUMN recon_stable_rounds INTEGER NOT NULL DEFAULT 0")
-        columns.add("recon_stable_rounds")
+    if "collection_max_reason_rounds" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN collection_max_reason_rounds INTEGER")
+        if "recon_max_reason_rounds" in columns:
+            conn.execute("UPDATE projects SET collection_max_reason_rounds = recon_max_reason_rounds")
+        columns.add("collection_max_reason_rounds")
+    if "collection_reason_rounds" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN collection_reason_rounds INTEGER NOT NULL DEFAULT 0")
+        if "recon_reason_rounds" in columns:
+            conn.execute("UPDATE projects SET collection_reason_rounds = recon_reason_rounds")
+        columns.add("collection_reason_rounds")
+    if "collection_explore_rounds" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN collection_explore_rounds INTEGER NOT NULL DEFAULT 0")
+        if "recon_explore_rounds" in columns:
+            conn.execute("UPDATE projects SET collection_explore_rounds = recon_explore_rounds")
+        columns.add("collection_explore_rounds")
+    if "collection_stable_rounds" not in columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN collection_stable_rounds INTEGER NOT NULL DEFAULT 0")
+        if "recon_stable_rounds" in columns:
+            conn.execute("UPDATE projects SET collection_stable_rounds = recon_stable_rounds")
+        columns.add("collection_stable_rounds")
     if "judge_status" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN judge_status TEXT NOT NULL DEFAULT 'not_judged'")
         columns.add("judge_status")
@@ -282,10 +303,10 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_started_at TEXT,
             reason_last_heartbeat_at TEXT,
             reason_pending INTEGER NOT NULL DEFAULT 0,
-            recon_max_reason_rounds INTEGER,
-            recon_reason_rounds INTEGER NOT NULL DEFAULT 0,
-            recon_explore_rounds INTEGER NOT NULL DEFAULT 0,
-            recon_stable_rounds INTEGER NOT NULL DEFAULT 0,
+            collection_max_reason_rounds INTEGER,
+            collection_reason_rounds INTEGER NOT NULL DEFAULT 0,
+            collection_explore_rounds INTEGER NOT NULL DEFAULT 0,
+            collection_stable_rounds INTEGER NOT NULL DEFAULT 0,
             judge_status TEXT NOT NULL DEFAULT 'not_judged',
             judged_at TEXT
         )
@@ -307,10 +328,10 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_started_at,
             reason_last_heartbeat_at,
             reason_pending,
-            recon_max_reason_rounds,
-            recon_reason_rounds,
-            recon_explore_rounds,
-            recon_stable_rounds,
+            collection_max_reason_rounds,
+            collection_reason_rounds,
+            collection_explore_rounds,
+            collection_stable_rounds,
             judge_status,
             judged_at
         )
@@ -328,10 +349,10 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_started_at,
             reason_last_heartbeat_at,
             reason_pending,
-            recon_max_reason_rounds,
-            recon_reason_rounds,
-            recon_explore_rounds,
-            recon_stable_rounds,
+            collection_max_reason_rounds,
+            collection_reason_rounds,
+            collection_explore_rounds,
+            collection_stable_rounds,
             judge_status,
             judged_at
         FROM projects
@@ -357,6 +378,18 @@ def _ensure_fact_structure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE facts ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'")
 
 
+def _migrate_recon_projects_to_vuln(conn: sqlite3.Connection) -> None:
+    table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'projects'"
+    ).fetchone()
+    if table is None:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+    if "project_kind" not in columns:
+        return
+    conn.execute("UPDATE projects SET project_kind = 'vuln' WHERE project_kind = 'recon'")
+
+
 def _migrate_intent_table(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(intents)")}
     if "intent_kind" not in columns:
@@ -368,6 +401,21 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
     if "auth_scope" not in columns:
         conn.execute("ALTER TABLE intents ADD COLUMN auth_scope TEXT")
         columns.add("auth_scope")
+    if "task_mode" not in columns:
+        conn.execute("ALTER TABLE intents ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'validation'")
+        conn.execute(
+            """
+            UPDATE intents
+            SET task_mode = CASE
+                WHEN project_id IN (
+                    SELECT id FROM projects WHERE project_kind = 'recon'
+                ) THEN 'collection'
+                WHEN intent_kind = 'report' THEN 'report'
+                ELSE 'validation'
+            END
+            """
+        )
+        columns.add("task_mode")
     conn.execute(
         """
         UPDATE intents
@@ -398,6 +446,7 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             concluded_at TEXT,
             intent_kind TEXT NOT NULL DEFAULT 'explore',
+            task_mode TEXT NOT NULL DEFAULT 'validation',
             finding_id TEXT,
             auth_scope TEXT,
             PRIMARY KEY (id, project_id)
@@ -417,6 +466,7 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
             created_at,
             concluded_at,
             intent_kind,
+            task_mode,
             finding_id,
             auth_scope
         )
@@ -431,6 +481,7 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
             created_at,
             concluded_at,
             intent_kind,
+            task_mode,
             finding_id,
             auth_scope
         FROM intents
@@ -573,6 +624,49 @@ def _ensure_ephemeral_jobs_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ephemeral_jobs ADD COLUMN worker TEXT")
 
 
+def _ensure_project_reason_leases_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_reason_leases (
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            task_mode TEXT NOT NULL,
+            worker TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            last_heartbeat_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, task_mode)
+        )
+        """
+    )
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+    if {"reason_worker", "reason_trigger", "reason_started_at", "reason_last_heartbeat_at"} - columns:
+        return
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO project_reason_leases (
+            project_id,
+            task_mode,
+            worker,
+            trigger,
+            started_at,
+            last_heartbeat_at
+        )
+        SELECT
+            id,
+            'collection',
+            reason_worker,
+            reason_trigger,
+            reason_started_at,
+            reason_last_heartbeat_at
+        FROM projects
+        WHERE reason_worker IS NOT NULL
+          AND reason_trigger IS NOT NULL
+          AND reason_started_at IS NOT NULL
+          AND reason_last_heartbeat_at IS NOT NULL
+        """
+    )
+
+
 def _ensure_finding_reports_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -602,6 +696,7 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_project_snapshots_project_created ON project_snapshots(project_id, created_at, id)",
         "CREATE INDEX IF NOT EXISTS idx_intent_sources_project_intent ON intent_sources(project_id, intent_id)",
         "CREATE INDEX IF NOT EXISTS idx_ephemeral_jobs_queue ON ephemeral_jobs(status, job_type, created_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_project_reason_leases_project ON project_reason_leases(project_id, task_mode)",
         "CREATE INDEX IF NOT EXISTS idx_finding_reports_project_created ON finding_reports(project_id, created_at, id)",
     ):
         conn.execute(ddl)

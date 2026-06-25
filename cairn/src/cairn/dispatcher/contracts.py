@@ -39,14 +39,61 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
     return False
 
 
-def _validate_reason_intent(intent: Any, index: int, *, require_auth_scope: bool = False) -> None:
+REASON_TASK_MODES = {"collection", "validation"}
+VALIDATION_FOCUS_TERMS = (
+    "validate",
+    "validation",
+    "vulnerability",
+    "vuln",
+    "idor",
+    "xss",
+    "csrf",
+    "ssrf",
+    "rce",
+    "injection",
+    "authz",
+    "authorization",
+    "bypass",
+    "exploit",
+    "finding",
+    "reproduce",
+    "impact",
+)
+
+
+def _has_validation_focus(description: Any) -> bool:
+    if not isinstance(description, str):
+        return False
+    text = description.lower()
+    return any(term in text for term in VALIDATION_FOCUS_TERMS)
+
+
+def _validate_reason_intent(
+    intent: Any,
+    index: int,
+    *,
+    task_mode: str,
+    require_auth_scope: bool = False,
+) -> dict[str, Any]:
     if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
         raise ValueError(f"invalid intent at index {index}")
+    intent_task_mode = intent["task_mode"] if "task_mode" in intent else task_mode
+    if intent_task_mode not in REASON_TASK_MODES:
+        raise ValueError(f"unknown task_mode at index {index}")
+    if task_mode == "validation" and intent_task_mode != "validation":
+        raise ValueError(f"validation reason intent must use task_mode validation at index {index}")
+    if task_mode == "collection" and intent_task_mode == "validation" and "task_mode" not in intent:
+        raise ValueError(f"validation seed intent must explicitly set task_mode at index {index}")
+    if task_mode == "collection" and intent_task_mode == "validation" and not _has_validation_focus(intent.get("description")):
+        raise ValueError(f"validation seed intent must be validation-focused at index {index}")
     auth_scope = intent.get("auth_scope")
-    if require_auth_scope and auth_scope not in ("anonymous", "authenticated"):
+    if require_auth_scope and intent_task_mode == "collection" and auth_scope not in ("anonymous", "authenticated"):
         raise ValueError(f"auth_scope is required at index {index}")
     if auth_scope is not None and auth_scope not in ("anonymous", "authenticated"):
         raise ValueError(f"invalid auth_scope at index {index}")
+    normalized = dict(intent)
+    normalized["task_mode"] = intent_task_mode
+    return normalized
 
 
 EXPLORE_ALLOWED_KEYS = {
@@ -60,8 +107,8 @@ EXPLORE_ALLOWED_KEYS = {
 
 JUDGE_RECOMMENDED_ACTIONS = {
     "create_vuln_project",
-    "continue_anonymous_recon",
-    "continue_authenticated_recon",
+    "continue_anonymous_collection",
+    "continue_authenticated_collection",
     "clarify_scope",
     "fix_account_access",
     "stop_or_archive",
@@ -99,8 +146,12 @@ def validate_reason_payload(
     payload: dict[str, Any],
     open_intents_empty: bool,
     max_intents: int,
+    *,
+    task_mode: str,
     require_auth_scope: bool = False,
 ) -> tuple[str, dict[str, Any] | list[dict[str, Any]] | None]:
+    if task_mode not in REASON_TASK_MODES:
+        raise ValueError("unknown task_mode")
     accepted, data = _unwrap_wrapped_payload(payload)
     if accepted is False:
         return "rejected", None
@@ -122,11 +173,19 @@ def validate_reason_payload(
     if intents is not None:
         if not isinstance(intents, list):
             raise ValueError("intents must be an array")
+        normalized_intents = []
         for i, intent in enumerate(intents):
-            _validate_reason_intent(intent, i, require_auth_scope=require_auth_scope)
+            normalized_intents.append(
+                _validate_reason_intent(
+                    intent,
+                    i,
+                    task_mode=task_mode,
+                    require_auth_scope=require_auth_scope,
+                )
+            )
         if not intents and open_intents_empty and decision not in ("noop", "no_new_high_value"):
             raise ValueError("intents must not be empty when open_intents is empty")
-        intents = intents[:max_intents]
+        intents = normalized_intents[:max_intents]
         if not intents:
             if decision == "no_new_high_value":
                 return "stable", None
@@ -278,7 +337,9 @@ def validate_report_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any
     return "report", {"report_markdown": report_markdown.strip(), "report_json": report_json}
 
 
-def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+def validate_explore_payload(payload: dict[str, Any], *, task_mode: str) -> tuple[str, dict[str, Any] | None]:
+    if task_mode not in ("collection", "validation"):
+        raise ValueError("unknown task_mode")
     accepted, data = _unwrap_wrapped_payload(payload)
     if accepted is False:
         return "rejected", None
@@ -300,6 +361,8 @@ def validate_explore_payload(payload: dict[str, Any]) -> tuple[str, dict[str, An
     if not isinstance(details, dict):
         raise ValueError("details must be an object")
     findings = data.get("findings")
+    if task_mode == "collection" and findings:
+        raise ValueError("collection explore payload cannot include findings")
     if findings is not None:
         if not isinstance(findings, list):
             raise ValueError("findings must be an array")

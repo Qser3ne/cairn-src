@@ -21,7 +21,7 @@ from cairn.server.services import (
     get_finding_or_404,
     get_claimable_open_intent_or_404,
     get_releasable_open_intent_or_404,
-    increment_recon_explore_round,
+    increment_collection_explore_round,
     intent_to_model,
     mark_reason_pending_if_reason_running,
     next_fact_id,
@@ -52,15 +52,28 @@ def create_intent(project_id: str, body: CreateIntentRequest):
         if project is None:
             raise HTTPException(404, "Project not found")
 
+        if body.intent_kind == "report":
+            body.task_mode = "report"
+        elif body.task_mode is None:
+            body.task_mode = "validation"
+        elif body.task_mode == "report":
+            raise HTTPException(400, "task_mode=report requires a report intent")
+
+        if body.intent_kind == "explore" and body.task_mode == "collection" and body.auth_scope is None:
+            raise HTTPException(400, "collection intents require auth_scope")
+        if body.intent_kind == "explore" and body.task_mode == "collection" and body.auth_scope == "authenticated":
+            account_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_accounts WHERE project_id = ?", (project_id,)
+            ).fetchone()["count"]
+            if account_count == 0:
+                raise HTTPException(400, "authenticated collection intents require project accounts")
         if body.intent_kind == "explore" and body.auth_scope is None:
-            body.auth_scope = (
-                project["auth_mode"]
-                if project["project_kind"] == "vuln"
-                else "anonymous"
-            )
+            body.auth_scope = "anonymous" if project["auth_mode"] == "dual" else project["auth_mode"]
         if (
             body.intent_kind == "explore"
+            and body.task_mode == "validation"
             and project["project_kind"] == "vuln"
+            and project["auth_mode"] != "dual"
             and body.auth_scope != project["auth_mode"]
         ):
             raise HTTPException(400, "vuln intent auth_scope must match project auth_mode")
@@ -88,9 +101,10 @@ def create_intent(project_id: str, body: CreateIntentRequest):
                 created_at,
                 concluded_at,
                 intent_kind,
+                task_mode,
                 finding_id,
                 auth_scope
-            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
             """,
             (
                 iid,
@@ -101,6 +115,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
                 now if claimed else None,
                 now,
                 body.intent_kind,
+                body.task_mode,
                 body.finding_id,
                 body.auth_scope,
             ),
@@ -122,6 +137,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
             created_at=now,
             concluded_at=None,
             intent_kind=body.intent_kind,
+            task_mode=body.task_mode,
             finding_id=body.finding_id,
             auth_scope=body.auth_scope,
         )
@@ -186,8 +202,8 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
             raise HTTPException(404, "Project not found")
         if intent["intent_kind"] == "report":
             raise HTTPException(400, "Report intents must be concluded through the report endpoint")
-        if project["project_kind"] == "recon" and body.findings:
-            raise HTTPException(400, "recon projects cannot write findings")
+        if intent["task_mode"] == "collection" and body.findings:
+            raise HTTPException(400, "collection intents cannot write findings")
 
         now = utcnow()
         fid = next_fact_id(conn, project_id)
@@ -283,9 +299,10 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
                         created_at,
                         concluded_at,
                         intent_kind,
+                        task_mode,
                         finding_id,
                         auth_scope
-                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_followup', NULL, NULL, ?, NULL, 'explore', ?, ?)
+                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_followup', NULL, NULL, ?, NULL, 'explore', 'validation', ?, ?)
                     """,
                     (
                         followup_intent_id,
@@ -319,9 +336,10 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
                         created_at,
                         concluded_at,
                         intent_kind,
+                        task_mode,
                         finding_id,
                         auth_scope
-                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_report', NULL, NULL, ?, NULL, 'report', ?, NULL)
+                    ) VALUES (?, ?, NULL, ?, 'dispatcher.finding_report', NULL, NULL, ?, NULL, 'report', 'report', ?, NULL)
                     """,
                     (
                         report_intent_id,
@@ -345,8 +363,8 @@ def conclude(project_id: str, intent_id: str, body: ConcludeRequest):
             ).fetchone()
             findings.append(finding_to_model(row))
 
-        if project and project["project_kind"] == "recon":
-            increment_recon_explore_round(conn, project_id)
+        if intent["task_mode"] == "collection":
+            increment_collection_explore_round(conn, project_id)
 
         updated = conn.execute(
             "SELECT * FROM intents WHERE id = ? AND project_id = ?",
@@ -374,7 +392,7 @@ def conclude_report(project_id: str, intent_id: str, body: ReportConcludeRequest
         if project["project_kind"] != "vuln":
             raise HTTPException(400, "reports are only supported for vuln projects")
         intent = get_claimable_open_intent_or_404(conn, project_id, intent_id, body.worker)
-        if intent["intent_kind"] != "report":
+        if intent["intent_kind"] != "report" or intent["task_mode"] != "report":
             raise HTTPException(400, "Intent is not a report intent")
         if not intent["finding_id"]:
             raise HTTPException(409, "Report intent is missing finding_id")

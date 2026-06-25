@@ -79,7 +79,7 @@ Worker 容器中建议的目录语义：
 - 使用 `api-key-placeholder`、`token-placeholder` 等占位值。
 - 不包含真实 Cookie、手机号、邮箱、内网地址、业务路径或漏洞证据。
 
-`cairn/tests/test_recon_prompt_fixtures.py` 会检查 recon prompt fixture 是否包含 secret-looking 文本，并要求 fixture 域名使用 `.example.test`。
+`cairn/tests/test_collection_prompt_fixtures.py` 会检查 collection prompt fixture 是否包含 secret-looking 文本，并要求 fixture 域名使用 `.example.test`。
 
 ## 公开前检查
 

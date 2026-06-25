@@ -6,7 +6,7 @@ import re
 import yaml
 
 
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "prompts" / "recon"
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "prompts" / "collection"
 FIXTURE_NAMES = ("initial_origin.yaml", "with_open_intents.yaml", "ready_for_judge.yaml")
 SENSITIVE_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),
@@ -23,11 +23,15 @@ def _load_fixture(name: str) -> dict:
     return data
 
 
-def _assert_common_recon_graph(data: dict) -> None:
-    assert data["project"]["project_kind"] == "recon"
+def _assert_common_collection_graph(data: dict) -> None:
+    assert data["project"]["project_kind"] == "vuln"
     assert data["project"]["auth_mode"] == "dual"
     assert data["project"]["origin"].endswith(".example.test/")
-    assert data["recon"]["judge_status"] in {"not_judged", "ready", "not_ready", "blocked"}
+    assert "recon" not in data
+    assert data["collection"]["judge_status"] in {"not_judged", "ready", "not_ready", "blocked"}
+    assert {"max_reason_rounds", "reason_rounds", "explore_rounds", "stable_rounds"} <= data[
+        "collection"
+    ].keys()
     assert isinstance(data["facts"], list)
     assert data["facts"][0]["id"] == "origin"
     assert "findings" not in data
@@ -35,10 +39,10 @@ def _assert_common_recon_graph(data: dict) -> None:
     assert "reports" not in data
 
 
-def test_recon_prompt_fixtures_are_valid_yaml_and_have_required_fields() -> None:
+def test_collection_prompt_fixtures_are_valid_yaml_and_have_required_fields() -> None:
     for name in FIXTURE_NAMES:
         data = _load_fixture(name)
-        _assert_common_recon_graph(data)
+        _assert_common_collection_graph(data)
 
 
 def test_initial_origin_fixture_contains_only_origin_fact_and_no_intents() -> None:
@@ -56,9 +60,10 @@ def test_with_open_intents_fixture_has_anonymous_and_authenticated_open_intents(
     assert all(intent["to"] is None for intent in intents)
     assert all(intent["worker"] is None for intent in intents)
     assert all("auth_scope=" in intent["description"] for intent in intents)
+    assert all(intent["task_mode"] == "collection" for intent in intents)
 
 
-def test_ready_for_judge_fixture_has_judge_relevant_recon_coverage() -> None:
+def test_ready_for_judge_fixture_has_judge_relevant_collection_coverage() -> None:
     data = _load_fixture("ready_for_judge.yaml")
     fact_text = "\n".join(fact["description"] for fact in data["facts"])
 
@@ -69,9 +74,10 @@ def test_ready_for_judge_fixture_has_judge_relevant_recon_coverage() -> None:
     assert "candidate" in fact_text.lower()
     assert {intent["auth_scope"] for intent in data["intents"]} == {"anonymous", "authenticated"}
     assert all(intent["to"] for intent in data["intents"])
+    assert all(intent["task_mode"] == "collection" for intent in data["intents"])
 
 
-def test_recon_prompt_fixtures_do_not_include_real_targets_or_secrets() -> None:
+def test_collection_prompt_fixtures_do_not_include_real_targets_or_secrets() -> None:
     for name in FIXTURE_NAMES:
         text = (FIXTURE_DIR / name).read_text(encoding="utf-8")
         for pattern in SENSITIVE_PATTERNS:

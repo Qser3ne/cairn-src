@@ -17,11 +17,9 @@ from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.startup_healthcheck import format_failure_summary, run_startup_healthchecks
 from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.tasks.explore import run_explore_task
-from cairn.dispatcher.tasks.fork_seed import run_fork_seed_task
-from cairn.dispatcher.tasks.judge import run_judge_task
 from cairn.dispatcher.tasks.reason import run_reason_task
 from cairn.dispatcher.tasks.report import run_report_task
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary
+from cairn.server.models import Intent, ProjectDetail, ProjectSummary, TaskMode
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
@@ -47,7 +45,8 @@ class DispatcherLoop:
         self.cleanup_executor = ThreadPoolExecutor(max_workers=max(1, min(8, self.config.runtime.max_workers)))
         self.futures: dict[Future[str], RunningTask] = {}
         self.cleanup_futures: dict[Future[bool], tuple[str, str | None, str | None]] = {}
-        self.reason_checkpoints: dict[str, ReasonCheckpoint] = {}
+        self.reason_checkpoints: dict[tuple[str, TaskMode], ReasonCheckpoint] = {}
+        self.collection_expansion_requests: dict[str, str] = {}
         self.authenticated_wait_queues: dict[str, deque[str]] = {}
         self.account_leases: dict[str, dict[str, str]] = {}
         self.runtime_project_ids: set[str] = set()
@@ -89,8 +88,6 @@ class DispatcherLoop:
                     self._cancel_inactive_tasks(summaries)
                     self._queue_container_cleanups(summaries)
                     self._dispatch_available(summaries)
-                    self._dispatch_judge_jobs()
-                    self._dispatch_fork_seed_jobs()
                 except requests.RequestException as exc:
                     if once:
                         raise
@@ -177,126 +174,10 @@ class DispatcherLoop:
                     break
 
     def _dispatch_judge_jobs(self) -> None:
-        if len(self.futures) >= self.config.runtime.max_workers:
-            return
-        try:
-            jobs = self.client.list_queued_ephemeral_jobs("judge")
-        except requests.RequestException:
-            raise
-        for job in jobs:
-            if len(self.futures) >= self.config.runtime.max_workers:
-                return
-            if any(task.task_type == "judge" and task.intent_id == job.id for task in self.futures.values()):
-                continue
-            container_name = self.container_manager.container_name(job.project_id)
-            if container_name in self._cleanup_pending:
-                self._log_changed(
-                    f"job:{job.id}:cleanup:judge",
-                    logging.INFO,
-                    "skip judge dispatch because project container cleanup is pending job=%s project=%s container=%s",
-                    job.id,
-                    job.project_id,
-                    container_name,
-                )
-                continue
-            selection = self._select_worker(job.project_id, "judge")
-            worker = selection.worker
-            if worker is None:
-                self._log_changed(
-                    f"job:{job.id}:worker:judge",
-                    logging.INFO,
-                    "no worker available for judge job=%s project=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
-                    job.id,
-                    job.project_id,
-                    selection.blocked_busy,
-                    selection.blocked_unhealthy,
-                    selection.blocked_rejected,
-                )
-                continue
-            try:
-                future = self.executor.submit(
-                    run_judge_task,
-                    self.config,
-                    self.client,
-                    self.container_manager,
-                    job,
-                    worker,
-                    cancellation := TaskCancellation(),
-                )
-            except Exception:
-                LOG.exception("failed to submit judge job=%s worker=%s", job.id, worker.name)
-                continue
-            self.futures[future] = RunningTask(
-                project_id=job.project_id,
-                task_type="judge",
-                worker_name=worker.name,
-                cancellation=cancellation,
-                intent_id=job.id,
-            )
-            self.runtime_project_ids.add(job.project_id)
-            self._clear_log_state(f"job:{job.id}:worker:judge")
-            LOG.info("dispatched judge job=%s project=%s worker=%s", job.id, job.project_id, worker.name)
+        return
 
     def _dispatch_fork_seed_jobs(self) -> None:
-        if len(self.futures) >= self.config.runtime.max_workers:
-            return
-        try:
-            jobs = self.client.list_queued_ephemeral_jobs("fork_seed")
-        except requests.RequestException:
-            raise
-        for job in jobs:
-            if len(self.futures) >= self.config.runtime.max_workers:
-                return
-            if any(task.task_type == "fork_seed" and task.intent_id == job.id for task in self.futures.values()):
-                continue
-            container_name = self.container_manager.container_name(job.project_id)
-            if container_name in self._cleanup_pending:
-                self._log_changed(
-                    f"job:{job.id}:cleanup:fork_seed",
-                    logging.INFO,
-                    "skip fork_seed dispatch because project container cleanup is pending job=%s project=%s container=%s",
-                    job.id,
-                    job.project_id,
-                    container_name,
-                )
-                continue
-            selection = self._select_worker(job.project_id, "fork_seed")
-            worker = selection.worker
-            if worker is None:
-                self._log_changed(
-                    f"job:{job.id}:worker:fork_seed",
-                    logging.INFO,
-                    "no worker available for fork_seed job=%s project=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
-                    job.id,
-                    job.project_id,
-                    selection.blocked_busy,
-                    selection.blocked_unhealthy,
-                    selection.blocked_rejected,
-                )
-                continue
-            try:
-                future = self.executor.submit(
-                    run_fork_seed_task,
-                    self.config,
-                    self.client,
-                    self.container_manager,
-                    job,
-                    worker,
-                    cancellation := TaskCancellation(),
-                )
-            except Exception:
-                LOG.exception("failed to submit fork_seed job=%s worker=%s", job.id, worker.name)
-                continue
-            self.futures[future] = RunningTask(
-                project_id=job.project_id,
-                task_type="fork_seed",
-                worker_name=worker.name,
-                cancellation=cancellation,
-                intent_id=job.id,
-            )
-            self.runtime_project_ids.add(job.project_id)
-            self._clear_log_state(f"job:{job.id}:worker:fork_seed")
-            LOG.info("dispatched fork_seed job=%s project=%s worker=%s", job.id, job.project_id, worker.name)
+        return
 
     def _sync_authenticated_wait_queues(self, summaries: list[ProjectSummary]) -> None:
         for summary in summaries:
@@ -345,23 +226,11 @@ class DispatcherLoop:
                 project.project.status,
             )
             return False
-        if (
-            project.project.project_kind == "recon"
-            and project.project.auth_mode == "dual"
-            and not project.accounts
-        ):
-            self._log_changed(
-                f"{skip_scope}:accounts:missing",
-                logging.WARNING,
-                "skip recon project=%s because dual-line recon requires at least one cookie session",
-                summary.id,
-            )
-            return False
         if self._is_initial_project(project):
-            if project.project.reason is not None:
+            if self._reason_claimed(project, "collection") is not None:
                 return False
             export_yaml = self.client.export_project(summary.id)
-            return self._dispatch_reason(project, export_yaml, "initial")
+            return self._dispatch_reason(project, export_yaml, "initial", "collection")
         self._enqueue_current_authenticated_waiters(project)
         if self._project_running_task_count(summary.id) >= self.config.runtime.max_project_workers:
             self._log_changed(
@@ -401,23 +270,32 @@ class DispatcherLoop:
                 sorted(running_intent_ids),
             )
         if unclaimed_intents:
-            newest = max(unclaimed_intents, key=lambda i: i.created_at)
             export_yaml = self.client.export_project(summary.id)
-            if newest.intent_kind == "report":
-                return self._dispatch_report(project, export_yaml, newest)
-            return self._dispatch_explore(project, export_yaml, newest)
-        if project.project.reason is None:
-            reason_trigger = self._reason_trigger(project)
+            report_intent = self._newest_unclaimed_intent(unclaimed_intents, intent_kind="report")
+            if report_intent is not None:
+                return self._dispatch_report(project, export_yaml, report_intent)
+            validation_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="validation")
+            if validation_intent is not None:
+                return self._dispatch_explore(project, export_yaml, validation_intent)
+            collection_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="collection")
+            if collection_intent is not None:
+                return self._dispatch_explore(project, export_yaml, collection_intent)
+        for task_mode in ("validation", "collection"):
+            reason = self._reason_claimed(project, task_mode)
+            if reason is not None:
+                continue
+            reason_trigger = self._reason_trigger(project, task_mode)
             if reason_trigger is not None:
                 export_yaml = self.client.export_project(summary.id)
-                return self._dispatch_reason(project, export_yaml, reason_trigger)
-        if project.project.reason is not None:
+                return self._dispatch_reason(project, export_yaml, reason_trigger, task_mode)
+        claimed_reasons = [reason.worker for reason in project.project.reasons.values() if reason is not None]
+        if claimed_reasons:
             self._log_changed(
                 f"{skip_scope}:reason_claimed",
                 logging.DEBUG,
-                "skip reason project=%s because reason is already claimed by %s",
+                "skip reason project=%s because reasons are already claimed by %s",
                 summary.id,
-                project.project.reason.worker,
+                claimed_reasons,
             )
             return False
         self._log_changed(
@@ -432,22 +310,31 @@ class DispatcherLoop:
         )
         return False
 
-    def _dispatch_reason(self, project: ProjectDetail, export_yaml: str, trigger: str) -> bool:
-        selection = self._select_worker(project.project.id, "reason")
+    def _dispatch_reason(
+        self,
+        project: ProjectDetail,
+        export_yaml: str,
+        trigger: str,
+        task_mode: TaskMode | None = None,
+    ) -> bool:
+        task_mode = task_mode or self._reason_task_mode(project)
+        task_type = self._reason_task_type(task_mode)
+        selection = self._select_worker(project.project.id, task_type)
         worker = selection.worker
         if worker is None:
             self._log_changed(
-                f"project:{project.project.id}:worker:reason",
+                f"project:{project.project.id}:worker:{task_type}",
                 logging.INFO,
-                "no worker available for reason project=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                "no worker available for %s project=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                task_type,
                 project.project.id,
                 selection.blocked_busy,
                 selection.blocked_unhealthy,
                 selection.blocked_rejected,
             )
             return False
-        self._clear_log_state(f"project:{project.project.id}:worker:reason")
-        claim = self.client.claim_reason(project.project.id, worker.name, trigger)
+        self._clear_log_state(f"project:{project.project.id}:worker:{task_type}")
+        claim = self.client.claim_reason(project.project.id, worker.name, trigger, task_mode)
         if claim.status_code in (403, 409):
             level = logging.INFO if claim.status_code == 403 else logging.WARNING
             LOG.log(
@@ -475,27 +362,57 @@ class DispatcherLoop:
                 project,
                 export_yaml,
                 worker,
+                task_mode,
                 cancellation := TaskCancellation(),
             )
         except Exception:
             LOG.exception("failed to submit reason task project=%s worker=%s", project.project.id, worker.name)
-            self._best_effort_release_reason(project.project.id, worker.name)
+            self._best_effort_release_reason(project.project.id, worker.name, task_mode)
             return False
         self.futures[future] = RunningTask(
             project_id=project.project.id,
-            task_type="reason",
+            task_type=task_type,
             worker_name=worker.name,
             cancellation=cancellation,
             intent_id=None,
             reason_trigger=trigger,
+            reason_task_mode=task_mode,
             reason_start_fact_count=len(project.facts),
             reason_start_hint_count=len(project.hints),
-            reason_start_open_intent_count=self._project_open_intent_count(project),
+            reason_start_open_intent_count=self._project_open_intent_count_for_mode(project, task_mode),
         )
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
         LOG.info("dispatched reason project=%s worker=%s trigger=%s", project.project.id, worker.name, trigger)
         return True
+
+    def _reason_task_mode(self, project: ProjectDetail) -> TaskMode:
+        if project.project.judge_status == "ready" or project.findings:
+            return "validation"
+        return "collection"
+
+    def _reason_task_type(self, task_mode: TaskMode) -> str:
+        return f"{task_mode}_reason"
+
+    def _newest_unclaimed_intent(
+        self,
+        intents: list[Intent],
+        *,
+        intent_kind: str | None = None,
+        task_mode: TaskMode | None = None,
+    ) -> Intent | None:
+        candidates = [
+            intent
+            for intent in intents
+            if (intent_kind is None or intent.intent_kind == intent_kind)
+            and (task_mode is None or intent.task_mode == task_mode)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.created_at)
+
+    def _reason_claimed(self, project: ProjectDetail, task_mode: TaskMode):
+        return project.project.reasons.get(task_mode)
 
     def _dispatch_report(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
         selection = self._select_worker(project.project.id, "report")
@@ -589,7 +506,8 @@ class DispatcherLoop:
                     len(project.accounts),
                 )
                 return False
-        selection = self._select_worker(project.project.id, "explore")
+        task_type = self._explore_task_type(intent.task_mode)
+        selection = self._select_worker(project.project.id, task_type)
         worker = selection.worker
         if worker is None:
             if account is not None:
@@ -597,7 +515,8 @@ class DispatcherLoop:
             self._log_changed(
                 f"project:{project.project.id}:worker:explore",
                 logging.INFO,
-                "no worker available for explore project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                "no worker available for %s project=%s intent=%s queued_authenticated_intents=%s busy_accounts=%s total_accounts=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                task_type,
                 project.project.id,
                 intent.id,
                 self._authenticated_queue_length(project.project.id),
@@ -655,7 +574,7 @@ class DispatcherLoop:
             return False
         self.futures[future] = RunningTask(
             project_id=project.project.id,
-            task_type="explore",
+            task_type=task_type,
             worker_name=worker.name,
             cancellation=cancellation,
             intent_id=intent.id,
@@ -675,6 +594,11 @@ class DispatcherLoop:
                 account.id,
             )
         return True
+
+    def _explore_task_type(self, task_mode: str) -> str:
+        if task_mode == "collection":
+            return "collection_explore"
+        return "validation_explore"
 
     def _select_worker(self, project_id: str, task_type: str) -> WorkerSelection:
         now = time.time()
@@ -768,7 +692,9 @@ class DispatcherLoop:
         return {
             task.intent_id
             for task in self.futures.values()
-            if task.project_id == project_id and task.task_type in ("explore", "report") and task.intent_id is not None
+            if task.project_id == project_id
+            and task.task_type in ("collection_explore", "validation_explore", "report")
+            and task.intent_id is not None
         }
 
     def _project_uses_account_pool(self, project: ProjectDetail) -> bool:
@@ -928,21 +854,33 @@ class DispatcherLoop:
     def _project_open_intent_count(self, project: ProjectDetail) -> int:
         return sum(1 for intent in project.intents if intent.to is None)
 
+    def _project_open_intent_count_for_mode(self, project: ProjectDetail, task_mode: TaskMode) -> int:
+        return sum(
+            1
+            for intent in project.intents
+            if intent.to is None and intent.task_mode == task_mode
+        )
+
     def _is_initial_project(self, project: ProjectDetail) -> bool:
         fact_ids = {fact.id for fact in project.facts}
         return fact_ids == {"origin"} and len(project.facts) == 1 and not project.intents
 
-    def _reason_trigger(self, project: ProjectDetail) -> str | None:
+    def _reason_trigger(self, project: ProjectDetail, task_mode: TaskMode) -> str | None:
         # Reason checkpoint is the last successful reason baseline. Trigger on
         # new facts, new hints, or the transition from some open intents to none.
-        open_intent_count = self._project_open_intent_count(project)
-        checkpoint = self.reason_checkpoints.get(project.project.id)
+        if task_mode == "validation" and not self._has_validation_signal(project):
+            return None
+        changes = []
+        if task_mode == "collection":
+            validation_trigger = self.collection_expansion_requests.get(project.project.id)
+            if validation_trigger is not None:
+                changes.append(validation_trigger)
+        open_intent_count = self._project_open_intent_count_for_mode(project, task_mode)
+        checkpoint = self.reason_checkpoints.get((project.project.id, task_mode))
         if project.project.reason_pending:
             if checkpoint is None:
                 return "pending"
-            changes = ["pending"]
-        else:
-            changes = []
+            changes.append("pending")
         if checkpoint is None:
             return "initial"
         if len(project.facts) > checkpoint.fact_count:
@@ -954,6 +892,9 @@ class DispatcherLoop:
         if not changes:
             return None
         return ",".join(changes)
+
+    def _has_validation_signal(self, project: ProjectDetail) -> bool:
+        return bool(project.findings) or any(intent.task_mode == "validation" for intent in project.intents)
 
     def _reap_futures(self) -> None:
         done = [future for future in self.futures if future.done()]
@@ -1006,17 +947,18 @@ class DispatcherLoop:
                         task.worker_name,
                         retry_after_seconds,
                     )
-                if outcome == "success" and task.task_type == "reason":
+                if outcome == "success" and task.task_type in ("collection_reason", "validation_reason"):
                     self._update_reason_checkpoint_after_success(task)
             except Exception:
                 LOG.exception("task crashed project=%s task=%s worker=%s", task.project_id, task.task_type, task.worker_name)
 
     def _update_reason_checkpoint_after_success(self, task: RunningTask) -> None:
+        task_mode = task.reason_task_mode or self._task_mode_from_reason_task_type(task.task_type)
         try:
             project = self.client.get_project(task.project_id)
         except requests.RequestException as exc:
-            checkpoint = self._reason_start_checkpoint(task)
-            self.reason_checkpoints[task.project_id] = checkpoint
+            checkpoint = self._reason_start_checkpoint(task, task_mode)
+            self.reason_checkpoints[(task.project_id, task_mode)] = checkpoint
             LOG.warning(
                 "reason checkpoint refresh failed project=%s worker=%s trigger=%s error=%s fallback_facts=%s fallback_hints=%s fallback_open_intents=%s",
                 task.project_id,
@@ -1031,9 +973,14 @@ class DispatcherLoop:
         checkpoint = ReasonCheckpoint(
             fact_count=len(project.facts),
             hint_count=len(project.hints),
-            open_intent_count=self._project_open_intent_count(project),
+            open_intent_count=self._project_open_intent_count_for_mode(project, task_mode),
+            task_mode=task_mode,
         )
-        self.reason_checkpoints[task.project_id] = checkpoint
+        self.reason_checkpoints[(task.project_id, task_mode)] = checkpoint
+        if task_mode == "collection":
+            self.collection_expansion_requests.pop(task.project_id, None)
+        if task_mode == "validation" and checkpoint.open_intent_count == 0:
+            self.collection_expansion_requests[task.project_id] = "validation_converged"
         LOG.debug(
             "reason checkpoint updated project=%s worker=%s trigger=%s facts=%s hints=%s open_intents=%s source=latest",
             task.project_id,
@@ -1044,7 +991,7 @@ class DispatcherLoop:
             checkpoint.open_intent_count,
         )
 
-    def _reason_start_checkpoint(self, task: RunningTask) -> ReasonCheckpoint:
+    def _reason_start_checkpoint(self, task: RunningTask, task_mode: TaskMode) -> ReasonCheckpoint:
         assert task.reason_start_fact_count is not None
         assert task.reason_start_hint_count is not None
         assert task.reason_start_open_intent_count is not None
@@ -1052,7 +999,13 @@ class DispatcherLoop:
             fact_count=task.reason_start_fact_count,
             hint_count=task.reason_start_hint_count,
             open_intent_count=task.reason_start_open_intent_count,
+            task_mode=task_mode,
         )
+
+    def _task_mode_from_reason_task_type(self, task_type: str) -> TaskMode:
+        if task_type == "validation_reason":
+            return "validation"
+        return "collection"
 
     def _cleanup_completed_containers(self, summaries: list[ProjectSummary]) -> None:
         for summary in summaries:
@@ -1078,8 +1031,6 @@ class DispatcherLoop:
                 continue
             container_name = self.container_manager.container_name(summary.id)
             if container_name in self._cleanup_pending:
-                continue
-            if any(task.project_id == summary.id and task.task_type == "judge" for task in self.futures.values()):
                 continue
             if not self.container_manager.needs_stopped_cleanup(summary.id):
                 self._inactive_cleanup_done[summary.id] = summary.status
@@ -1125,6 +1076,9 @@ class DispatcherLoop:
     def _refresh_runtime_projects(self, summaries: list[ProjectSummary]) -> None:
         active_ids = {summary.id for summary in summaries if summary.status == "active"}
         self.runtime_project_ids.intersection_update(active_ids)
+        for project_id in list(self.collection_expansion_requests):
+            if project_id not in active_ids:
+                self.collection_expansion_requests.pop(project_id, None)
         inactive_status_by_id = {summary.id: summary.status for summary in summaries if summary.status != "active"}
         for project_id, status in list(self._inactive_cleanup_done.items()):
             current_status = inactive_status_by_id.get(project_id)
@@ -1135,8 +1089,6 @@ class DispatcherLoop:
         status_by_project = {summary.id: summary.status for summary in summaries}
         for task in self.futures.values():
             status = status_by_project.get(task.project_id, "deleted")
-            if task.task_type in ("judge", "fork_seed") and status == "stopped":
-                continue
             if status != "active" and task.cancellation.cancel(status):
                 LOG.info(
                     "cancelling running task for inactive project project=%s task=%s worker=%s status=%s",
@@ -1150,33 +1102,39 @@ class DispatcherLoop:
         for summary in summaries:
             if summary.status != "active":
                 continue
-            if summary.id in self.reason_checkpoints:
-                continue
             open_intent_count = summary.working_intent_count + summary.unclaimed_intent_count
             if open_intent_count == 0:
                 continue
-            self.reason_checkpoints[summary.id] = ReasonCheckpoint(
-                fact_count=summary.fact_count,
-                hint_count=summary.hint_count,
-                open_intent_count=open_intent_count,
-            )
-            LOG.debug(
-                "reason checkpoint initialized project=%s facts=%s hints=%s open_intents=%s",
-                summary.id,
-                summary.fact_count,
-                summary.hint_count,
-                open_intent_count,
-            )
+            project = self.client.get_project(summary.id)
+            for task_mode in ("collection", "validation"):
+                key = (summary.id, task_mode)
+                if key in self.reason_checkpoints:
+                    continue
+                task_mode_open_intent_count = self._project_open_intent_count_for_mode(project, task_mode)
+                self.reason_checkpoints[key] = ReasonCheckpoint(
+                    fact_count=summary.fact_count,
+                    hint_count=summary.hint_count,
+                    open_intent_count=task_mode_open_intent_count,
+                    task_mode=task_mode,
+                )
+                LOG.debug(
+                    "reason checkpoint initialized project=%s task_mode=%s facts=%s hints=%s open_intents=%s",
+                    summary.id,
+                    task_mode,
+                    summary.fact_count,
+                    summary.hint_count,
+                    task_mode_open_intent_count,
+                )
 
     def _best_effort_release(self, project_id: str, intent_id: str, worker_name: str) -> None:
         response = self.client.release(project_id, intent_id, worker_name)
         if not response.ok and response.status_code not in (403, 409):
             LOG.warning("release failed project=%s intent=%s worker=%s status=%s", project_id, intent_id, worker_name, response.status_code)
 
-    def _best_effort_release_reason(self, project_id: str, worker_name: str) -> None:
-        response = self.client.release_reason(project_id, worker_name)
+    def _best_effort_release_reason(self, project_id: str, worker_name: str, task_mode: TaskMode) -> None:
+        response = self.client.release_reason(project_id, worker_name, task_mode)
         if not response.ok and response.status_code not in (403, 409):
-            LOG.warning("reason release failed project=%s worker=%s status=%s", project_id, worker_name, response.status_code)
+            LOG.warning("reason release failed project=%s worker=%s task_mode=%s status=%s", project_id, worker_name, task_mode, response.status_code)
 
     def _log_changed(self, scope: str, level: int, message: str, *args: object) -> None:
         state = (level, message, args)

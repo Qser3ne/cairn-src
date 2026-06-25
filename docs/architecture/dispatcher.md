@@ -25,13 +25,8 @@ tasks:
   explore:
     timeout: 300
     conclude_timeout: 90
-  judge:
-    timeout: 120
   report:
     timeout: 180
-  fork_seed:
-    timeout: 120
-    max_seed_facts: 8
 
 container:
   image: ghcr.io/oritera/cairn-worker-container:latest
@@ -40,13 +35,13 @@ container:
   completed_action: stop
 ```
 
-`TaskType` 只允许：
+Worker `task_types` 只允许：
 
-- `reason`
-- `explore`
-- `judge`
+- `collection_reason`
+- `collection_explore`
+- `validation_reason`
+- `validation_explore`
 - `report`
-- `fork_seed`
 
 配置校验规则：
 
@@ -80,30 +75,32 @@ container:
 6. 初始化 reason checkpoints。
 7. 刷新 active runtime projects。
 8. 清理 inactive 项目的 authenticated wait queues。
-9. 取消 inactive/deleted projects 上的本地任务，但 stopped project 上运行中的 judge/fork_seed 不取消。
+9. 取消 inactive/deleted projects 上的本地任务。
 10. 为 stopped/completed/deleted projects 排队 container cleanup。
 11. 调度 project tasks。
-12. 调度 queued judge jobs。
-13. 调度 queued fork_seed jobs。
+12. 清理 legacy queued judge jobs，将其标记为 retired failure。
+13. 清理 legacy queued fork_seed jobs，将其标记为 retired failure。
 
 ## 项目调度规则
 
 - 只为 `active` project 调度 reason、explore、report。
 - 初始项目指 facts 只有 `origin` 且没有 intents。
-- 初始 active project 直接 dispatch reason。
+- 初始 active project 先 dispatch `collection_reason`，按项目 `auth_mode` 生成可用的 collection baseline intents。
 - Authenticated explore 等待队列优先于普通未 claim intent。
-- 未 claim intents 中选择最新 intent。
-- `intent_kind="report"` dispatch report，其余 dispatch explore。
-- 如果没有可调度 intent，且 reason trigger 存在，dispatch reason。
+- 未 claim intents 按 `report`、`validation` explore、`collection` explore 的顺序调度；同一组内选择最新 intent。
+- 如果没有可调度 intent，Dispatcher 分别按 `validation`、`collection` 检查 reason trigger，并按 task mode claim reason lease。
+- Validation 没有 open work 且已稳定时不会停止项目；collection 可继续扩展覆盖面。
 - 不存在 bootstrap 分支。
 
 Reason trigger 包括：
 
 - 初始项目。
-- checkpoint 后新增 facts。
-- checkpoint 后新增 hints。
-- open intent count 从非零变为零。
+- mode-specific checkpoint 后新增 facts。
+- mode-specific checkpoint 后新增 hints。
+- 同一 task mode 的 open intent count 从非零变为零。
 - Server 暴露 `reason_pending=true`。
+
+`reason_checkpoints` 使用 `(project_id, task_mode)` 作为 key。Collection 和 validation reason 拥有独立 checkpoint 和独立 server lease，因此同一项目内两类 reason 工作不会通过单个项目级 lease 相互阻塞。
 
 ## 并发限制
 
@@ -148,7 +145,7 @@ authenticated_wait_queues: project_id -> deque[intent_id]
 规则：
 
 - 只有 `auth_scope="authenticated"` 的 explore intent 领取 Cookie session。
-- Reason、judge、fork_seed、report 和 anonymous explore 不领取 Cookie session。
+- Reason、report 和 anonymous explore 不领取 Cookie session。
 - 没有空闲 session 时，authenticated intent 进入 FIFO 等待队列，不提前 claim。
 - Task 完成、失败、取消或异常时统一释放 session lease。
 - Inactive project 或 anonymous project 的 session 队列和租约会被清理。
@@ -167,17 +164,16 @@ Authenticated explore prompt 会包含 session 信息和隔离目录。Anonymous
 - 容器创建使用配置中的 image、network mode、`init`、`cap_add`。
 - `init=true` 用于回收 Playwright/Chrome 等子进程，降低 zombie 进程累积风险。
 - Completed projects 按 `container.completed_action` 执行 stop/remove。
-- Stopped project 如有正在运行的 judge/fork_seed，会推迟 stopped-container cleanup。
+- Stopped project 会排队 container cleanup；legacy retired jobs 不作为新 workflow 的保活理由。
 - Dispatcher 会清理本地 orphan worker 容器；对刚完成 task 的项目使用短暂 cooldown，避免 cleanup 与后续调度抢同一容器。
 
 ## Task 数据流摘要
 
 | Task | Claim | Prompt 输入 | 输出写回 |
 | --- | --- | --- | --- |
-| `reason` | project reason lease | graph YAML、fact IDs、open intents、max intents | create intents，记录 recon reason round。 |
-| `explore` | intent heartbeat | graph YAML、intent、auth context | conclude fact；vuln 可写 findings。 |
-| `judge` | ephemeral job claim | job input snapshot YAML | finish/fail job，更新 judge 摘要。 |
-| `fork_seed` | ephemeral job claim | job input snapshot YAML、max seed facts | finish-fork-seed，创建 child vuln。 |
+| `collection_reason` / `validation_reason` | per-mode project reason lease | graph YAML、fact IDs、open intents、max intents | create same-mode intents；collection 记录 reason round。 |
+| `collection_explore` | intent heartbeat | graph YAML、intent、auth context | conclude fact；拒绝 findings。 |
+| `validation_explore` | intent heartbeat | graph YAML、intent、auth context | conclude fact；可写 findings。 |
 | `report` | report intent heartbeat | graph YAML、intent | 写 finding report draft。 |
 
 ## 可观测性
@@ -192,7 +188,7 @@ Dispatcher 日志重点记录状态变化：
 - claim conflict。
 - rejected worker cooldown。
 - cookie session wait/release。
-- judge claim/finish/fail。
+- retired legacy job cleanup。
 - report draft writeback。
 
 Routine heartbeat success 和稳定轮询应保持低噪声。

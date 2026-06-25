@@ -1,6 +1,6 @@
 # 架构总览
 
-Cairn SRC 是基于 fact/intent graph 的授权 SRC 工作流引擎。当前 fork 聚焦 `recon -> judge -> snapshot -> fork vuln -> report`，移除了上游通用 Standard/bootstrap 流程。
+Cairn SRC 是基于 fact/intent graph 的授权 SRC 工作流引擎。当前 fork 聚焦单一 `vuln` project 内的 `collection -> validation seed -> validation -> report`，移除了上游通用 Standard/bootstrap 流程。Legacy recon snapshot/fork 仅作为迁移历史处理。
 
 ## 技术栈
 
@@ -32,7 +32,7 @@ Browser / API client
         v
 Cairn Server
   FastAPI + SQLite + static UI
-  Projects / Facts / Intents / Hints / Findings / Snapshots / Jobs
+  Projects / Facts / Intents / Hints / Findings / Reports / Legacy Jobs
         ^
         | HTTP protocol
         v
@@ -60,7 +60,7 @@ Project worker containers
 
 Server 是 graph 和运行状态的事实来源：
 
-- 保存 projects、facts、intents、hints、findings、snapshots、reports、cookie session pools 和 ephemeral jobs。
+- 保存 projects、facts、intents、hints、findings、reports、cookie session pools，以及 legacy snapshot/job 迁移数据。
 - 维护 SQLite schema 和 legacy 迁移。
 - 提供 UI 和 HTTP API。
 - 校验 project kind、auth mode、intent 去重、finding lifecycle 和 report 写入规则。
@@ -70,13 +70,13 @@ Server 是 graph 和运行状态的事实来源：
 
 Dispatcher 是 model worker 的唯一协议写入方：
 
-- 拉取 Server 项目和 queued ephemeral jobs。
+- 拉取 Server 项目和 legacy queued ephemeral jobs。
 - 选择 worker 后端。
 - 管理 project worker 容器。
-- 渲染 prompt，注入 graph snapshot 和 auth context。
+- 渲染 prompt，注入 graph YAML 和 auth context。
 - 启动 worker CLI 并解析输出。
 - 使用 contract 校验 JSON。
-- 通过 Server API 写回 facts、intents、job result 和 reports。
+- 通过 Server API 写回 facts、intents、findings 和 reports；legacy retired jobs 只写失败结果。
 
 Worker 不直接写 Cairn API，也不直接修改 graph。
 
@@ -84,22 +84,21 @@ Worker 不直接写 Cairn API，也不直接修改 graph。
 
 | 类型 | 作用 | 写入边界 |
 | --- | --- | --- |
-| `recon` | 收集攻击面、功能面、认证边界和候选线索。 | 写 facts/intents/snapshots/judge jobs，不写 findings/reports。 |
-| `vuln` | 从 recon snapshot 派生，验证漏洞并产出 findings/reports。 | 写 facts/findings/follow-up intents/report intents/reports。 |
+| `vuln` | 承载 collection、validation 和 report 的 SRC 工作空间。 | Collection 写 facts；validation 写 facts/findings；report 写 report drafts。 |
 
 `completed` 是人工归档状态，不代表 worker 自动完成。
 
 ## 任务类型
 
-| Task | 项目类型 | 目的 | 写入 |
+| Task | Task mode | 目的 | 写入 |
 | --- | --- | --- | --- |
-| `reason` | `recon`, `vuln` | 读取 graph，规划非重复 intents 或返回 noop/stable。 | Intents 或 recon round state。 |
-| `explore` | `recon`, `vuln` | 执行一个已 claim intent。 | Facts；vuln 可附带 findings。 |
-| `judge` | `recon` | 评估 recon 是否适合 fork vuln。 | Ephemeral job result 和 project judge 摘要。 |
-| `fork_seed` | `recon` | 从 recon snapshot 生成 child vuln seed facts。 | Child vuln project。 |
-| `report` | `vuln` | 从 finding 生成 SRC 报告草稿。 | Finding report draft。 |
+| `collection_reason` | `collection` | 读取 graph，规划 collection 或 validation seed intents。 | Intents 或 collection round state。 |
+| `collection_explore` | `collection` | 执行 collection intent，建立功能/API/auth facts。 | Facts only。 |
+| `validation_reason` | `validation` | 读取 collection facts、validation seeds 和 findings，规划验证方向。 | Validation intents 或 stable/no-op。 |
+| `validation_explore` | `validation` | 执行漏洞验证 intent。 | Facts，可附带 findings。 |
+| `report` | `report` | 从 finding 生成 SRC 报告草稿。 | Finding report draft。 |
 
-Server 会强制执行项目边界：`recon` conclude 请求不能包含 `findings`，`report` intent 和 report draft 写入只允许发生在 `vuln` 项目。
+Server 会强制执行 task mode 边界：`collection` conclude 请求不能包含 `findings`，`validation` 才能写 findings，`report` intent 必须通过 report endpoint 写入草稿。
 
 ## 运行入口
 
@@ -111,8 +110,8 @@ Server 会强制执行项目边界：`recon` conclude 请求不能包含 `findin
 
 ## 关键约束
 
-- 新建项目默认 `recon`。
-- `recon` 固定 `auth_mode="dual"`，且必须有至少一个 Cookie session。
-- 新 `vuln` 必须从 parent recon snapshot 创建。
+- 新建项目固定为 `vuln`。
+- `auth_mode="anonymous"` 项目不能包含 accounts；`authenticated` 和 `dual` 项目必须包含至少一个 Cookie session。
+- Legacy parent/snapshot 字段只用于迁移或历史数据读取，不是新项目主流程要求。
 - Standard mode、bootstrap task、Goal fact、自动 complete/reopen 已移除。
 - `/projects/{id}/complete` 和 `/projects/{id}/reopen` 只保留兼容路由，返回 `410 Gone`。

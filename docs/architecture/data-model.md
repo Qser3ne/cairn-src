@@ -24,10 +24,10 @@ Server 使用 Pydantic 定义请求/响应模型，使用 SQLite 持久化项目
 
 | 类型 | 取值 |
 | --- | --- |
-| `ProjectKind` | `recon | vuln` |
+| `ProjectKind` | `vuln` |
 | `AuthMode` | `anonymous | authenticated | dual` |
 | `ProjectStatus` | `active | stopped | completed` |
-| `JudgeStatus` | `not_judged | ready | not_ready | blocked` |
+| `JudgeStatus` | `not_judged | ready | not_ready | blocked`，legacy only |
 | `IntentKind` | `explore | report` |
 | `AuthScope` | `anonymous | authenticated` |
 | `FactType` | `observation | feature_surface` |
@@ -44,11 +44,11 @@ Project 保存项目元信息和调度摘要：
 - `status`。
 - `project_kind`。
 - `auth_mode`。
-- `parent_project_id`、`parent_snapshot_id`。
-- reason lease 字段。
+- `parent_project_id`、`parent_snapshot_id`：legacy/migration 关联字段。
+- `reasons`：按 `task_mode` 返回的 reason lease 摘要。
 - `reason_pending`。
-- recon round counters。
-- judge status 摘要。
+- collection round counters。
+- judge status 摘要：legacy field，新 workflow 不依赖。
 
 状态规则：
 
@@ -71,7 +71,7 @@ Project ID 由当前 `projects.id` 中最大 `proj_###` 后缀加 1 生成。删
 - `summary`
 - `details`
 
-`feature_surface` 用于功能理解优先的 recon 或 AI seed fact。常见 `details` 字段：
+`feature_surface` 用于 collection 功能理解事实或 validation seed fact。常见 `details` 字段：
 
 - `page_url`
 - `visible_features`
@@ -104,6 +104,7 @@ Intent 表示一个待执行方向。
 - `created_at`
 - `concluded_at`
 - `intent_kind`
+- `task_mode`
 - `finding_id`
 - `auth_scope`
 
@@ -112,12 +113,27 @@ Intent 表示一个待执行方向。
 - `from` 必须引用已有 facts。
 - `to` 在 intent open 时为 null，conclude 后指向产生的 fact ID。
 - `intent_kind="report"` 必须绑定 `finding_id`，且 `auth_scope` 为 null。
-- Vuln explore intent 的 `auth_scope` 必须匹配 project `auth_mode`。
+- `task_mode` 合法值为 `collection`、`validation`、`report`；report intent 固定使用 `task_mode="report"`。
+- Collection explore intent 必须显式提供 `auth_scope`；`auth_scope="authenticated"` 需要项目存在 accounts。
+- Validation explore intent 在非 `dual` vuln 项目中必须匹配 project `auth_mode`。
 - Report intent 不走 explore prompt。
 
 ## Hint
 
-Hint 是 graph-adjacent strategy note，不是 fact。项目处于 `active`、`stopped` 或 `completed` 时都允许追加 hint。若 reason lease 正在运行，新增 hint 会设置 `reason_pending=true`。
+Hint 是 graph-adjacent strategy note，不是 fact。项目处于 `active`、`stopped` 或 `completed` 时都允许追加 hint。若任一 task mode 的 reason lease 正在运行，新增 hint 会设置 `reason_pending=true`。
+
+## Reason Lease
+
+`project_reason_leases` 保存 reason task 的短租约：
+
+- `project_id`
+- `task_mode`
+- `worker`
+- `trigger`
+- `started_at`
+- `last_heartbeat_at`
+
+主键为 `(project_id, task_mode)`。Collection 和 validation reason 可在同一项目内独立 claim、heartbeat 和 release，不再共享单个项目级 reason lease。
 
 ## Account 与 Cookie Session
 
@@ -127,7 +143,7 @@ Hint 是 graph-adjacent strategy note，不是 fact。项目处于 `active`、`s
 - `label`。
 - `cookies_json`：`[{"name": "...", "value": "..."}]`。
 
-同一个 account 内 cookie name 必须唯一。Recon 必须有 accounts，authenticated vuln 必须有 accounts，anonymous vuln 不能有 accounts。
+同一个 account 内 cookie name 必须唯一。`auth_mode="authenticated"` 和 `auth_mode="dual"` 项目必须有 accounts，`auth_mode="anonymous"` 项目不能有 accounts。
 
 ## Finding 与 Report
 
@@ -160,22 +176,22 @@ Finding 只属于 vuln 项目。
 
 Report task 成功后写入 `finding_reports`，并把 finding `report_status` 改为 `drafted`。
 
-## Snapshot
+## Legacy Snapshot
 
-Recon snapshot 保存：
+Snapshot 表保留用于旧 `recon -> snapshot -> fork vuln` 数据读取和迁移，不是 active workflow 的入口。Snapshot 保存：
 
 - `summary_yaml`
 - `selected_fact_ids_json`
 - `stats_json`
 - `created_at`
 
-默认 AI seeded fork 使用 `summary_yaml` 作为主输入。`selected_fact_ids` 保留给 legacy/manual copy fork。
+新流程使用 collection facts 和 validation seed intents 进入 validation，不创建 recon snapshot。`selected_fact_ids` 保留给 legacy/manual copy fork。
 
-## Ephemeral Job
+## Legacy Ephemeral Job
 
-Ephemeral jobs 是临时任务，不直接写 graph data。
+Ephemeral jobs 是旧 judge/fork_seed 临时任务，不直接写 graph data。当前 Dispatcher 会把 legacy queued judge/fork_seed job 标记为 retired failure；新 workflow 不创建这些 job。
 
-当前类型：
+遗留类型：
 
 - `judge`
 - `fork_seed`
@@ -193,22 +209,23 @@ Ephemeral jobs 是临时任务，不直接写 graph data。
 - `worker`
 - timestamps
 
-Judge job ID 使用 `judge_###`，由当前 `ephemeral_jobs.id` 最大后缀加 1 生成。
+Judge job ID 使用 `judge_###`，由当前 `ephemeral_jobs.id` 最大后缀加 1 生成；仅用于历史数据。
 
 ## SQLite 表
 
 | 表 | 内容 |
 | --- | --- |
 | `settings` | server timeout settings。 |
-| `projects` | 项目元信息、状态、reason lease、recon counters、judge 摘要。 |
+| `projects` | 项目元信息、状态、collection counters、legacy judge 摘要。 |
 | `facts` | 项目 facts。 |
 | `intents` | intents 主表。 |
 | `intent_sources` | intent -> source facts 多对多关系。 |
 | `hints` | 用户 hints。 |
 | `project_accounts` | Cookie session 池。 |
 | `findings` | vuln findings。 |
-| `project_snapshots` | recon snapshots。 |
-| `ephemeral_jobs` | judge 和 fork_seed jobs。 |
+| `project_snapshots` | legacy snapshots。 |
+| `ephemeral_jobs` | legacy judge 和 fork_seed jobs。 |
+| `project_reason_leases` | 按 `(project_id, task_mode)` 保存 reason lease。 |
 | `finding_reports` | report task 输出。 |
 | `counters` | legacy/global counter 支撑。 |
 | `scoped_counters` | 项目内 fact/intent/hint/account/snapshot/report ID 计数。 |
@@ -233,11 +250,11 @@ Schema 初始化会创建项目详情、队列和导出常用路径的索引：
 
 1. 如果存在 legacy `projects.mode`，先检查 `mode="standard"`。
 2. 存在 legacy standard project 时抛出 `RuntimeError`，要求先导出或删除。
-3. legacy `mode="src"` 迁移为 parentless `project_kind="vuln"`。
-4. 新建 vuln 不允许 parent/snapshot 为空；parentless vuln 只用于读取旧数据。
+3. legacy `mode="src"` 和 legacy `project_kind="recon"` 都迁移为 `project_kind="vuln"`。
+4. parent/snapshot 字段只用于旧数据读取；新建 vuln 不需要 parent/snapshot。
 5. 移除旧 `session_lock_enabled` 和 `session_lock` 列。
 6. 保留 `project_accounts`。
-7. recon projects 回填为 `auth_mode="dual"`。
+7. legacy recon projects 回填为 `auth_mode="dual"` 后迁移为 vuln project。
 8. legacy explore intent 从 project auth mode 回填 `auth_scope`，默认 anonymous。
 9. 删除 legacy `goal` facts 和对应 intent source。
 10. 为 facts 补齐结构化字段。

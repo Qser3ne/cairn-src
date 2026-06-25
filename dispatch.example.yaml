@@ -34,17 +34,9 @@ tasks:
     timeout: 300
     # Time budget for conclude fallback used to summarize confirmed findings from the same session.
     conclude_timeout: 90
-  judge:
-    # Timeout for ephemeral recon readiness evaluation.
-    timeout: 120
   report:
     # Timeout for drafting SRC submission reports.
     timeout: 180
-  fork_seed:
-    # Timeout for AI seeded recon -> vuln fork planning.
-    timeout: 120
-    # Hard cap on how many seed facts one fork planner may create.
-    max_seed_facts: 8
 
 container:
   # Base worker container. The dispatcher execs agent commands inside one container per project.
@@ -64,9 +56,10 @@ container:
 workers:
   # Worker priority is ascending: lower numbers are preferred first.
   # max_running is per-worker concurrency. Slower backends such as Pi usually benefit from lower values.
-  - name: "claudecode_deepseek-v4-pro"
+  # Collection workers continuously map the business surface and produce scoped follow-up intents.
+  - name: "claudecode_collection_deepseek-v4-pro"
     type: "claudecode"
-    task_types: [reason, explore, judge, report, fork_seed]
+    task_types: [collection_reason, collection_explore]
     max_running: 2
     priority: 0
     env:
@@ -74,9 +67,10 @@ workers:
       ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
       ANTHROPIC_AUTH_TOKEN: "sk-xxx"
 
-  - name: "codex_qwen3.6-plus"
+  # Validation workers verify vulnerability hypotheses and produce evidence-backed findings.
+  - name: "codex_validation_qwen3.6-plus"
     type: "codex"
-    task_types: [reason, explore, judge, report, fork_seed]
+    task_types: [validation_reason, validation_explore]
     max_running: 2
     priority: 0
     env:
@@ -84,9 +78,10 @@ workers:
       CODEX_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
       OPENAI_API_KEY: "sk-xxx"
 
-  - name: "pi_qwen3.6-plus"
+  # Report workers draft final reports from confirmed findings.
+  - name: "pi_report_qwen3.6-plus"
     type: "pi"
-    task_types: [reason, explore, judge, report, fork_seed]
+    task_types: [report]
     max_running: 2
     priority: 0
     env:

@@ -40,6 +40,15 @@ def run_explore_task(
     cancellation: TaskCancellation,
     account: ProjectAccount | None = None,
 ) -> str:
+    if intent.intent_kind == "report" or intent.task_mode == "report":
+        LOG.warning(
+            "report intent cannot run as explore project=%s intent=%s worker=%s",
+            project.project.id,
+            intent.id,
+            worker.name,
+        )
+        best_effort_release(client, project.project.id, intent.id, worker.name)
+        return "failed"
     driver = get_driver(worker.type)
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
@@ -99,7 +108,7 @@ def run_explore_task(
                 return "unhealthy"
 
         prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "explore.md", project.project.project_kind),
+            load_prompt(config.runtime.prompt_group, "explore.md", intent.task_mode),
             {
                 "graph_yaml": write_graph_snapshot_reference(
                     container_manager,
@@ -110,6 +119,7 @@ def run_explore_task(
                 "intent_id": intent.id,
                 "intent_description": intent.description,
                 "auth_context": format_auth_context(project, intent, account),
+                "task_mode": intent.task_mode,
             },
         )
 
@@ -156,7 +166,10 @@ def run_explore_task(
             try:
                 model_output = driver.extract_response_text(first.stdout, first.stderr)
                 payload = parse_json_output(model_output)
-                kind, fact_data = validate_explore_payload(_payload_for_validation(payload, project.project.project_kind))
+                kind, fact_data = validate_explore_payload(
+                    _payload_for_validation(payload, intent.task_mode),
+                    task_mode=intent.task_mode,
+                )
             except Exception as exc:
                 LOG.warning(
                     "explore parse failed project=%s intent=%s worker=%s error=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -207,7 +220,7 @@ def run_explore_task(
                 title=fact_data["title"],
                 summary=fact_data["summary"],
                 details=fact_data["details"],
-                findings=_payload_findings_for_project(payload, project.project.project_kind),
+                findings=_payload_findings_for_project(payload, intent.task_mode),
                 source="explore_execute",
                 phase_ms=execute_ms,
                 total_ms=int((time.perf_counter() - task_started) * 1000),
@@ -314,7 +327,7 @@ def _try_conclude_fallback(
     container_name = container_manager.ensure_running(project_id)
 
     prompt = render_prompt(
-        load_prompt(config.runtime.prompt_group, "explore_conclude.md", project.project.project_kind),
+        load_prompt(config.runtime.prompt_group, "explore_conclude.md", intent.task_mode),
         {
             "graph_yaml": write_graph_snapshot_reference(
                 container_manager,
@@ -325,6 +338,7 @@ def _try_conclude_fallback(
             "intent_id": intent.id,
             "intent_description": intent.description,
             "auth_context": format_auth_context(project, intent, account),
+            "task_mode": intent.task_mode,
         },
     )
     conclude_argv = driver.build_conclude(worker, prompt, session)
@@ -373,7 +387,10 @@ def _try_conclude_fallback(
     try:
         model_output = driver.extract_response_text(result.stdout, result.stderr)
         payload = parse_json_output(model_output)
-        kind, fact_data = validate_explore_payload(_payload_for_validation(payload, project.project.project_kind))
+        kind, fact_data = validate_explore_payload(
+            _payload_for_validation(payload, intent.task_mode),
+            task_mode=intent.task_mode,
+        )
     except Exception as exc:
         LOG.warning(
             "conclude parse failed project=%s intent=%s worker=%s error=%s conclude_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -409,24 +426,24 @@ def _try_conclude_fallback(
         title=fact_data["title"],
         summary=fact_data["summary"],
         details=fact_data["details"],
-        findings=_payload_findings_for_project(payload, project.project.project_kind),
+        findings=_payload_findings_for_project(payload, intent.task_mode),
         source="explore_conclude",
         phase_ms=conclude_ms,
     )
     return outcome
 
 
-def _payload_findings_for_project(payload: dict, project_kind: str) -> list[dict] | None:
+def _payload_findings_for_project(payload: dict, task_mode: str) -> list[dict] | None:
     findings = _payload_findings(payload)
-    if project_kind == "recon":
+    if task_mode == "collection":
         if findings:
-            LOG.warning("dropping findings from recon explore payload count=%s", len(findings))
+            LOG.warning("dropping findings from collection explore payload count=%s", len(findings))
         return None
     return findings
 
 
-def _payload_for_validation(payload: dict, project_kind: str) -> dict:
-    if project_kind != "recon":
+def _payload_for_validation(payload: dict, task_mode: str) -> dict:
+    if task_mode != "collection":
         return payload
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     if not isinstance(data, dict) or "findings" not in data:

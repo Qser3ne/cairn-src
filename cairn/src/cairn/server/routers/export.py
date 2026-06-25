@@ -115,15 +115,14 @@ def _export_yaml(conn, project_id: str) -> str:
         }
     }
 
-    if proj["project_kind"] == "recon":
-        data["recon"] = {
-            "max_reason_rounds": proj["recon_max_reason_rounds"],
-            "reason_rounds": proj["recon_reason_rounds"],
-            "explore_rounds": proj["recon_explore_rounds"],
-            "stable_rounds": proj["recon_stable_rounds"],
-            "judge_status": proj["judge_status"],
-            "judged_at": format_export_timestamp(proj["judged_at"]),
-        }
+    data["collection"] = {
+        "max_reason_rounds": proj["collection_max_reason_rounds"],
+        "reason_rounds": proj["collection_reason_rounds"],
+        "explore_rounds": proj["collection_explore_rounds"],
+        "stable_rounds": proj["collection_stable_rounds"],
+        "judge_status": proj["judge_status"],
+        "judged_at": format_export_timestamp(proj["judged_at"]),
+    }
 
     if hints:
         data["hints"] = [
@@ -188,6 +187,7 @@ def _export_yaml(conn, project_id: str) -> str:
             "created_at": format_export_timestamp(i["created_at"]),
             "concluded_at": format_export_timestamp(i["concluded_at"]),
             "intent_kind": i["intent_kind"],
+            "task_mode": i["task_mode"],
             "finding_id": i["finding_id"],
             "auth_scope": i["auth_scope"],
         }
@@ -245,6 +245,7 @@ def _export_timeline(conn, project_id: str) -> str:
         ts = format_export_timestamp(i["created_at"]) or ""
         meta = f"  from: {from_str}"
         meta += f"\n  kind: {i['intent_kind']}"
+        meta += f"\n  task_mode: {i['task_mode']}"
         if i["auth_scope"]:
             meta += f"\n  auth_scope: {i['auth_scope']}"
         if i["worker"] and not i["concluded_at"]:

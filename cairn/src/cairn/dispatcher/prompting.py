@@ -5,11 +5,11 @@ from importlib import resources
 from typing import Any
 
 
-def load_prompt(group: str, name: str, project_kind: str = "recon") -> str:
+def load_prompt(group: str, name: str, task_mode: str) -> str:
     group_dir = resources.files("cairn.dispatcher.prompts").joinpath(group)
-    kind_path = group_dir.joinpath(project_kind).joinpath(name)
-    if kind_path.is_file():
-        return kind_path.read_text(encoding="utf-8")
+    mode_path = group_dir.joinpath(task_mode).joinpath(name)
+    if mode_path.is_file():
+        return mode_path.read_text(encoding="utf-8")
     return group_dir.joinpath(name).read_text(encoding="utf-8")
 
 

@@ -63,7 +63,7 @@ def run_report_task(
                 return "unhealthy"
 
         prompt = render_prompt(
-            load_prompt(config.runtime.prompt_group, "report.md", project.project.project_kind),
+            load_prompt(config.runtime.prompt_group, "report.md", intent.task_mode),
             {
                 "graph_yaml": write_graph_snapshot_reference(
                     container_manager,

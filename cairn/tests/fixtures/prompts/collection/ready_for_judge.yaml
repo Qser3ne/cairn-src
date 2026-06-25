@@ -1,0 +1,76 @@
+project:
+  title: Example collection ready for judge
+  origin: https://app.example.test/
+  project_kind: vuln
+  auth_mode: dual
+  parent_project_id: null
+  parent_snapshot_id: null
+collection:
+  max_reason_rounds: 5
+  reason_rounds: 3
+  explore_rounds: 6
+  stable_rounds: 1
+  judge_status: not_judged
+  judged_at: null
+facts:
+  - id: origin
+    description: "Origin target is https://app.example.test/ for an authorized synthetic collection fixture."
+  - id: f001
+    description: "intent_summary: anonymous public surface baseline for app.example.test\nauth_scope: anonymous\nconfirmed_observations:\n- https://app.example.test/ returns a public landing page with links to /login, /docs, and /status.\n- Public static assets identify a single web application rather than unrelated third-party hosts.\nevidence_refs:\n- /home/kali/evidence/example-public-routes.txt\nboundaries_or_constraints:\n- No authenticated session was used for this anonymous baseline.\nnoise_or_dead_ends:\n- cdn.example.test was excluded as static asset hosting only.\nsuggested_next_collection:\n- Sample authenticated dashboard endpoints with the demo account session."
+  - id: f002
+    description: "intent_summary: authenticated dashboard endpoint sampling for the demo account\nauth_scope: authenticated\nconfirmed_observations:\n- After login, /dashboard, /api/profile, /api/orders, and /api/uploads are reachable in the isolated session.\n- /api/orders accepts id and status query parameters and returns account-scoped sample order metadata.\nevidence_refs:\n- /home/kali/evidence/example-authenticated-endpoints.txt\nboundaries_or_constraints:\n- Only the leased demo account session was used.\nnoise_or_dead_ends:\n- /admin returns 403 for the demo account and was not explored further.\nsuggested_next_collection:\n- Compare account boundary behavior in a vuln project if scope permits."
+  - id: f003
+    description: "intent_summary: authentication boundary mapping for public and login-only routes\nauth_scope: anonymous\nconfirmed_observations:\n- /dashboard redirects anonymous users to /login with a return_url parameter.\n- /api/profile returns 401 anonymously and 200 in the authenticated session.\n- /status is public and does not expose user-specific data.\nevidence_refs:\n- /home/kali/evidence/example-auth-boundary.txt\nboundaries_or_constraints:\n- No bypass attempts or vulnerability validation were performed.\nnoise_or_dead_ends:\n- Password reset flow was noted but not tested for impact.\nsuggested_next_collection:\n- Preserve these auth-boundary facts for vuln project scoping."
+  - id: f004
+    description: "intent_summary: candidate attack surface collection without vulnerability validation\nauth_scope: authenticated\nconfirmed_observations:\n- Candidate surfaces for later vuln validation include /api/orders?id=, /api/uploads, and /account/email-change.\n- Each candidate has a concrete route, parameter or form, and an auth boundary fact.\nevidence_refs:\n- /home/kali/evidence/example-candidate-surfaces.txt\nboundaries_or_constraints:\n- Collection did not attempt IDOR, upload abuse, CSRF, or impact proof.\nnoise_or_dead_ends:\n- Marketing pages and static assets were excluded as low-value for vuln validation.\nsuggested_next_collection:\n- Judge can decide whether this context is ready for validation."
+intents:
+  - from:
+      - origin
+    to: f001
+    description: "[asset_discovery] Anonymous baseline for public pages and static assets; auth_scope=anonymous."
+    creator: reasoner
+    worker: mock-worker
+    created_at: 2026-01-01 00:00:01
+    concluded_at: 2026-01-01 00:02:00
+    intent_kind: explore
+    finding_id: null
+    auth_scope: anonymous
+    task_mode: collection
+  - from:
+      - origin
+    to: f002
+    description: "[endpoint_sampling] Authenticated baseline for dashboard and account APIs; auth_scope=authenticated."
+    creator: reasoner
+    worker: mock-worker
+    created_at: 2026-01-01 00:00:02
+    concluded_at: 2026-01-01 00:04:00
+    intent_kind: explore
+    finding_id: null
+    auth_scope: authenticated
+    task_mode: collection
+  - from:
+      - f001
+      - f002
+    to: f003
+    description: "[auth_boundary_mapping] Compare anonymous redirects and authenticated status codes; auth_scope=anonymous."
+    creator: reasoner
+    worker: mock-worker
+    created_at: 2026-01-01 00:04:30
+    concluded_at: 2026-01-01 00:06:00
+    intent_kind: explore
+    finding_id: null
+    auth_scope: anonymous
+    task_mode: collection
+  - from:
+      - f002
+      - f003
+    to: f004
+    description: "[candidate_surface_collection] Collect concrete routes and parameters for later validation; auth_scope=authenticated."
+    creator: reasoner
+    worker: mock-worker
+    created_at: 2026-01-01 00:06:30
+    concluded_at: 2026-01-01 00:08:00
+    intent_kind: explore
+    finding_id: null
+    auth_scope: authenticated
+    task_mode: collection

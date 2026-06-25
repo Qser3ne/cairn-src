@@ -17,12 +17,12 @@
 | --- | --- |
 | [`architecture/overview.md`](./architecture/overview.md) | 技术栈、整体架构、模块边界。 |
 | [`architecture/server-api.md`](./architecture/server-api.md) | FastAPI Server、路由、API 语义。 |
-| [`architecture/data-model.md`](./architecture/data-model.md) | Project、Fact、Intent、Finding、Snapshot、SQLite schema 与迁移。 |
+| [`architecture/data-model.md`](./architecture/data-model.md) | Project、Fact、Intent、Finding、Report、legacy Snapshot、SQLite schema 与迁移。 |
 | [`architecture/dispatcher.md`](./architecture/dispatcher.md) | Dispatcher 调度循环、并发、租约、容器生命周期。 |
-| [`architecture/worker-contracts.md`](./architecture/worker-contracts.md) | reason、explore、judge、fork_seed、report 的 JSON 契约。 |
+| [`architecture/worker-contracts.md`](./architecture/worker-contracts.md) | collection、validation、report task 的 JSON 契约。 |
 | [`architecture/prompts.md`](./architecture/prompts.md) | prompt group、默认 prompt 布局、占位符校验。 |
 | [`user/quickstart.md`](./user/quickstart.md) | 从配置到启动的最短路径。 |
-| [`user/src-workflow.md`](./user/src-workflow.md) | recon -> judge -> snapshot -> fork vuln -> report 工作流。 |
+| [`user/src-workflow.md`](./user/src-workflow.md) | collection -> validation seed -> validation -> report 工作流。 |
 | [`ops/configuration-security.md`](./ops/configuration-security.md) | 配置文件、Cookie、SQLite、证据文件和 API key 的安全边界。 |
 | [`ops/worker-container.md`](./ops/worker-container.md) | Worker 镜像、工具链、目录约定和 GHCR 构建。 |
 | [`ops/deployment-release.md`](./ops/deployment-release.md) | 本机生产部署、版本同步、发布检查。 |

@@ -16,13 +16,8 @@ tasks:
   explore:
     timeout: 9
     conclude_timeout: 5
-  judge:
-    timeout: 5
   report:
     timeout: 5
-  fork_seed:
-    timeout: 5
-    max_seed_facts: 8
 
 container:
   image: "ghcr.io/oritera/cairn-worker-container:latest"
@@ -39,7 +34,7 @@ common_env:
 workers:
   - name: "mock-observer-1"
     type: "mock"
-    task_types: [reason, explore, judge, report, fork_seed]
+    task_types: [collection_reason, collection_explore, validation_reason, validation_explore, report]
     max_running: 1
     priority: 0
     env:
@@ -50,7 +45,7 @@ workers:
 
   - name: "mock-observer-2"
     type: "mock"
-    task_types: [reason, explore, judge, report, fork_seed]
+    task_types: [collection_reason, collection_explore, validation_reason, validation_explore, report]
     max_running: 1
     priority: 0
     env:

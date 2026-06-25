@@ -16,6 +16,8 @@ from cairn.server.models import (
     ProjectMeta,
     ProjectReason,
     ProjectSnapshot,
+    TaskMode,
+    empty_project_reasons,
 )
 
 def utcnow() -> str:
@@ -255,6 +257,7 @@ def intent_to_model(
         created_at=row["created_at"],
         concluded_at=row["concluded_at"],
         intent_kind=row["intent_kind"],
+        task_mode=row["task_mode"],
         finding_id=row["finding_id"],
         auth_scope=row["auth_scope"],
     )
@@ -359,22 +362,47 @@ def project_reason_from_row(row: sqlite3.Row) -> ProjectReason | None:
     )
 
 
-def project_meta_from_row(row: sqlite3.Row) -> ProjectMeta:
+def project_reason_from_lease_row(row: sqlite3.Row) -> ProjectReason:
+    return ProjectReason(
+        worker=row["worker"],
+        trigger=row["trigger"],
+        started_at=row["started_at"],
+        last_heartbeat_at=row["last_heartbeat_at"],
+    )
+
+
+def build_project_reasons(conn: sqlite3.Connection, project_id: str) -> dict[TaskMode, ProjectReason | None]:
+    reasons = empty_project_reasons()
+    rows = conn.execute(
+        "SELECT * FROM project_reason_leases WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
+    for lease in rows:
+        task_mode = lease["task_mode"]
+        if task_mode in reasons:
+            reasons[task_mode] = project_reason_from_lease_row(lease)
+    return reasons
+
+
+def project_meta_from_row(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> ProjectMeta:
+    reasons = build_project_reasons(conn, row["id"]) if conn is not None else empty_project_reasons()
+    reason = next((lease for lease in reasons.values() if lease is not None), None) or project_reason_from_row(row)
     return ProjectMeta(
         id=row["id"],
         title=row["title"],
         status=row["status"],
-        project_kind=row["project_kind"],
+        project_kind="vuln",
         auth_mode=row["auth_mode"],
         parent_project_id=row["parent_project_id"],
         parent_snapshot_id=row["parent_snapshot_id"],
         created_at=row["created_at"],
-        reason=project_reason_from_row(row),
+        reason=reason,
+        reasons=reasons,
         reason_pending=bool(row["reason_pending"]),
-        recon_max_reason_rounds=row["recon_max_reason_rounds"],
-        recon_reason_rounds=row["recon_reason_rounds"],
-        recon_explore_rounds=row["recon_explore_rounds"],
-        recon_stable_rounds=row["recon_stable_rounds"],
+        collection_max_reason_rounds=row["collection_max_reason_rounds"],
+        collection_reason_rounds=row["collection_reason_rounds"],
+        collection_explore_rounds=row["collection_explore_rounds"],
+        collection_stable_rounds=row["collection_stable_rounds"],
         judge_status=row["judge_status"],
         judged_at=row["judged_at"],
     )
@@ -394,6 +422,7 @@ def fact_from_row(row: sqlite3.Row) -> Fact:
 
 
 def clear_project_reason(conn: sqlite3.Connection, project_id: str) -> None:
+    conn.execute("DELETE FROM project_reason_leases WHERE project_id = ?", (project_id,))
     conn.execute(
         """
         UPDATE projects
@@ -418,7 +447,7 @@ def mark_reason_pending_if_reason_running(conn: sqlite3.Connection, project_id: 
         SET reason_pending = 1
         WHERE id = ?
           AND status = 'active'
-          AND reason_worker IS NOT NULL
+          AND EXISTS (SELECT 1 FROM project_reason_leases WHERE project_id = projects.id)
         """,
         (project_id,),
     )
@@ -446,6 +475,16 @@ def expire_reason_leases(conn: sqlite3.Connection, project_id: str | None = None
     timeout = get_reason_timeout(conn)
     now = utcnow()
     query = """
+        DELETE FROM project_reason_leases
+        WHERE last_heartbeat_at IS NOT NULL
+          AND (julianday(?) - julianday(last_heartbeat_at)) * 86400 > ?
+    """
+    params: tuple = (now, timeout)
+    if project_id is not None:
+        query = query.replace("WHERE ", "WHERE project_id = ? AND ", 1)
+        params = (project_id, now, timeout)
+    conn.execute(query, params)
+    query = """
         UPDATE projects
         SET reason_worker = NULL,
             reason_trigger = NULL,
@@ -462,42 +501,16 @@ def expire_reason_leases(conn: sqlite3.Connection, project_id: str | None = None
     conn.execute(query, params)
 
 
-def maybe_stop_recon_by_round_limit(conn: sqlite3.Connection, project_id: str) -> None:
-    row = get_project_or_404(conn, project_id)
-    if row["project_kind"] != "recon":
-        return
-    if row["recon_max_reason_rounds"] is None:
-        return
-    if row["recon_reason_rounds"] < row["recon_max_reason_rounds"]:
-        return
-    conn.execute(
-        """
-        UPDATE projects
-        SET status = 'stopped',
-            reason_worker = NULL,
-            reason_trigger = NULL,
-            reason_started_at = NULL,
-            reason_last_heartbeat_at = NULL
-        WHERE id = ?
-        """,
-        (project_id,),
-    )
-    conn.execute(
-        "UPDATE intents SET worker = NULL WHERE project_id = ? AND concluded_at IS NULL",
-        (project_id,),
-    )
-
-
-def increment_recon_reason_round(conn: sqlite3.Connection, project_id: str, stable: bool) -> ProjectMeta:
-    row = check_project_kind(conn, project_id, "recon")
+def increment_collection_reason_round(conn: sqlite3.Connection, project_id: str, stable: bool) -> ProjectMeta:
+    row = check_project_kind(conn, project_id, "vuln")
     if row["status"] != "active":
         raise HTTPException(403, f"Project is {row['status']}")
     if stable:
         conn.execute(
             """
             UPDATE projects
-            SET recon_reason_rounds = recon_reason_rounds + 1,
-                recon_stable_rounds = recon_stable_rounds + 1
+            SET collection_reason_rounds = collection_reason_rounds + 1,
+                collection_stable_rounds = collection_stable_rounds + 1
             WHERE id = ?
             """,
             (project_id,),
@@ -506,25 +519,24 @@ def increment_recon_reason_round(conn: sqlite3.Connection, project_id: str, stab
         conn.execute(
             """
             UPDATE projects
-            SET recon_reason_rounds = recon_reason_rounds + 1,
-                recon_stable_rounds = 0
+            SET collection_reason_rounds = collection_reason_rounds + 1,
+                collection_stable_rounds = 0
             WHERE id = ?
             """,
             (project_id,),
         )
-    maybe_stop_recon_by_round_limit(conn, project_id)
-    return project_meta_from_row(get_project_or_404(conn, project_id))
+    return project_meta_from_row(get_project_or_404(conn, project_id), conn)
 
 
-def increment_recon_explore_round(conn: sqlite3.Connection, project_id: str) -> ProjectMeta:
-    row = check_project_kind(conn, project_id, "recon")
+def increment_collection_explore_round(conn: sqlite3.Connection, project_id: str) -> ProjectMeta:
+    row = check_project_kind(conn, project_id, "vuln")
     if row["status"] != "active":
         raise HTTPException(403, f"Project is {row['status']}")
     conn.execute(
-        "UPDATE projects SET recon_explore_rounds = recon_explore_rounds + 1 WHERE id = ?",
+        "UPDATE projects SET collection_explore_rounds = collection_explore_rounds + 1 WHERE id = ?",
         (project_id,),
     )
-    return project_meta_from_row(get_project_or_404(conn, project_id))
+    return project_meta_from_row(get_project_or_404(conn, project_id), conn)
 
 
 def snapshot_to_model(row: sqlite3.Row) -> ProjectSnapshot:

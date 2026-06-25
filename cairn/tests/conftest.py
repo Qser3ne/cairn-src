@@ -35,7 +35,13 @@ def make_config() -> DispatchConfig:
                 {
                     "name": "test-worker",
                     "type": "mock",
-                    "task_types": ["reason", "explore", "judge", "report", "fork_seed"],
+                    "task_types": [
+                        "collection_reason",
+                        "collection_explore",
+                        "validation_reason",
+                        "validation_explore",
+                        "report",
+                    ],
                     "max_running": 1,
                     "priority": 0,
                 }
@@ -129,11 +135,11 @@ class FakeClient:
     project: ProjectDetail
     concluded: list[tuple[str, str, str, str]] = field(default_factory=list)
     concluded_findings: list[list[dict] | None] = field(default_factory=list)
-    created_intents: list[tuple[str, list[str], str, str, str | None]] = field(default_factory=list)
+    created_intents: list[tuple[str, list[str], str, str, str | None, str | None]] = field(default_factory=list)
     released: list[tuple[str, str, str]] = field(default_factory=list)
     released_reasons: list[tuple[str, str]] = field(default_factory=list)
-    recon_reason_rounds: list[tuple[str, bool]] = field(default_factory=list)
-    recon_explore_rounds: list[str] = field(default_factory=list)
+    collection_reason_rounds: list[tuple[str, bool]] = field(default_factory=list)
+    collection_explore_rounds: list[str] = field(default_factory=list)
 
     def get_project(self, _project_id: str) -> ProjectDetail:
         return self.project
@@ -168,16 +174,17 @@ class FakeClient:
         intent_kind: str = "explore",
         finding_id: str | None = None,
         auth_scope: str | None = None,
+        task_mode: str | None = None,
     ) -> ApiResult:
-        self.created_intents.append((project_id, from_ids, description, creator, auth_scope))
+        self.created_intents.append((project_id, from_ids, description, creator, auth_scope, task_mode))
         return ApiResult(201, {})
 
-    def record_recon_reason_round(self, project_id: str, stable: bool) -> ApiResult:
-        self.recon_reason_rounds.append((project_id, stable))
+    def record_collection_reason_round(self, project_id: str, stable: bool) -> ApiResult:
+        self.collection_reason_rounds.append((project_id, stable))
         return ApiResult(200, {})
 
-    def record_recon_explore_round(self, project_id: str) -> ApiResult:
-        self.recon_explore_rounds.append(project_id)
+    def record_collection_explore_round(self, project_id: str) -> ApiResult:
+        self.collection_explore_rounds.append(project_id)
         return ApiResult(200, {})
 
     def conclude_report(
@@ -194,7 +201,7 @@ class FakeClient:
         self.released.append((project_id, intent_id, worker))
         return ApiResult(200, {})
 
-    def release_reason(self, project_id: str, worker: str) -> ApiResult:
+    def release_reason(self, project_id: str, worker: str, _task_mode: str | None = None) -> ApiResult:
         self.released_reasons.append((project_id, worker))
         return ApiResult(200, {})
 
