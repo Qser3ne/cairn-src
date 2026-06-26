@@ -84,6 +84,7 @@ def create_intent(project_id: str, body: CreateIntentRequest):
                 raise HTTPException(400, "finding_id is required for report intents")
             get_finding_or_404(conn, project_id, body.finding_id)
             body.auth_scope = None
+        conn.execute("BEGIN IMMEDIATE")
         check_duplicate_intent(conn, project_id, body.from_, body.description, body.auth_scope)
         now = utcnow()
         iid = next_intent_id(conn, project_id)

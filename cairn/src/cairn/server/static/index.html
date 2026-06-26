@@ -1126,6 +1126,14 @@
     <div class="mt-4">
       <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason timeout (seconds)</label>
       <input type="number" x-model.number="settingsForm.reason_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+    </div>
+    <div class="mt-4">
+      <label class="text-[11px] text-slate-400 mb-1 block font-medium">Initial collection rounds</label>
+      <input type="number" min="0" x-model.number="settingsForm.initial_collection_rounds" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+    </div>
+    <div class="mt-4">
+      <label class="text-[11px] text-slate-400 mb-1 block font-medium">Collection worker limit</label>
+      <input type="number" min="1" x-model.number="settingsForm.collection_worker_limit" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
       <p class="text-[11px] text-slate-400 mt-2">Shared backend configuration.</p>
     </div>
     <div class="flex justify-end gap-2 mt-5">
@@ -1242,7 +1250,7 @@ function cairnApp() {
     hintForm: { content: '' },
     renameForm: { projectId: '', originalTitle: '', title: '' },
     localPrefs: { actor_name: 'Human', layout_mode: 'dagre_tb' },
-    settingsForm: { intent_timeout: 5, reason_timeout: 5 },
+    settingsForm: { intent_timeout: 5, reason_timeout: 5, initial_collection_rounds: 5, collection_worker_limit: 1 },
     deleteConfirm: { id: '', title: '' },
     isDeletingProject: false,
     yamlPreviewTitle: '',
@@ -1897,6 +1905,8 @@ function cairnApp() {
         const s = await this.api('GET', '/settings');
         this.settingsForm.intent_timeout = s.intent_timeout;
         this.settingsForm.reason_timeout = s.reason_timeout;
+        this.settingsForm.initial_collection_rounds = s.initial_collection_rounds;
+        this.settingsForm.collection_worker_limit = s.collection_worker_limit;
       } catch(e) { console.error(e); }
     },
 

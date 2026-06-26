@@ -14,12 +14,13 @@ from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import CairnClient
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
+from cairn.dispatcher.runtime.heartbeat import HEARTBEAT_FAILURE_GRACE_MULTIPLIER
 from cairn.dispatcher.runtime.startup_healthcheck import format_failure_summary, run_startup_healthchecks
 from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
 from cairn.dispatcher.tasks.report import run_report_task
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary, TaskMode
+from cairn.server.models import Intent, ProjectDetail, ProjectSummary, Settings, TaskMode
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
@@ -47,11 +48,13 @@ class DispatcherLoop:
         self.cleanup_futures: dict[Future[bool], tuple[str, str | None, str | None]] = {}
         self.reason_checkpoints: dict[tuple[str, TaskMode], ReasonCheckpoint] = {}
         self.collection_expansion_requests: dict[str, str] = {}
+        self.collection_warmup_released: set[str] = set()
         self.authenticated_wait_queues: dict[str, deque[str]] = {}
         self.account_leases: dict[str, dict[str, str]] = {}
         self.runtime_project_ids: set[str] = set()
         self.worker_unhealthy_until: dict[str, float] = {}
         self.worker_rejected_until: dict[tuple[str, str, str], float] = {}
+        self.server_settings: Settings | None = None
         self._log_state: dict[str, tuple[int, str, tuple[object, ...]]] = {}
         self._cleanup_pending: set[str] = set()
         self._inactive_cleanup_done: dict[str, str] = {}
@@ -76,8 +79,10 @@ class DispatcherLoop:
             self.run_startup_healthchecks()
             while True:
                 try:
+                    settings = self.client.get_settings()
+                    self.server_settings = settings
                     if not self._settings_checked:
-                        self._validate_server_settings()
+                        self._validate_server_settings(settings)
                         self._settings_checked = True
                     self._reap_futures()
                     self._reap_cleanup_futures()
@@ -249,7 +254,8 @@ class DispatcherLoop:
                 len(self.futures),
             )
             return False
-        queued_intent = self._next_authenticated_waiting_intent(project)
+        collection_warmup_complete = self._collection_warmup_complete(project)
+        queued_intent = None if not collection_warmup_complete else self._next_authenticated_waiting_intent(project)
         if queued_intent is not None:
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_explore(project, export_yaml, queued_intent)
@@ -271,16 +277,22 @@ class DispatcherLoop:
             )
         if unclaimed_intents:
             export_yaml = self.client.export_project(summary.id)
-            report_intent = self._newest_unclaimed_intent(unclaimed_intents, intent_kind="report")
-            if report_intent is not None:
-                return self._dispatch_report(project, export_yaml, report_intent)
-            validation_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="validation")
-            if validation_intent is not None:
-                return self._dispatch_explore(project, export_yaml, validation_intent)
-            collection_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="collection")
-            if collection_intent is not None:
-                return self._dispatch_explore(project, export_yaml, collection_intent)
-        for task_mode in ("validation", "collection"):
+            if not collection_warmup_complete:
+                collection_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="collection")
+                if collection_intent is not None:
+                    return self._dispatch_explore(project, export_yaml, collection_intent)
+            else:
+                report_intent = self._newest_unclaimed_intent(unclaimed_intents, intent_kind="report")
+                if report_intent is not None:
+                    return self._dispatch_report(project, export_yaml, report_intent)
+                validation_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="validation")
+                if validation_intent is not None:
+                    return self._dispatch_explore(project, export_yaml, validation_intent)
+                collection_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="collection")
+                if collection_intent is not None:
+                    return self._dispatch_explore(project, export_yaml, collection_intent)
+        reason_task_modes: tuple[TaskMode, ...] = ("validation", "collection") if collection_warmup_complete else ("collection",)
+        for task_mode in reason_task_modes:
             reason = self._reason_claimed(project, task_mode)
             if reason is not None:
                 continue
@@ -319,6 +331,17 @@ class DispatcherLoop:
     ) -> bool:
         task_mode = task_mode or self._reason_task_mode(project)
         task_type = self._reason_task_type(task_mode)
+        if self._is_collection_task_type(task_type) and not self._collection_capacity_available():
+            self._log_changed(
+                f"project:{project.project.id}:collection_limit:{task_type}",
+                logging.INFO,
+                "skip %s project=%s because collection_worker_limit reached running_collection_tasks=%s limit=%s",
+                task_type,
+                project.project.id,
+                self._running_collection_task_count(),
+                self._current_server_settings().collection_worker_limit,
+            )
+            return False
         selection = self._select_worker(project.project.id, task_type)
         worker = selection.worker
         if worker is None:
@@ -478,6 +501,19 @@ class DispatcherLoop:
         return True
 
     def _dispatch_explore(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
+        task_type = self._explore_task_type(intent.task_mode)
+        if self._is_collection_task_type(task_type) and not self._collection_capacity_available():
+            self._log_changed(
+                f"project:{project.project.id}:collection_limit:{task_type}",
+                logging.INFO,
+                "skip %s project=%s intent=%s because collection_worker_limit reached running_collection_tasks=%s limit=%s",
+                task_type,
+                project.project.id,
+                intent.id,
+                self._running_collection_task_count(),
+                self._current_server_settings().collection_worker_limit,
+            )
+            return False
         account = None
         if intent.auth_scope == "authenticated":
             if not project.accounts:
@@ -506,7 +542,6 @@ class DispatcherLoop:
                     len(project.accounts),
                 )
                 return False
-        task_type = self._explore_task_type(intent.task_mode)
         selection = self._select_worker(project.project.id, task_type)
         worker = selection.worker
         if worker is None:
@@ -672,6 +707,16 @@ class DispatcherLoop:
         for task in self.futures.values():
             counts[task.worker_name] = counts.get(task.worker_name, 0) + 1
         return counts
+
+    def _is_collection_task_type(self, task_type: str) -> bool:
+        return task_type in ("collection_reason", "collection_explore")
+
+    def _running_collection_task_count(self) -> int:
+        return sum(1 for task in self.futures.values() if self._is_collection_task_type(task.task_type))
+
+    def _collection_capacity_available(self) -> bool:
+        settings = self._current_server_settings()
+        return self._running_collection_task_count() < settings.collection_worker_limit
 
     def _project_running_task_count(self, project_id: str) -> int:
         return sum(1 for task in self.futures.values() if task.project_id == project_id)
@@ -864,6 +909,28 @@ class DispatcherLoop:
     def _is_initial_project(self, project: ProjectDetail) -> bool:
         fact_ids = {fact.id for fact in project.facts}
         return fact_ids == {"origin"} and len(project.facts) == 1 and not project.intents
+
+    def _collection_warmup_complete(self, project: ProjectDetail) -> bool:
+        if project.project.id in self.collection_warmup_released:
+            return True
+        settings = self._current_server_settings()
+        complete = (
+            settings.initial_collection_rounds <= 0
+            or project.project.collection_explore_rounds >= settings.initial_collection_rounds
+            or self._collection_warmup_converged(project)
+        )
+        if complete:
+            self.collection_warmup_released.add(project.project.id)
+        return complete
+
+    def _collection_warmup_converged(self, project: ProjectDetail) -> bool:
+        if project.project.collection_reason_rounds <= 0:
+            return False
+        if any(intent.to is None and intent.task_mode == "collection" for intent in project.intents):
+            return False
+        if self._reason_claimed(project, "collection") is not None:
+            return False
+        return self._reason_trigger(project, "collection") is None
 
     def _reason_trigger(self, project: ProjectDetail, task_mode: TaskMode) -> str | None:
         # Reason checkpoint is the last successful reason baseline. Trigger on
@@ -1076,6 +1143,7 @@ class DispatcherLoop:
     def _refresh_runtime_projects(self, summaries: list[ProjectSummary]) -> None:
         active_ids = {summary.id for summary in summaries if summary.status == "active"}
         self.runtime_project_ids.intersection_update(active_ids)
+        self.collection_warmup_released.intersection_update(active_ids)
         for project_id in list(self.collection_expansion_requests):
             if project_id not in active_ids:
                 self.collection_expansion_requests.pop(project_id, None)
@@ -1152,24 +1220,22 @@ class DispatcherLoop:
             if scope.startswith(prefix):
                 self._log_state.pop(scope, None)
 
-    def _validate_server_settings(self) -> None:
-        settings = self.client.get_settings()
+    def _current_server_settings(self) -> Settings:
+        if self.server_settings is not None:
+            return self.server_settings
+        self.server_settings = self.client.get_settings()
+        return self.server_settings
+
+    def _validate_server_settings(self, settings: Settings | None = None) -> None:
+        settings = settings or self.client.get_settings()
         interval = self.config.runtime.interval
+        heartbeat_grace = max(interval, interval * HEARTBEAT_FAILURE_GRACE_MULTIPLIER)
         for name, value in (("intent_timeout", settings.intent_timeout), ("reason_timeout", settings.reason_timeout)):
-            if value <= interval:
+            if value <= heartbeat_grace:
                 raise RuntimeError(
-                    f"server {name}={value}s must be greater than dispatcher interval={interval}s"
+                    f"server {name}={value}s must be greater than heartbeat grace={heartbeat_grace}s "
+                    f"for dispatcher interval={interval}s"
                 )
-            if value < interval * 2:
-                LOG.warning(
-                    "server %s is tight %s=%ss interval=%ss; heartbeat slack is only %ss",
-                    name,
-                    name,
-                    value,
-                    interval,
-                    value - interval,
-                )
-                continue
             LOG.info(
                 "server setting validated %s=%ss interval=%ss",
                 name,

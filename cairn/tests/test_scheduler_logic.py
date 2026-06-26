@@ -4,6 +4,7 @@ import logging
 from collections import deque
 from concurrent.futures import Future
 
+import pytest
 import requests
 
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
@@ -12,15 +13,22 @@ from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.tasks.explore import format_auth_context
-from cairn.server.models import EphemeralJob, Fact, ProjectSummary, TaskMode
+from cairn.server.models import EphemeralJob, Fact, ProjectSummary, Settings, TaskMode
 
 from conftest import make_account, make_config, make_intent, make_project
 
 
 def _loop() -> DispatcherLoop:
     loop = DispatcherLoop.__new__(DispatcherLoop)
+    loop.server_settings = Settings(
+        intent_timeout=15,
+        reason_timeout=15,
+        initial_collection_rounds=5,
+        collection_worker_limit=1,
+    )
     loop.reason_checkpoints = {}
     loop.collection_expansion_requests = {}
+    loop.collection_warmup_released = set()
     loop.authenticated_wait_queues = {}
     loop.account_leases = {}
     loop.runtime_project_ids = set()
@@ -33,6 +41,20 @@ def _loop() -> DispatcherLoop:
     loop._log_state = {}
     loop.project_cursor = 0
     return loop
+
+
+def _set_scheduler_settings(
+    loop: DispatcherLoop,
+    *,
+    initial_collection_rounds: int = 5,
+    collection_worker_limit: int = 1,
+) -> None:
+    loop.server_settings = Settings(
+        intent_timeout=15,
+        reason_timeout=15,
+        initial_collection_rounds=initial_collection_rounds,
+        collection_worker_limit=collection_worker_limit,
+    )
 
 
 def _summary(project_id: str, status: str) -> ProjectSummary:
@@ -109,6 +131,35 @@ def _authenticated_project(intent_count: int, account_count: int = 3):
     return project
 
 
+@pytest.mark.parametrize(
+    ("intent_timeout", "reason_timeout"),
+    [
+        (6, 7),
+        (7, 6),
+    ],
+)
+def test_validate_server_settings_rejects_timeout_at_heartbeat_grace(intent_timeout: int, reason_timeout: int) -> None:
+    loop = _loop()
+    loop.config = make_config().model_copy(
+        update={"runtime": make_config().runtime.model_copy(update={"interval": 3})}
+    )
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_settings": lambda _self: Settings(
+                intent_timeout=intent_timeout,
+                reason_timeout=reason_timeout,
+                initial_collection_rounds=5,
+                collection_worker_limit=1,
+            )
+        },
+    )()
+
+    with pytest.raises(RuntimeError, match="must be greater than heartbeat grace"):
+        loop._validate_server_settings()
+
+
 def _prepare_real_dispatch(loop: DispatcherLoop, project, *, task_types: list[str] | None = None) -> _RecordingExecutor:
     config = make_config()
     worker = config.workers[0].model_copy(
@@ -128,6 +179,8 @@ def _prepare_real_dispatch(loop: DispatcherLoop, project, *, task_types: list[st
     loop.config = config
     loop.executor = executor
     loop.futures = {}
+    _set_scheduler_settings(loop, initial_collection_rounds=0, collection_worker_limit=3)
+    project.project.collection_explore_rounds = max(project.project.collection_explore_rounds, 5)
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
     loop.client = type(
         "Client",
@@ -373,6 +426,7 @@ def test_unclaimed_explore_dispatches_before_new_reason_trigger() -> None:
     loop.futures = {}
     project = make_project(intents=[make_intent()])
     project.intents[0].worker = None
+    project.project.collection_explore_rounds = 5
     project.facts.append(Fact(id="f002", description="new"))
     loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(2, 1, 1)
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
@@ -441,6 +495,7 @@ def test_dual_vuln_project_without_accounts_dispatches_collection_baseline() -> 
 def test_report_validation_collection_intents_dispatch_in_required_order() -> None:
     loop = _loop()
     loop.config = make_config()
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=2)
     loop.futures = {}
     collection = make_intent("i001")
     collection.worker = None
@@ -456,6 +511,7 @@ def test_report_validation_collection_intents_dispatch_in_required_order() -> No
     report.task_mode = "report"
     report.created_at = "2026-01-01T00:00:01Z"
     project = make_project(intents=[collection, validation, report])
+    project.project.collection_explore_rounds = 5
     loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
     loop.client = type(
         "Client",
@@ -485,6 +541,187 @@ def test_report_validation_collection_intents_dispatch_in_required_order() -> No
     assert loop._try_dispatch_project(_summary("proj_001", "active"))
 
     assert dispatched == [("report", "i003"), ("validation", "i002"), ("collection", "i001")]
+
+
+def test_collection_warmup_dispatches_collection_before_validation_and_report() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=2)
+    loop.futures = {}
+    collection = make_intent("i001")
+    collection.worker = None
+    collection.task_mode = "collection"
+    collection.created_at = "2026-01-01T00:00:01Z"
+    validation = make_intent("i002")
+    validation.worker = None
+    validation.task_mode = "validation"
+    validation.created_at = "2026-01-01T00:00:03Z"
+    report = make_intent("i003")
+    report.worker = None
+    report.intent_kind = "report"
+    report.task_mode = "report"
+    report.created_at = "2026-01-01T00:00:04Z"
+    project = make_project(intents=[collection, validation, report])
+    project.project.collection_explore_rounds = 2
+    project.project.collection_reason_rounds = 2
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_report = lambda _project, _graph, intent: dispatched.append(("report", intent.id)) or True
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append((intent.task_mode, intent.id)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("collection", "i001")]
+
+
+def test_collection_warmup_blocks_validation_when_no_collection_round_has_run() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=2)
+    validation = make_intent("i001")
+    validation.worker = None
+    validation.task_mode = "validation"
+    project = make_project(intents=[validation])
+    project.project.collection_explore_rounds = 0
+    project.project.collection_reason_rounds = 0
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_reason = lambda _project, _graph, trigger, task_mode: dispatched.append((task_mode, trigger)) or True
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append((intent.task_mode, intent.id)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("collection", "initial")]
+
+
+def test_collection_warmup_allows_validation_after_explore_threshold() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=1)
+    validation = make_intent("i001")
+    validation.worker = None
+    validation.task_mode = "validation"
+    project = make_project(intents=[validation])
+    project.project.collection_explore_rounds = 5
+    project.project.collection_reason_rounds = 1
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append((intent.task_mode, intent.id)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("validation", "i001")]
+
+
+def test_collection_warmup_allows_early_validation_when_collection_converged() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=1)
+    validation = make_intent("i001")
+    validation.worker = None
+    validation.task_mode = "validation"
+    project = make_project(intents=[validation])
+    project.project.collection_explore_rounds = 1
+    project.project.collection_reason_rounds = 2
+    loop.reason_checkpoints[("proj_001", "collection")] = ReasonCheckpoint(
+        fact_count=len(project.facts),
+        hint_count=len(project.hints),
+        open_intent_count=0,
+    )
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append((intent.task_mode, intent.id)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("validation", "i001")]
+
+
+def test_collection_worker_limit_blocks_collection_dispatch_globally() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=1)
+    loop.futures = {
+        Future(): RunningTask("other", "collection_explore", "worker-a", TaskCancellation(), intent_id="i999")
+    }
+    collection = make_intent("i001")
+    collection.worker = None
+    collection.task_mode = "collection"
+    project = make_project(intents=[collection])
+    project.project.collection_explore_rounds = 0
+    project.project.collection_reason_rounds = 1
+    executor = _prepare_real_dispatch(loop, project)
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=1)
+    project.project.collection_explore_rounds = 0
+    project.project.collection_reason_rounds = 1
+    loop.futures = {
+        Future(): RunningTask("other", "collection_explore", "worker-a", TaskCancellation(), intent_id="i999")
+    }
+
+    assert not loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert executor.submissions == []
+
+
+def test_collection_worker_limit_does_not_block_validation_after_warmup() -> None:
+    loop = _loop()
+    loop.config = make_config()
+    _set_scheduler_settings(loop, initial_collection_rounds=5, collection_worker_limit=1)
+    loop.futures = {
+        Future(): RunningTask("other", "collection_reason", "worker-a", TaskCancellation())
+    }
+    validation = make_intent("i001")
+    validation.worker = None
+    validation.task_mode = "validation"
+    project = make_project(intents=[validation])
+    project.project.collection_explore_rounds = 5
+    loop.container_manager = type("Containers", (), {"container_name": lambda _self, project_id: project_id})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_project": lambda _self, _project_id: project,
+            "export_project": lambda _self, _project_id: "graph",
+        },
+    )()
+    dispatched: list[tuple[str, str]] = []
+    loop._dispatch_explore = lambda _project, _graph, intent: dispatched.append((intent.task_mode, intent.id)) or True
+
+    assert loop._try_dispatch_project(_summary("proj_001", "active"))
+
+    assert dispatched == [("validation", "i001")]
 
 
 def test_validation_convergence_schedules_collection_reason_without_collection_delta() -> None:
@@ -963,7 +1200,14 @@ def test_dispatcher_run_once_does_not_call_legacy_ephemeral_dispatchers() -> Non
     loop = _loop()
     config = make_config()
     loop.config = config
-    loop.client = type("Client", (), {"list_projects": lambda _self: []})()
+    loop.client = type(
+        "Client",
+        (),
+        {
+            "get_settings": lambda _self: loop.server_settings,
+            "list_projects": lambda _self: [],
+        },
+    )()
     loop.container_manager = _RecordingContainerManager()
     loop.executor = _RecordingExecutor()
     loop.cleanup_executor = _RecordingExecutor()

@@ -56,33 +56,51 @@ container:
 workers:
   # Worker priority is ascending: lower numbers are preferred first.
   # max_running is per-worker concurrency. Slower backends such as Pi usually benefit from lower values.
-  # Collection workers continuously map the business surface and produce scoped follow-up intents.
-  - name: "claudecode_collection_deepseek-v4-pro"
+  # These five entries show the logical worker roles. Operators may combine compatible task_types on one backend worker.
+  - name: "claudecode_collection_reason_deepseek-v4-pro"
     type: "claudecode"
-    task_types: [collection_reason, collection_explore]
-    max_running: 2
+    task_types: [collection_reason]
+    max_running: 1
     priority: 0
     env:
       ANTHROPIC_MODEL: "deepseek-v4-pro"
       ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
       ANTHROPIC_AUTH_TOKEN: "sk-xxx"
 
-  # Validation workers verify vulnerability hypotheses and produce evidence-backed findings.
-  - name: "codex_validation_qwen3.6-plus"
+  - name: "claudecode_collection_explore_deepseek-v4-pro"
+    type: "claudecode"
+    task_types: [collection_explore]
+    max_running: 1
+    priority: 0
+    env:
+      ANTHROPIC_MODEL: "deepseek-v4-pro"
+      ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
+      ANTHROPIC_AUTH_TOKEN: "sk-xxx"
+
+  - name: "codex_validation_reason_qwen3.6-plus"
     type: "codex"
-    task_types: [validation_reason, validation_explore]
-    max_running: 2
+    task_types: [validation_reason]
+    max_running: 1
     priority: 0
     env:
       CODEX_MODEL: "qwen3.6-plus"
       CODEX_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
       OPENAI_API_KEY: "sk-xxx"
 
-  # Report workers draft final reports from confirmed findings.
+  - name: "codex_validation_explore_qwen3.6-plus"
+    type: "codex"
+    task_types: [validation_explore]
+    max_running: 1
+    priority: 0
+    env:
+      CODEX_MODEL: "qwen3.6-plus"
+      CODEX_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      OPENAI_API_KEY: "sk-xxx"
+
   - name: "pi_report_qwen3.6-plus"
     type: "pi"
     task_types: [report]
-    max_running: 2
+    max_running: 1
     priority: 0
     env:
       PI_MODEL: "qwen3.6-plus"

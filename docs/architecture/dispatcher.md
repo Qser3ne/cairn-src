@@ -43,6 +43,13 @@ Worker `task_types` 只允许：
 - `validation_explore`
 - `report`
 
+这五个 task types 是五类逻辑 worker 角色。示例配置使用一类 worker 对应一个 task type；实际部署可在同一 backend worker 上合并多个兼容 task types。
+
+Server-side `/settings` 也控制运行时调度行为：
+
+- `initial_collection_rounds` 默认 `5`。Validation/report 调度会等待完成足够多的 collection explore 执行，除非 collection 提前收敛。
+- `collection_worker_limit` 默认 `1`。它全局限制正在运行的 `collection_reason` 与 `collection_explore` 总数。
+
 配置校验规则：
 
 - Dispatcher 配置模型对嵌套段落使用 strict parsing，未知字段会在启动配置解析阶段失败。
@@ -68,7 +75,7 @@ Worker `task_types` 只允许：
 `DispatcherLoop.run()` 每轮执行：
 
 1. 启动 worker startup healthchecks。
-2. 校验 server timeout settings。
+2. 拉取 server settings，并在启动时校验 timeout settings。
 3. 回收已完成 task futures。
 4. 回收 container cleanup futures。
 5. 拉取 projects。
@@ -85,6 +92,8 @@ Worker `task_types` 只允许：
 - 只为 `active` project 调度 reason、explore、report。
 - 初始项目指 facts 只有 `origin` 且没有 intents。
 - 初始 active project 先 dispatch `collection_reason`，按项目 `auth_mode` 生成可用的 collection baseline intents。
+- Warmup 完成前不调度 report intents、validation explore 或 validation reason；collection reason/explore 仍可调度。
+- Warmup 在 `collection_explore_rounds >= initial_collection_rounds` 时完成；如果至少已有一轮 collection reason 且无 open/triggerable collection work，也会提前完成。
 - Authenticated explore 等待队列优先于普通未 claim intent。
 - 未 claim intents 按 `report`、`validation` explore、`collection` explore 的顺序调度；同一组内选择最新 intent。
 - 如果没有可调度 intent，Dispatcher 分别按 `validation`、`collection` 检查 reason trigger，并按 task mode claim reason lease。
@@ -111,6 +120,7 @@ Dispatcher 同时受以下限制：
 - `runtime.max_running_projects`：同时运行项目数。
 - `runtime.max_project_workers`：单项目 task 并发。
 - `worker.max_running`：单 worker 后端并发。
+- `settings.collection_worker_limit`：全局 collection reason/explore 并发。
 - Cookie session 数量：authenticated explore 的实际并发上限之一。
 
 Authenticated explore 实际并发上限：

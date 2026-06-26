@@ -8,6 +8,7 @@ import yaml
 
 from cairn.server import db
 from cairn.server.app import app
+from cairn.server.routers import intents as intents_router
 
 
 @pytest.fixture
@@ -176,7 +177,13 @@ def test_write_requests_reject_unknown_fields(client: TestClient) -> None:
     )
     settings = client.put(
         "/settings",
-        json={"intent_timeout": 10, "reason_timeout": 10, "surprise": True},
+        json={
+            "intent_timeout": 10,
+            "reason_timeout": 10,
+            "initial_collection_rounds": 5,
+            "collection_worker_limit": 1,
+            "surprise": True,
+        },
     )
 
     assert nested_cookie.status_code == 422
@@ -184,6 +191,104 @@ def test_write_requests_reject_unknown_fields(client: TestClient) -> None:
     assert intent.status_code == 422
     assert status.status_code == 422
     assert settings.status_code == 422
+
+
+def test_settings_api_exposes_collection_scheduling_defaults_and_updates(client: TestClient) -> None:
+    defaults = client.get("/settings")
+
+    assert defaults.status_code == 200
+    assert defaults.json() == {
+        "intent_timeout": 15,
+        "reason_timeout": 15,
+        "initial_collection_rounds": 5,
+        "collection_worker_limit": 1,
+    }
+
+    updated = client.put(
+        "/settings",
+        json={
+            "intent_timeout": 20,
+            "reason_timeout": 21,
+            "initial_collection_rounds": 3,
+            "collection_worker_limit": 2,
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json() == {
+        "intent_timeout": 20,
+        "reason_timeout": 21,
+        "initial_collection_rounds": 3,
+        "collection_worker_limit": 2,
+    }
+    assert client.get("/settings").json() == updated.json()
+
+
+def test_settings_api_validates_collection_scheduling_bounds(client: TestClient) -> None:
+    invalid_rounds = client.put(
+        "/settings",
+        json={
+            "intent_timeout": 10,
+            "reason_timeout": 10,
+            "initial_collection_rounds": -1,
+            "collection_worker_limit": 1,
+        },
+    )
+    invalid_limit = client.put(
+        "/settings",
+        json={
+            "intent_timeout": 10,
+            "reason_timeout": 10,
+            "initial_collection_rounds": 0,
+            "collection_worker_limit": 0,
+        },
+    )
+
+    assert invalid_rounds.status_code == 422
+    assert invalid_limit.status_code == 422
+
+
+def test_static_ui_exposes_collection_scheduling_settings(client: TestClient) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    ui = response.text
+    assert "Initial collection rounds" in ui
+    assert "Collection worker limit" in ui
+    assert "settingsForm: { intent_timeout: 5, reason_timeout: 5, initial_collection_rounds: 5, collection_worker_limit: 1 }" in ui
+    assert "this.settingsForm.initial_collection_rounds = s.initial_collection_rounds;" in ui
+    assert "this.settingsForm.collection_worker_limit = s.collection_worker_limit;" in ui
+
+
+def test_create_intent_rejects_duplicate_source_fact_ids(client: TestClient) -> None:
+    project_id = _create_project(client)["project"]["id"]
+
+    response = client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin", "origin"], "description": "duplicate source", "creator": "tester"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_intent_duplicate_check_runs_inside_write_transaction(client: TestClient, monkeypatch) -> None:
+    project_id = _create_project(client)["project"]["id"]
+    original = intents_router.check_duplicate_intent
+    observed_transactions: list[bool] = []
+
+    def check_duplicate_with_transaction_assertion(conn, *args, **kwargs):
+        observed_transactions.append(conn.in_transaction)
+        return original(conn, *args, **kwargs)
+
+    monkeypatch.setattr(intents_router, "check_duplicate_intent", check_duplicate_with_transaction_assertion)
+
+    response = client.post(
+        f"/projects/{project_id}/intents",
+        json={"from": ["origin"], "description": "first work", "creator": "tester"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert observed_transactions == [True]
 
 
 def test_static_ui_polling_avoids_fixed_interval_overlap(client: TestClient) -> None:
@@ -736,6 +841,18 @@ def test_legacy_ephemeral_jobs_are_hidden_from_dispatch_queue_and_cannot_be_clai
     with db.get_conn() as conn:
         rows = conn.execute("SELECT id, status FROM ephemeral_jobs ORDER BY id").fetchall()
     assert [(row["id"], row["status"]) for row in rows] == [("fork_001", "queued"), ("judge_001", "queued")]
+
+
+def test_retired_ephemeral_job_fail_route_is_gone(client: TestClient) -> None:
+    project_id = _create_project(client)["project"]["id"]
+    _insert_ephemeral_job(project_id, "judge_001", "judge")
+
+    response = client.post(
+        "/ephemeral-jobs/judge_001/fail",
+        json={"worker": "dispatcher", "error": "retired"},
+    )
+
+    assert response.status_code == 410
 
 
 def test_collection_conclude_rejects_findings(client: TestClient) -> None:

@@ -38,6 +38,9 @@ Collection 的目标是建立可用于漏洞验证的上下文：
 - 匿名与登录态认证边界。
 - 候选攻击面、验证种子和噪声排除结论。
 
+项目启动后先进入 collection warmup。默认需要完成 5 次 `collection_explore`
+执行后才开始 validation/report；如果 collection 已无可继续产出的工作，则允许提前进入 validation/report，避免卡住。全局 `collection_worker_limit` 默认 1，会限制同时运行的 `collection_reason` 与 `collection_explore` 数量。
+
 `collection_reason` 只负责规划：
 
 - 初始项目会生成 collection baseline intents；有 accounts 的项目会区分 anonymous 和 authenticated 基线。

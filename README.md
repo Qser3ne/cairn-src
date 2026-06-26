@@ -108,6 +108,9 @@ The Chinese documentation set lives under [`docs/`](./docs/):
 | `validation_explore` | `validation` | Validate vulnerabilities and write findings | Facts and optional findings |
 | `report` | `report` | Draft an SRC report from a finding | Finding report draft |
 
+The five task types are separate logical worker roles. A deployment may use one
+worker entry per role or combine compatible task types on the same backend.
+
 Supported worker backends are Claude Code, Codex, Pi, and the mock adapter used
 by tests.
 
@@ -202,6 +205,10 @@ Main dispatcher configuration lives in `dispatch.yaml`.
   behavior, and completed-container action.
 - `workers` configures backend type, task support, priority, concurrency, and
   backend-specific environment variables.
+- Server settings include `initial_collection_rounds` (default `5`) and
+  `collection_worker_limit` (default `1`). New projects run collection-only
+  warmup until enough collection executions finish or collection converges;
+  after that, collection and validation/report can run in parallel.
 
 See:
 

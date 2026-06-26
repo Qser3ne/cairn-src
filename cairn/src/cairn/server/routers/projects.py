@@ -703,6 +703,8 @@ def finish_ephemeral_job(job_id: str, body: EphemeralJobFinishRequest):
 def fail_ephemeral_job(job_id: str, body: EphemeralJobFailRequest):
     with get_conn() as conn:
         row = get_ephemeral_job_or_404(conn, job_id)
+        if row["job_type"] in RETIRED_EPHEMERAL_JOB_TYPES:
+            raise HTTPException(410, f"{row['job_type']} jobs have been retired")
         if row["status"] not in ("queued", "running") or (row["worker"] is not None and row["worker"] != body.worker):
             raise HTTPException(409, "Ephemeral job is not claimed by this worker")
         conn.execute(

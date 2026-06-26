@@ -24,6 +24,8 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
         }
         finding_columns = {row["name"] for row in conn.execute("PRAGMA table_info(findings)")}
         ephemeral_columns = {row["name"] for row in conn.execute("PRAGMA table_info(ephemeral_jobs)")}
+        settings_columns = {row["name"] for row in conn.execute("PRAGMA table_info(settings)")}
+        settings = conn.execute("SELECT * FROM settings WHERE rowid = 1").fetchone()
         tables = {
             row["name"]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -41,7 +43,35 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert "session_lock" not in intent_columns
     assert {"research_value", "next_action", "report_status", "report_intent_id"} <= finding_columns
     assert "input_json" in ephemeral_columns
+    assert {"initial_collection_rounds", "collection_worker_limit"} <= settings_columns
+    assert settings["initial_collection_rounds"] == 5
+    assert settings["collection_worker_limit"] == 1
     assert {"project_accounts", "project_snapshots", "ephemeral_jobs", "finding_reports"} <= tables
+
+
+def test_legacy_settings_table_gains_collection_scheduling_columns(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "legacy-settings.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE settings (
+                intent_timeout INTEGER NOT NULL DEFAULT 15,
+                reason_timeout INTEGER NOT NULL DEFAULT 15
+            );
+            INSERT INTO settings (rowid, intent_timeout, reason_timeout) VALUES (1, 30, 31);
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT * FROM settings WHERE rowid = 1").fetchone()
+
+    assert row["intent_timeout"] == 30
+    assert row["reason_timeout"] == 31
+    assert row["initial_collection_rounds"] == 5
+    assert row["collection_worker_limit"] == 1
 
 
 def test_new_database_has_query_indexes(tmp_path, monkeypatch) -> None:
@@ -88,6 +118,35 @@ def test_legacy_standard_project_blocks_startup(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(db, "_db_path", None)
     with pytest.raises(RuntimeError, match="Standard workflow has been removed"):
         db.configure(path)
+
+
+def test_configure_failure_does_not_cache_failed_db_path(tmp_path, monkeypatch) -> None:
+    bad_path = tmp_path / "standard.db"
+    with sqlite3.connect(bad_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                mode TEXT NOT NULL DEFAULT 'standard',
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO projects (id, title, mode, created_at)
+            VALUES ('proj_001', 'legacy standard', 'standard', '2026-01-01T00:00:00Z');
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    with pytest.raises(RuntimeError, match="Standard workflow has been removed"):
+        db.configure(bad_path)
+
+    assert db._db_path is None
+
+    good_path = tmp_path / "new.db"
+    db.configure(good_path)
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) AS count FROM projects").fetchone()["count"] == 0
 
 
 def test_legacy_src_project_migrates_to_parentless_vuln_and_drops_password_accounts(tmp_path, monkeypatch) -> None:
@@ -146,6 +205,123 @@ def test_legacy_src_project_migrates_to_parentless_vuln_and_drops_password_accou
     assert "username" not in account_columns
     assert "password" not in account_columns
     assert "session_lock_enabled" not in project_columns
+
+
+def test_legacy_projects_rebuild_preserves_parent_project_foreign_key(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "legacy-parent-fk.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                project_kind TEXT NOT NULL DEFAULT 'vuln',
+                auth_mode TEXT NOT NULL DEFAULT 'anonymous',
+                parent_project_id TEXT REFERENCES projects(id) ON DELETE RESTRICT,
+                parent_snapshot_id TEXT,
+                created_at TEXT NOT NULL,
+                reason_worker TEXT,
+                reason_trigger TEXT,
+                reason_started_at TEXT,
+                reason_last_heartbeat_at TEXT,
+                reason_pending INTEGER NOT NULL DEFAULT 0,
+                collection_max_reason_rounds INTEGER,
+                collection_reason_rounds INTEGER NOT NULL DEFAULT 0,
+                collection_explore_rounds INTEGER NOT NULL DEFAULT 0,
+                collection_stable_rounds INTEGER NOT NULL DEFAULT 0,
+                judge_status TEXT NOT NULL DEFAULT 'not_judged',
+                judged_at TEXT
+            );
+            INSERT INTO projects (id, title, project_kind, auth_mode, created_at)
+            VALUES ('proj_001', 'legacy collection max', 'vuln', 'anonymous', '2026-01-01T00:00:00Z');
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        foreign_keys = conn.execute("PRAGMA foreign_key_list(projects)").fetchall()
+
+    assert any(
+        row["from"] == "parent_project_id"
+        and row["table"] == "projects"
+        and row["on_delete"] == "RESTRICT"
+        for row in foreign_keys
+    )
+
+
+def test_legacy_project_retired_columns_are_removed_without_session_lock(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "legacy-retired-columns.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                mode TEXT NOT NULL DEFAULT 'src',
+                bootstrap_enabled INTEGER NOT NULL DEFAULT 1,
+                recon_max_reason_rounds INTEGER,
+                recon_reason_rounds INTEGER NOT NULL DEFAULT 0,
+                recon_explore_rounds INTEGER NOT NULL DEFAULT 0,
+                recon_stable_rounds INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                reason_worker TEXT,
+                reason_trigger TEXT,
+                reason_started_at TEXT,
+                reason_last_heartbeat_at TEXT
+            );
+            INSERT INTO projects (
+                id,
+                title,
+                mode,
+                bootstrap_enabled,
+                recon_max_reason_rounds,
+                recon_reason_rounds,
+                recon_explore_rounds,
+                recon_stable_rounds,
+                created_at
+            ) VALUES (
+                'proj_001',
+                'legacy src',
+                'src',
+                1,
+                8,
+                3,
+                4,
+                1,
+                '2026-01-01T00:00:00Z'
+            );
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        project_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+        project = conn.execute(
+            """
+            SELECT project_kind, collection_reason_rounds, collection_explore_rounds, collection_stable_rounds
+            FROM projects
+            WHERE id = 'proj_001'
+            """
+        ).fetchone()
+
+    assert {
+        "mode",
+        "bootstrap_enabled",
+        "recon_max_reason_rounds",
+        "recon_reason_rounds",
+        "recon_explore_rounds",
+        "recon_stable_rounds",
+    }.isdisjoint(project_columns)
+    assert project["project_kind"] == "vuln"
+    assert project["collection_reason_rounds"] == 3
+    assert project["collection_explore_rounds"] == 4
+    assert project["collection_stable_rounds"] == 1
 
 
 def test_legacy_intent_session_lock_column_is_removed_and_new_columns_added(tmp_path, monkeypatch) -> None:

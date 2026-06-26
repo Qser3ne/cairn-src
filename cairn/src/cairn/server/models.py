@@ -24,6 +24,8 @@ class Settings(BaseModel):
 
     intent_timeout: int = Field(ge=5)
     reason_timeout: int = Field(ge=5)
+    initial_collection_rounds: int = Field(ge=0)
+    collection_worker_limit: int = Field(ge=1)
 
 
 class Fact(BaseModel):
@@ -319,10 +321,14 @@ class CreateIntentRequest(BaseModel):
     @classmethod
     def validate_fact_ids(cls, value: list[str]) -> list[str]:
         cleaned = []
+        seen = set()
         for item in value:
             text = item.strip()
             if not text:
                 raise ValueError("fact ids must not be empty")
+            if text in seen:
+                raise ValueError("fact ids must be unique")
+            seen.add(text)
             cleaned.append(text)
         return cleaned
 

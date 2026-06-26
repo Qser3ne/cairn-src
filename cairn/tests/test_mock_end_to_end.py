@@ -335,11 +335,13 @@ def _loop(config: DispatchConfig, client: InProcessClient, containers: LocalCont
     loop.cleanup_futures = {}
     loop.reason_checkpoints = {}
     loop.collection_expansion_requests = {}
+    loop.collection_warmup_released = set()
     loop.authenticated_wait_queues = {}
     loop.account_leases = {}
     loop.runtime_project_ids = set()
     loop.worker_unhealthy_until = {}
     loop.worker_rejected_until = {}
+    loop.server_settings = client.get_settings()
     loop._log_state = {}
     loop._cleanup_pending = set()
     loop._inactive_cleanup_done = {}
@@ -498,6 +500,7 @@ def test_mock_scheduler_validation_reason_creates_validation_intents(http_client
         client,
         containers,
     )
+    loop.server_settings = loop.server_settings.model_copy(update={"initial_collection_rounds": 0})
 
     try:
         _dispatch_and_wait(loop)
@@ -546,6 +549,8 @@ def test_mock_scheduler_exercises_collection_validation_report_flow(http_client:
         assert all(fact.details.get("apis") for fact in collection_facts)
         assert all(fact.details.get("auth") for fact in collection_facts)
         assert project.findings == []
+
+        _dispatch_and_wait(loop)
 
         collection_fact_id = collection_facts[0].id
         seed = http_client.post(

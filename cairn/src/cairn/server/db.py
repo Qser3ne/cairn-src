@@ -9,10 +9,23 @@ DEFAULT_DB = Path.home() / ".local" / "share" / "cairn" / "cairn.db"
 
 _db_path: Path | None = None
 
+RETIRED_PROJECT_COLUMNS = {
+    "mode",
+    "bootstrap_enabled",
+    "session_lock_enabled",
+    "recon_max_reason_rounds",
+    "recon_reason_rounds",
+    "recon_explore_rounds",
+    "recon_stable_rounds",
+    "collection_max_reason_rounds",
+}
+
 SCHEMA = """\
 CREATE TABLE IF NOT EXISTS settings (
     intent_timeout INTEGER NOT NULL DEFAULT 15,
-    reason_timeout INTEGER NOT NULL DEFAULT 15
+    reason_timeout INTEGER NOT NULL DEFAULT 15,
+    initial_collection_rounds INTEGER NOT NULL DEFAULT 5,
+    collection_worker_limit INTEGER NOT NULL DEFAULT 1
 );
 
 INSERT OR IGNORE INTO settings (rowid, intent_timeout, reason_timeout) VALUES (1, 15, 15);
@@ -190,23 +203,37 @@ def configure(path: Path) -> None:
     global _db_path
     if _db_path is not None:
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    previous_path = _db_path
     _db_path = path
-    _db_path.parent.mkdir(parents=True, exist_ok=True)
-    with get_conn() as conn:
-        _ensure_no_legacy_standard_projects(conn)
-        conn.executescript(SCHEMA)
-        _ensure_src_only_project_columns(conn)
-        _ensure_fact_structure_columns(conn)
-        _migrate_intent_table(conn)
-        _migrate_recon_projects_to_vuln(conn)
-        _ensure_project_accounts_table(conn)
-        _ensure_findings_table(conn)
-        _ensure_project_snapshots_table(conn)
-        _ensure_ephemeral_jobs_table(conn)
-        _ensure_project_reason_leases_table(conn)
-        _ensure_finding_reports_table(conn)
-        _ensure_indexes(conn)
-        _remove_goal_facts(conn)
+    try:
+        with get_conn() as conn:
+            _ensure_no_legacy_standard_projects(conn)
+            conn.executescript(SCHEMA)
+            _ensure_settings_columns(conn)
+            _ensure_src_only_project_columns(conn)
+            _ensure_fact_structure_columns(conn)
+            _migrate_intent_table(conn)
+            _migrate_recon_projects_to_vuln(conn)
+            _ensure_project_accounts_table(conn)
+            _ensure_findings_table(conn)
+            _ensure_project_snapshots_table(conn)
+            _ensure_ephemeral_jobs_table(conn)
+            _ensure_project_reason_leases_table(conn)
+            _ensure_finding_reports_table(conn)
+            _ensure_indexes(conn)
+            _remove_goal_facts(conn)
+    except Exception:
+        _db_path = previous_path
+        raise
+
+
+def _ensure_settings_columns(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(settings)")}
+    if "initial_collection_rounds" not in columns:
+        conn.execute("ALTER TABLE settings ADD COLUMN initial_collection_rounds INTEGER NOT NULL DEFAULT 5")
+    if "collection_worker_limit" not in columns:
+        conn.execute("ALTER TABLE settings ADD COLUMN collection_worker_limit INTEGER NOT NULL DEFAULT 1")
 
 
 def _ensure_no_legacy_standard_projects(conn: sqlite3.Connection) -> None:
@@ -277,10 +304,10 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE projects ADD COLUMN reason_pending INTEGER NOT NULL DEFAULT 0")
         columns.add("reason_pending")
     conn.execute("UPDATE projects SET auth_mode = 'dual' WHERE project_kind = 'recon'")
-    if "session_lock_enabled" not in columns and "collection_max_reason_rounds" not in columns:
+    if columns.isdisjoint(RETIRED_PROJECT_COLUMNS):
         return
 
-    conn.execute("PRAGMA foreign_keys=OFF")
+    _begin_table_rebuild(conn)
     conn.execute(
         """
         CREATE TABLE projects_new (
@@ -289,7 +316,7 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             status TEXT NOT NULL DEFAULT 'active',
             project_kind TEXT NOT NULL DEFAULT 'vuln',
             auth_mode TEXT NOT NULL DEFAULT 'anonymous',
-            parent_project_id TEXT,
+            parent_project_id TEXT REFERENCES projects(id) ON DELETE RESTRICT,
             parent_snapshot_id TEXT,
             created_at TEXT NOT NULL,
             reason_worker TEXT,
@@ -351,7 +378,7 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
     )
     conn.execute("DROP TABLE projects")
     conn.execute("ALTER TABLE projects_new RENAME TO projects")
-    conn.execute("PRAGMA foreign_keys=ON")
+    _finish_table_rebuild(conn)
 
 
 def _ensure_fact_structure_columns(conn: sqlite3.Connection) -> None:
@@ -423,7 +450,7 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
     if "session_lock" not in columns:
         return
 
-    conn.execute("PRAGMA foreign_keys=OFF")
+    _begin_table_rebuild(conn)
     conn.execute(
         """
         CREATE TABLE intents_new (
@@ -480,7 +507,7 @@ def _migrate_intent_table(conn: sqlite3.Connection) -> None:
     )
     conn.execute("DROP TABLE intents")
     conn.execute("ALTER TABLE intents_new RENAME TO intents")
-    conn.execute("PRAGMA foreign_keys=ON")
+    _finish_table_rebuild(conn)
 
 
 def _ensure_project_accounts_table(conn: sqlite3.Connection) -> None:
@@ -499,7 +526,7 @@ def _ensure_project_accounts_table(conn: sqlite3.Connection) -> None:
     if "cookies_json" in columns and "username" not in columns and "password" not in columns:
         return
 
-    conn.execute("PRAGMA foreign_keys=OFF")
+    _begin_table_rebuild(conn)
     conn.execute(
         """
         CREATE TABLE project_accounts_new (
@@ -521,7 +548,22 @@ def _ensure_project_accounts_table(conn: sqlite3.Connection) -> None:
         )
     conn.execute("DROP TABLE project_accounts")
     conn.execute("ALTER TABLE project_accounts_new RENAME TO project_accounts")
+    _finish_table_rebuild(conn)
+
+
+def _begin_table_rebuild(conn: sqlite3.Connection) -> None:
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("PRAGMA foreign_keys=OFF")
+
+
+def _finish_table_rebuild(conn: sqlite3.Connection) -> None:
+    if conn.in_transaction:
+        conn.commit()
     conn.execute("PRAGMA foreign_keys=ON")
+    violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise RuntimeError(f"SQLite foreign key check failed after schema migration: {violations!r}")
 
 
 def _ensure_findings_table(conn: sqlite3.Connection) -> None:
