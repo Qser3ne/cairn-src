@@ -51,31 +51,28 @@ scripts/deploy.sh
 ./scripts/deploy.sh
 ```
 
-可选参数：
-
-```bash
-./scripts/deploy.sh --skip-tests
-./scripts/deploy.sh --no-backup
-```
-
 脚本执行顺序：
 
-1. 校验开发目录和生产目录都是 Git 仓库。
-2. 校验两个目录 `origin` 一致。
-3. 校验两个目录都在 `main` 分支。
-4. 拒绝部署有 tracked 改动的开发或生产目录。
-5. 默认在 `cairn/` 运行 `uv run --group dev pytest -s`。
-6. 推送开发目录 `main` 到 origin。
-7. 在生产目录 `git pull --ff-only origin main`。
-8. 默认备份生产 `datas/` 到 `datas.backup/<timestamp>/`。
-9. 调用生产目录 `./start.sh` 重建和重启服务。
-10. 访问 `http://127.0.0.1:8000/projects` 做健康检查。
+1. 校验开发目录和生产目录存在。
+2. 校验本机可用 `rsync`。
+3. 使用 `rsync -a --delete` 将开发目录直接覆盖到生产目录。
+
+同步排除项：
+
+- `.git/`
+- `.github/`
+- `.agents/`
+- `.superpowers/`
+- `.worktrees/`
+- `.pytest_cache/`
+- `datas.backup/`
+
+脚本会覆盖生产 `datas/`，不会运行测试，不使用 Git 同步，不调用 `./start.sh` 重建/重启服务，也不执行 HTTP 健康检查。
 
 保护项：
 
-- 脚本不会自动 `git add`、`git commit` 或 `git reset --hard`。
-- 脚本不会覆盖生产本地 `dispatch.yaml`、`datas/`、`.venv-test/`。
-- 生产目录如有 tracked 改动，脚本会停止。
+- 脚本不会自动 `git add`、`git commit`、`git push`、`git pull` 或 `git reset --hard`。
+- 脚本不会覆盖生产本地 `.git/`、`.github/`、`.agents/`、`.superpowers/`、`.worktrees/`、`.pytest_cache/` 和 `datas.backup/`。
 
 ## Worker 镜像发布
 
