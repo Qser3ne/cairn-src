@@ -56,6 +56,8 @@ class ManagedProcess:
 
     def communicate(self, timeout: float | None) -> ProcessResult:
         assert self._reader is not None
+        if self._cancel_reason is not None:
+            self.kill()
         self._reader.join(timeout=timeout)
         if self._reader.is_alive():
             self._timed_out = True

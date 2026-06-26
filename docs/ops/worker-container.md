@@ -45,6 +45,8 @@ Worker 容器内固定目录：
 | `/home/kali/targets` | 只读源码、样本、安装包或审计材料。 |
 | `/home/kali/cache` | 浏览器、包管理器或工具缓存。 |
 
+镜像构建会创建 `/home/kali/workspace/.agents` 和 `/home/kali/workspace/.claude` 空目录，并把 `container/AGENTS.md` 复制为 worker 指令文件。不要依赖本地未跟踪的 `.agents/` 目录参与镜像构建。
+
 推荐挂载示例：
 
 ```bash
@@ -55,6 +57,8 @@ docker run --rm -it \
   -v "$PWD/targets:/home/kali/targets:ro" \
   cairn-worker-container:latest
 ```
+
+挂载整个 `/home/kali/workspace` 会遮蔽镜像内的 `AGENTS.md`、`CLAUDE.md`、`.agents/` 和 `.claude/`。本地交互调试如需保留 worker 指令，应把这些文件复制到挂载目录，或只挂载子目录。
 
 ## Dispatcher 动态容器
 
@@ -122,7 +126,7 @@ docker run --rm cairn-worker-container:latest bash -lc '
 
 ## 安全边界
 
-Worker 容器运行指令位于 `container/AGENTS.md`。公开文档只总结通用边界：
+Worker 容器运行指令位于 `container/AGENTS.md`。该文件允许提交，但只能包含占位符和通用边界，不能写入真实 OOB 服务器、SSH 凭据、授权账号、Cookie 或目标资产。公开文档只总结通用边界：
 
 - 只对授权目标运行。
 - 最小化影响。

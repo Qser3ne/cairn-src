@@ -81,6 +81,9 @@ class HeartbeatLease:
     def attach_process(self, process: ManagedProcess | None) -> None:
         with self._lock:
             self._process = process
+            failure = self._failure
+        if failure is not None and process is not None:
+            process.cancel(f"heartbeat failed: {failure.text}")
 
     @property
     def failure(self) -> HeartbeatFailure | None:
@@ -88,7 +91,17 @@ class HeartbeatLease:
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
-            result = self._heartbeat()
+            try:
+                result = self._heartbeat()
+            except Exception as exc:
+                LOG.warning(
+                    "heartbeat raised exception scope=%s worker=%s error=%s",
+                    self._scope,
+                    self._worker_name,
+                    exc,
+                )
+                self._fail(None, str(exc))
+                return
             if result.ok:
                 self._last_success_at = time.monotonic()
                 continue

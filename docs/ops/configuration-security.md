@@ -10,6 +10,7 @@ Cairn SRC 会处理目标范围、Cookie session、worker API key、扫描证据
 | `dispatch_mock.yaml` | 本地 mock worker 示例。 | 可以 |
 | `docker-compose.yaml` | Server 和 Dispatcher 的 compose 拓扑。 | 可以 |
 | `Dockerfile`、`container/Dockerfile` | 主应用和 worker 镜像构建定义。 | 可以 |
+| `container/AGENTS.md` | Worker 容器通用运行指令。只能使用占位符，不能包含真实 OOB、SSH、账号或目标信息。 | 可以 |
 
 ## 不应提交的内容
 
@@ -20,6 +21,7 @@ Cairn SRC 会处理目标范围、Cookie session、worker API key、扫描证据
 - `datas.backup/`
 - `.venv-test/`
 - `.agents/`
+- `.worktrees/`
 
 以下内容也不应粘贴到文档、issue、commit message 或测试 fixture：
 
@@ -81,6 +83,8 @@ Worker 容器中建议的目录语义：
 
 `cairn/tests/test_collection_prompt_fixtures.py` 会检查 collection prompt fixture 是否包含 secret-looking 文本，并要求 fixture 域名使用 `.example.test`。
 
+`cairn/tests/test_container_assets.py` 会检查 worker Dockerfile 不依赖未跟踪 `.agents/` 目录，并要求 `container/AGENTS.md` 的敏感资源字段保持占位符。
+
 ## 公开前检查
 
 运行以下命令检查旧文档链接和敏感路径是否残留：
@@ -88,7 +92,7 @@ Worker 容器中建议的目录语义：
 ```bash
 old_doc_path="Document$(printf /)"
 rg "$old_doc_path" README.md docs cairn/tests
-rg '/home/kali|dispatch.yaml|API_KEY|TOKEN|PASSWORD|COOKIE' README.md docs cairn/tests
+rg '/home/kali|dispatch.yaml|API_KEY|TOKEN|PASSWORD|COOKIE' README.md docs cairn/tests container/AGENTS.md
 ```
 
 命令可能匹配安全说明中的字段名；需要人工确认没有真实值。

@@ -45,6 +45,7 @@ GitHub Actions：
 | `test_config_and_adapters.py` | dispatcher config、worker env、mock 行为、adapter 命令。 |
 | `test_runtime_logic.py` | runtime、container、heartbeat、cancellation。 |
 | `test_container_archives.py` | 容器归档/清理相关逻辑。 |
+| `test_container_assets.py` | Worker Dockerfile 构建资产和 `container/AGENTS.md` 占位符安全。 |
 | `test_protocol_and_startup.py` | Server protocol client 与 startup healthcheck。 |
 | `test_prompt_contracts.py` | 默认 prompt 占位符、中文软约束、任务契约。 |
 | `test_collection_prompt_fixtures.py` | Collection prompt fixture 的 YAML 形态和脱敏规则。 |
@@ -91,7 +92,7 @@ rg "$old_doc_path" README.md docs cairn container scripts .github
 检查敏感字段：
 
 ```bash
-rg "API_KEY|TOKEN|PASSWORD|COOKIE|dispatch.yaml|datas/|/home/kali/evidence|/home/kali/reports" README.md docs container/README.md
+rg "API_KEY|TOKEN|PASSWORD|COOKIE|dispatch.yaml|datas/|/home/kali/evidence|/home/kali/reports" README.md docs container/README.md container/AGENTS.md
 ```
 
 该命令会匹配安全说明中的字段名；人工确认没有真实值。

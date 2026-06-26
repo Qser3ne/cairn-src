@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import subprocess
 
 import pytest
@@ -163,6 +164,14 @@ def test_worker_rejects_legacy_task_types(legacy_task_type: str) -> None:
                 "priority": 0,
             }
         )
+
+
+def test_dispatch_example_yaml_matches_current_schema() -> None:
+    config_path = Path(__file__).resolve().parents[2] / "dispatch.example.yaml"
+
+    config = DispatchConfig.load(config_path)
+
+    assert config.workers
 
 
 def test_mock_worker_accepts_collection_and_validation_phase_configuration() -> None:

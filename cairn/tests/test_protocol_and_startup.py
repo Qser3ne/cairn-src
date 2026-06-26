@@ -24,6 +24,50 @@ def test_client_request_failure_returns_status_zero() -> None:
     assert result.text == "offline"
 
 
+def test_client_malformed_json_response_returns_status_zero() -> None:
+    class Response:
+        status_code = 200
+        text = "not json"
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            raise ValueError("bad json")
+
+    class Session:
+        def request(self, *_args, **_kwargs):
+            return Response()
+
+    client = CairnClient("http://server/")
+    client._local.session = Session()
+
+    result = client.create_intent("proj_001", ["f001"], "investigate", "reasoner")
+
+    assert result.status_code == 0
+    assert "bad json" in result.text
+
+
+def test_client_malformed_error_json_preserves_http_status() -> None:
+    class Response:
+        status_code = 409
+        text = "not json"
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            raise ValueError("bad json")
+
+    class Session:
+        def request(self, *_args, **_kwargs):
+            return Response()
+
+    client = CairnClient("http://server/")
+    client._local.session = Session()
+
+    result = client.create_intent("proj_001", ["f001"], "investigate", "reasoner")
+
+    assert result.status_code == 409
+    assert "bad json" in result.text
+
+
 def test_startup_healthcheck_stdout_parser_extracts_status_and_compacts_preview() -> None:
     status, preview = _parse_stdout("http_status=200\n  hello\n  world  ")
 

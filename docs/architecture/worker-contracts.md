@@ -81,6 +81,7 @@ Stable 输出：
 - `intents` 最多创建 `tasks.reason.max_intents` 个。
 - 初始 collection 需要覆盖项目账号池允许的 baseline collection intents；无 accounts 项目只要求 anonymous，有 accounts 项目要求 anonymous 和 authenticated 两条，Dispatcher 会按需要提升初始 max intents。
 - 重复 intent 返回 `409` 时跳过，不把 reason 任务视为失败。
+- 除项目停止/租约冲突类 `403`、`409` 外，intent 创建或 collection reason round 写回失败会让 reason task 返回 `failed`，避免 scheduler 推进 checkpoint 后丢失模型输出；如果写回期间同时观察到 heartbeat lease failure，`403`/`409` 分支也返回 `failed`。
 - Collection `noop` 和 `no_new_high_value` 都会记录 reason round；`no_new_high_value` 记为 stable。
 
 ## Explore

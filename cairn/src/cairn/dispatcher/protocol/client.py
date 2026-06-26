@@ -247,7 +247,12 @@ class CairnClient:
             return ApiResult(status_code=0, text=str(exc))
         data: Any | None = None
         if response.headers.get("content-type", "").startswith("application/json"):
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError as exc:
+                LOG.warning("invalid json response method=%s path=%s error=%s", method, path, exc)
+                status_code = 0 if 200 <= response.status_code < 300 else response.status_code
+                return ApiResult(status_code=status_code, text=str(exc))
         return ApiResult(status_code=response.status_code, data=data, text=response.text)
 
     def _url(self, path: str) -> str:

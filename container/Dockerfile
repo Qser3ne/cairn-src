@@ -166,8 +166,7 @@ RUN mkdir -p /home/kali/.config/nuclei && \
 RUN printf '%s\n' 'PS1="${PS1%\\n*} \[\033[0;36m\]\D{%y-%m-%d} - \t\[\033[;32m\]\n${PS1##*\\n}"' >> /home/kali/.bashrc && \
     cd /home/kali/workspace && git init
 
-COPY ./.agents /home/kali/workspace/.agents
-COPY ./.agents /home/kali/workspace/.claude
+RUN mkdir -p /home/kali/workspace/.agents /home/kali/workspace/.claude
 COPY ./AGENTS.md /home/kali/workspace/AGENTS.md
 COPY ./AGENTS.md /home/kali/workspace/CLAUDE.md
 

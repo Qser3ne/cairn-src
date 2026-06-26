@@ -118,6 +118,178 @@ def test_reason_writes_graph_snapshot_and_creates_intent(monkeypatch) -> None:
     assert path in driver.execute_prompts[0]
 
 
+def test_reason_returns_failed_when_intent_write_fails(monkeypatch) -> None:
+    class FailingCreateIntentClient(FakeClient):
+        def create_intent(self, *args, **kwargs) -> ApiResult:
+            super().create_intent(*args, **kwargs)
+            return ApiResult(500, text="server unavailable")
+
+    config = make_config()
+    project = make_project()
+    client = FailingCreateIntentClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"auth_scope":"anonymous","description":"next step"}]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "collection",
+        TaskCancellation(),
+    )
+
+    assert outcome == "failed"
+    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker", "anonymous", "collection")]
+    assert client.collection_reason_rounds == []
+    assert client.released_reasons == [("proj_001", "test-worker")]
+
+
+def test_collection_reason_returns_failed_when_round_update_fails(monkeypatch) -> None:
+    class FailingRoundClient(FakeClient):
+        def record_collection_reason_round(self, project_id: str, stable: bool) -> ApiResult:
+            super().record_collection_reason_round(project_id, stable)
+            return ApiResult(500, text="server unavailable")
+
+    config = make_config()
+    project = make_project()
+    client = FailingRoundClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"decision":"no_new_high_value","intents":[]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "collection",
+        TaskCancellation(),
+    )
+
+    assert outcome == "failed"
+    assert client.collection_reason_rounds == [("proj_001", True)]
+    assert client.released_reasons == [("proj_001", "test-worker")]
+
+
+def test_reason_returns_failed_when_heartbeat_fails_during_writeback(monkeypatch) -> None:
+    config = make_config()
+    project = make_project()
+    client = FakeClient(project)
+    containers = FakeContainerManager()
+    lease = FakeLease()
+
+    class HeartbeatFailingWriteClient(FakeClient):
+        def create_intent(self, *args, **kwargs) -> ApiResult:
+            response = super().create_intent(*args, **kwargs)
+            lease.failure = HeartbeatFailure(409, "lost")
+            return response
+
+    client = HeartbeatFailingWriteClient(project)
+
+    monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+    monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+    monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+    monkeypatch.setattr(
+        reason,
+        "run_worker_process",
+        lambda *_args, **_kwargs: ProcessResult(
+            0,
+            '{"accepted":true,"data":{"intents":[{"from":["f001"],"auth_scope":"anonymous","description":"next step"}]}}',
+            "",
+        ),
+    )
+
+    outcome = reason.run_reason_task(
+        config,
+        client,
+        containers,
+        project,
+        "graph",
+        config.workers[0],
+        "collection",
+        TaskCancellation(),
+    )
+
+    assert outcome == "failed"
+    assert client.created_intents == [("proj_001", ["f001"], "next step", "test-worker", "anonymous", "collection")]
+    assert client.collection_reason_rounds == []
+    assert client.released_reasons == [("proj_001", "test-worker")]
+
+
+def test_reason_returns_failed_when_heartbeat_fails_during_terminal_write_response(monkeypatch) -> None:
+    for status_code in (403, 409):
+        config = make_config()
+        project = make_project()
+        containers = FakeContainerManager()
+        lease = FakeLease()
+
+        class TerminalResponseClient(FakeClient):
+            def create_intent(self, *args, **kwargs) -> ApiResult:
+                super().create_intent(*args, **kwargs)
+                lease.failure = HeartbeatFailure(409, "lost")
+                return ApiResult(status_code, text="terminal")
+
+        client = TerminalResponseClient(project)
+
+        monkeypatch.setattr(reason, "get_driver", lambda _name: FakeDriver())
+        monkeypatch.setattr(reason.HeartbeatLease, "for_reason", _lease_factory(lease))
+        monkeypatch.setattr(reason, "run_healthcheck", _healthy)
+        monkeypatch.setattr(
+            reason,
+            "run_worker_process",
+            lambda *_args, **_kwargs: ProcessResult(
+                0,
+                '{"accepted":true,"data":{"intents":[{"from":["f001"],"auth_scope":"anonymous","description":"next step"}]}}',
+                "",
+            ),
+        )
+
+        outcome = reason.run_reason_task(
+            config,
+            client,
+            containers,
+            project,
+            "graph",
+            config.workers[0],
+            "collection",
+            TaskCancellation(),
+        )
+
+        assert outcome == "failed"
+        assert client.collection_reason_rounds == []
+        assert client.released_reasons == [("proj_001", "test-worker")]
+
+
 def test_collection_reason_stable_records_stable_round(monkeypatch) -> None:
     config = make_config()
     project = make_project()

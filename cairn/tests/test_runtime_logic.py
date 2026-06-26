@@ -8,6 +8,7 @@ from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.heartbeat import HeartbeatLease
+from cairn.dispatcher.runtime.process import ManagedProcess
 
 
 @dataclass
@@ -52,6 +53,14 @@ class FakeDockerClient:
         self.containers = FakeDockerContainers()
 
 
+class FakeReader:
+    def join(self, timeout=None) -> None:
+        return None
+
+    def is_alive(self) -> bool:
+        return False
+
+
 def _manager(*, completed_action: str = "stop", init: bool = True) -> ContainerManager:
     manager = ContainerManager.__new__(ContainerManager)
     manager._config = ContainerConfig(
@@ -87,6 +96,50 @@ def test_heartbeat_conflict_failure_kills_attached_process() -> None:
     assert lease.failure is not None
     assert lease.failure.status_code == 409
     assert process.kill_count == 1
+
+
+def test_heartbeat_exception_records_failure() -> None:
+    def broken_heartbeat() -> ApiResult:
+        raise RuntimeError("boom")
+
+    lease = HeartbeatLease(broken_heartbeat, "intent", "worker", interval=0)
+
+    lease._run()
+
+    assert lease.failure is not None
+    assert lease.failure.status_code is None
+    assert "boom" in lease.failure.text
+
+
+def test_heartbeat_failure_before_attach_kills_late_process() -> None:
+    process = FakeProcess()
+    lease = HeartbeatLease(lambda: ApiResult(409, text="lost"), "intent", "worker", interval=0)
+
+    lease._run()
+    lease.attach_process(process)
+
+    assert lease.failure is not None
+    assert process.cancelled == ["heartbeat failed: lost"]
+
+
+def test_managed_process_communicate_retries_kill_when_already_cancelled() -> None:
+    process = ManagedProcess.__new__(ManagedProcess)
+    process._reader = FakeReader()
+    process._stdout = []
+    process._stderr = []
+    process._returncode = 137
+    process._timed_out = False
+    process._cancel_reason = "heartbeat failed: lost"
+    process._read_error = None
+    process._done = threading.Event()
+    kills: list[str] = []
+    process.kill = lambda: kills.append("kill")
+
+    result = process.communicate(timeout=0)
+
+    assert kills == ["kill"]
+    assert result.cancelled
+    assert result.cancel_reason == "heartbeat failed: lost"
 
 
 def test_container_manager_build_exec_process_wraps_command_with_timeout() -> None:

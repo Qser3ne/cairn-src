@@ -78,8 +78,7 @@ Worker `task_types` 只允许：
 9. 取消 inactive/deleted projects 上的本地任务。
 10. 为 stopped/completed/deleted projects 排队 container cleanup。
 11. 调度 project tasks。
-12. 清理 legacy queued judge jobs，将其标记为 retired failure。
-13. 清理 legacy queued fork_seed jobs，将其标记为 retired failure。
+12. Legacy judge/fork_seed ephemeral dispatch 路径保持 no-op；retired job 不会进入新工作流调度。
 
 ## 项目调度规则
 
@@ -101,6 +100,8 @@ Reason trigger 包括：
 - Server 暴露 `reason_pending=true`。
 
 `reason_checkpoints` 使用 `(project_id, task_mode)` 作为 key。Collection 和 validation reason 拥有独立 checkpoint 和独立 server lease，因此同一项目内两类 reason 工作不会通过单个项目级 lease 相互阻塞。
+
+Reason task 只有在模型输出完成解析且关键写回成功后才会让 scheduler 更新 checkpoint。除项目已停止或租约冲突导致的 `403`、`409` 外，创建 intent 或记录 collection reason round 失败会返回 `failed`，下轮仍可重新触发，避免 checkpoint 前移造成 intent 丢失。如果写回期间同时观察到 heartbeat lease failure，即使 API 返回 `403` 或 `409`，任务也返回 `failed`，避免在租约已失效时推进 checkpoint。
 
 ## 并发限制
 
@@ -163,6 +164,7 @@ Authenticated explore prompt 会包含 session 信息和隔离目录。Anonymous
 - Startup healthcheck 使用临时容器，完成后删除。
 - 容器创建使用配置中的 image、network mode、`init`、`cap_add`。
 - `init=true` 用于回收 Playwright/Chrome 等子进程，降低 zombie 进程累积风险。
+- Heartbeat 线程会把协议异常、invalid JSON 或租约冲突收敛为 task failure，并终止已 attach 的 worker 进程。
 - Completed projects 按 `container.completed_action` 执行 stop/remove。
 - Stopped project 会排队 container cleanup；legacy retired jobs 不作为新 workflow 的保活理由。
 - Dispatcher 会清理本地 orphan worker 容器；对刚完成 task 的项目使用短暂 cooldown，避免 cleanup 与后续调度抢同一容器。

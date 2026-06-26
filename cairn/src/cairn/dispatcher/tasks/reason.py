@@ -245,6 +245,15 @@ def run_reason_task(
         if kind == "intents":
             created = 0
             for intent_data in data:
+                if lease.failure is not None:
+                    LOG.warning(
+                        "reason heartbeat failed before intent write project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        lease.failure.status_code,
+                        lease.failure.text,
+                    )
+                    return "failed"
                 response = client.create_intent(
                     project.project.id,
                     intent_data["from"],
@@ -253,6 +262,15 @@ def run_reason_task(
                     auth_scope=intent_data.get("auth_scope"),
                     task_mode=intent_data.get("task_mode", task_mode),
                 )
+                if lease.failure is not None:
+                    LOG.warning(
+                        "reason heartbeat failed after intent write project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        lease.failure.status_code,
+                        lease.failure.text,
+                    )
+                    return "failed"
                 if response.status_code == 403:
                     LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)
                     return "success"
@@ -274,7 +292,7 @@ def run_reason_task(
                         response.status_code,
                         response.text,
                     )
-                    continue
+                    return "failed"
                 created += 1
                 LOG.info(
                     "reason created intent project=%s worker=%s from=%s auth_scope=%s description=%s",
@@ -294,6 +312,15 @@ def run_reason_task(
                 total_ms,
             )
             if task_mode == "collection":
+                if lease.failure is not None:
+                    LOG.warning(
+                        "reason heartbeat failed before collection round write project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        lease.failure.status_code,
+                        lease.failure.text,
+                    )
+                    return "failed"
                 response = client.record_collection_reason_round(project.project.id, stable=False)
                 if not response.ok and response.status_code not in (403, 409):
                     LOG.warning(
@@ -303,9 +330,28 @@ def run_reason_task(
                         response.status_code,
                         response.text,
                     )
+                    return "failed"
+                if lease.failure is not None:
+                    LOG.warning(
+                        "reason heartbeat failed after collection round write project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        lease.failure.status_code,
+                        lease.failure.text,
+                    )
+                    return "failed"
             return "success"
         if kind in ("noop", "stable"):
             if task_mode == "collection":
+                if lease.failure is not None:
+                    LOG.warning(
+                        "reason heartbeat failed before collection round write project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        lease.failure.status_code,
+                        lease.failure.text,
+                    )
+                    return "failed"
                 response = client.record_collection_reason_round(project.project.id, stable=(kind == "stable"))
                 if not response.ok and response.status_code not in (403, 409):
                     LOG.warning(
@@ -315,6 +361,16 @@ def run_reason_task(
                         response.status_code,
                         response.text,
                     )
+                    return "failed"
+                if lease.failure is not None:
+                    LOG.warning(
+                        "reason heartbeat failed after collection round write project=%s worker=%s status=%s body=%s",
+                        project.project.id,
+                        worker.name,
+                        lease.failure.status_code,
+                        lease.failure.text,
+                    )
+                    return "failed"
         LOG.info(
             "reason finished without graph change project=%s worker=%s execute_ms=%s total_ms=%s",
             project.project.id,
