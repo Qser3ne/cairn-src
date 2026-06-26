@@ -450,7 +450,7 @@ def test_mock_scheduler_collection_stable_does_not_stop_project(http_client: Tes
         client,
         containers,
     )
-    project_id = _create_project(http_client, collection_max_reason_rounds=2)
+    project_id = _create_project(http_client)
 
     try:
         _dispatch_and_wait(loop)

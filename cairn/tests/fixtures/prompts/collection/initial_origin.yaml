@@ -6,7 +6,6 @@ project:
   parent_project_id: null
   parent_snapshot_id: null
 collection:
-  max_reason_rounds: 5
   reason_rounds: 0
   explore_rounds: 0
   stable_rounds: 0

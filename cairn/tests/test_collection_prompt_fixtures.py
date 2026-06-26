@@ -29,9 +29,8 @@ def _assert_common_collection_graph(data: dict) -> None:
     assert data["project"]["origin"].endswith(".example.test/")
     assert "recon" not in data
     assert data["collection"]["judge_status"] in {"not_judged", "ready", "not_ready", "blocked"}
-    assert {"max_reason_rounds", "reason_rounds", "explore_rounds", "stable_rounds"} <= data[
-        "collection"
-    ].keys()
+    assert {"reason_rounds", "explore_rounds", "stable_rounds"} <= data["collection"].keys()
+    assert "max_reason_rounds" not in data["collection"]
     assert isinstance(data["facts"], list)
     assert data["facts"][0]["id"] == "origin"
     assert "findings" not in data

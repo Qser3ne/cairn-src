@@ -906,10 +906,6 @@
     <div class="space-y-3">
       <input x-model="newProject.title" placeholder="Project title" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300">
       <textarea x-model="newProject.origin" placeholder="Origin — starting point" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
-      <div class="space-y-1">
-        <label class="text-[11px] text-slate-400 mb-1 block font-medium">Collection max reason rounds</label>
-        <input type="number" min="1" x-model.number="newProject.collection_max_reason_rounds" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
-      </div>
       <div class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
         <div>
           <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Auth mode</span>
@@ -1238,7 +1234,6 @@ function cairnApp() {
       title: '',
       origin: '',
       auth_mode: 'anonymous',
-      collection_max_reason_rounds: 8,
       accounts: [{ label: '', cookies: [{ name: '', value: '' }] }],
       hints: [{ content: '' }],
     },
@@ -1449,7 +1444,6 @@ function cairnApp() {
         title: '',
         origin: '',
         auth_mode: 'anonymous',
-        collection_max_reason_rounds: 8,
         accounts: [this.blankNewProjectAccount()],
         hints: [{ content: '' }],
       };
@@ -1614,8 +1608,7 @@ function cairnApp() {
 
     collectionRoundSummary() {
       const project = this.project?.project || {};
-      const max = project.collection_max_reason_rounds ?? '∞';
-      return `${project.collection_reason_rounds || 0}/${max}`;
+      return `${project.collection_reason_rounds || 0} reason rounds`;
     },
 
     collectionCoverageSummary() {
@@ -3657,7 +3650,6 @@ function cairnApp() {
           title: this.newProject.title.trim(),
           origin: this.newProject.origin.trim(),
           auth_mode: this.newProject.auth_mode,
-          collection_max_reason_rounds: Number(this.newProject.collection_max_reason_rounds) || 8,
         };
         if (this.newProject.auth_mode === 'authenticated') {
           body.accounts = this.cleanedNewProjectAccounts();

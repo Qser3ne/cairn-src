@@ -235,7 +235,6 @@ def _summary_from_row(row) -> ProjectSummary:
         created_at=row["created_at"],
         reason=project_reason_from_row(row),
         reason_pending=bool(row["reason_pending"]),
-        collection_max_reason_rounds=row["collection_max_reason_rounds"],
         collection_reason_rounds=row["collection_reason_rounds"],
         collection_explore_rounds=row["collection_explore_rounds"],
         collection_stable_rounds=row["collection_stable_rounds"],
@@ -305,9 +304,8 @@ def create_project(body: CreateProjectRequest):
                 auth_mode,
                 parent_project_id,
                 parent_snapshot_id,
-                created_at,
-                collection_max_reason_rounds
-            ) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?)
+                created_at
+            ) VALUES (?, ?, 'active', ?, ?, ?, ?, ?)
             """,
             (
                 pid,
@@ -317,7 +315,6 @@ def create_project(body: CreateProjectRequest):
                 body.parent_project_id,
                 body.parent_snapshot_id,
                 now,
-                body.collection_max_reason_rounds,
             ),
         )
         conn.execute(

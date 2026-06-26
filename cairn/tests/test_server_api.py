@@ -106,11 +106,17 @@ def test_create_project_defaults_to_vuln_and_forbids_old_fields(client: TestClie
 
     assert payload["project"]["project_kind"] == "vuln"
     assert payload["project"]["auth_mode"] == "dual"
-    assert payload["project"]["collection_max_reason_rounds"] == 8
+    assert "collection_max_reason_rounds" not in payload["project"]
     assert "mode" not in payload["project"]
     assert "bootstrap_enabled" not in payload["project"]
 
-    for field, value in (("mode", "src"), ("bootstrap_enabled", False), ("goal", "finish"), ("recon_max_reason_rounds", 8)):
+    for field, value in (
+        ("mode", "src"),
+        ("bootstrap_enabled", False),
+        ("goal", "finish"),
+        ("recon_max_reason_rounds", 8),
+        ("collection_max_reason_rounds", 8),
+    ):
         response = client.post(
             "/projects",
             json={
@@ -674,7 +680,7 @@ def test_hint_without_running_reason_does_not_mark_reason_pending(client: TestCl
 
 
 def test_collection_rounds_do_not_stop_project_at_reason_limit(client: TestClient) -> None:
-    project_id = _create_project(client, collection_max_reason_rounds=2)["project"]["id"]
+    project_id = _create_project(client)["project"]["id"]
     assert client.post(f"/projects/{project_id}/recon/reason-round", json={"stable": True}).json()["status"] == "active"
     response = client.post(f"/projects/{project_id}/recon/reason-round", json={"stable": False})
     assert response.status_code == 200
@@ -683,7 +689,7 @@ def test_collection_rounds_do_not_stop_project_at_reason_limit(client: TestClien
     assert payload["collection_stable_rounds"] == 0
     assert payload["status"] == "active"
     exported = yaml.safe_load(client.get(f"/projects/{project_id}/export?format=yaml").text)
-    assert exported["collection"]["max_reason_rounds"] == 2
+    assert "max_reason_rounds" not in exported["collection"]
     assert exported["collection"]["reason_rounds"] == 2
     assert exported["collection"]["stable_rounds"] == 0
 

@@ -32,6 +32,7 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert "mode" not in project_columns
     assert "bootstrap_enabled" not in project_columns
     assert "session_lock_enabled" not in project_columns
+    assert "collection_max_reason_rounds" not in project_columns
     assert {"project_kind", "auth_mode", "parent_project_id", "parent_snapshot_id", "reason_pending"} <= project_columns
     assert {"fact_type", "title", "summary", "details_json"} <= fact_columns
     assert {"intent_kind", "finding_id", "auth_scope", "task_mode"} <= intent_columns
@@ -221,6 +222,75 @@ def test_legacy_recon_project_kind_migrates_to_vuln(tmp_path, monkeypatch) -> No
 
     assert project["project_kind"] == "vuln"
     assert project["auth_mode"] == "dual"
+
+
+def test_legacy_collection_max_reason_rounds_column_is_removed(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "legacy-collection-max.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                project_kind TEXT NOT NULL DEFAULT 'vuln',
+                auth_mode TEXT NOT NULL DEFAULT 'anonymous',
+                parent_project_id TEXT,
+                parent_snapshot_id TEXT,
+                created_at TEXT NOT NULL,
+                reason_worker TEXT,
+                reason_trigger TEXT,
+                reason_started_at TEXT,
+                reason_last_heartbeat_at TEXT,
+                reason_pending INTEGER NOT NULL DEFAULT 0,
+                collection_max_reason_rounds INTEGER,
+                collection_reason_rounds INTEGER NOT NULL DEFAULT 0,
+                collection_explore_rounds INTEGER NOT NULL DEFAULT 0,
+                collection_stable_rounds INTEGER NOT NULL DEFAULT 0,
+                judge_status TEXT NOT NULL DEFAULT 'not_judged',
+                judged_at TEXT
+            );
+            INSERT INTO projects (
+                id,
+                title,
+                project_kind,
+                auth_mode,
+                created_at,
+                collection_max_reason_rounds,
+                collection_reason_rounds,
+                collection_explore_rounds,
+                collection_stable_rounds
+            ) VALUES (
+                'proj_001',
+                'legacy collection max',
+                'vuln',
+                'anonymous',
+                '2026-01-01T00:00:00Z',
+                8,
+                4,
+                5,
+                1
+            );
+            """
+        )
+
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        project_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+        project = conn.execute(
+            """
+            SELECT collection_reason_rounds, collection_explore_rounds, collection_stable_rounds
+            FROM projects
+            WHERE id = 'proj_001'
+            """
+        ).fetchone()
+
+    assert "collection_max_reason_rounds" not in project_columns
+    assert project["collection_reason_rounds"] == 4
+    assert project["collection_explore_rounds"] == 5
+    assert project["collection_stable_rounds"] == 1
 
 
 def test_legacy_recon_and_vuln_intents_backfill_task_mode(tmp_path, monkeypatch) -> None:

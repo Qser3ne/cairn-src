@@ -116,7 +116,6 @@ def _export_yaml(conn, project_id: str) -> str:
     }
 
     data["collection"] = {
-        "max_reason_rounds": proj["collection_max_reason_rounds"],
         "reason_rounds": proj["collection_reason_rounds"],
         "explore_rounds": proj["collection_explore_rounds"],
         "stable_rounds": proj["collection_stable_rounds"],

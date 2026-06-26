@@ -399,7 +399,6 @@ def project_meta_from_row(row: sqlite3.Row, conn: sqlite3.Connection | None = No
         reason=reason,
         reasons=reasons,
         reason_pending=bool(row["reason_pending"]),
-        collection_max_reason_rounds=row["collection_max_reason_rounds"],
         collection_reason_rounds=row["collection_reason_rounds"],
         collection_explore_rounds=row["collection_explore_rounds"],
         collection_stable_rounds=row["collection_stable_rounds"],

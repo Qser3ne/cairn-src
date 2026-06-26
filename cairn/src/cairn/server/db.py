@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS projects (
     reason_started_at TEXT,
     reason_last_heartbeat_at TEXT,
     reason_pending INTEGER NOT NULL DEFAULT 0,
-    collection_max_reason_rounds INTEGER,
     collection_reason_rounds INTEGER NOT NULL DEFAULT 0,
     collection_explore_rounds INTEGER NOT NULL DEFAULT 0,
     collection_stable_rounds INTEGER NOT NULL DEFAULT 0,
@@ -253,11 +252,6 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
     if "parent_snapshot_id" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN parent_snapshot_id TEXT")
         columns.add("parent_snapshot_id")
-    if "collection_max_reason_rounds" not in columns:
-        conn.execute("ALTER TABLE projects ADD COLUMN collection_max_reason_rounds INTEGER")
-        if "recon_max_reason_rounds" in columns:
-            conn.execute("UPDATE projects SET collection_max_reason_rounds = recon_max_reason_rounds")
-        columns.add("collection_max_reason_rounds")
     if "collection_reason_rounds" not in columns:
         conn.execute("ALTER TABLE projects ADD COLUMN collection_reason_rounds INTEGER NOT NULL DEFAULT 0")
         if "recon_reason_rounds" in columns:
@@ -283,7 +277,7 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE projects ADD COLUMN reason_pending INTEGER NOT NULL DEFAULT 0")
         columns.add("reason_pending")
     conn.execute("UPDATE projects SET auth_mode = 'dual' WHERE project_kind = 'recon'")
-    if "session_lock_enabled" not in columns:
+    if "session_lock_enabled" not in columns and "collection_max_reason_rounds" not in columns:
         return
 
     conn.execute("PRAGMA foreign_keys=OFF")
@@ -303,7 +297,6 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_started_at TEXT,
             reason_last_heartbeat_at TEXT,
             reason_pending INTEGER NOT NULL DEFAULT 0,
-            collection_max_reason_rounds INTEGER,
             collection_reason_rounds INTEGER NOT NULL DEFAULT 0,
             collection_explore_rounds INTEGER NOT NULL DEFAULT 0,
             collection_stable_rounds INTEGER NOT NULL DEFAULT 0,
@@ -328,7 +321,6 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_started_at,
             reason_last_heartbeat_at,
             reason_pending,
-            collection_max_reason_rounds,
             collection_reason_rounds,
             collection_explore_rounds,
             collection_stable_rounds,
@@ -349,7 +341,6 @@ def _ensure_src_only_project_columns(conn: sqlite3.Connection) -> None:
             reason_started_at,
             reason_last_heartbeat_at,
             reason_pending,
-            collection_max_reason_rounds,
             collection_reason_rounds,
             collection_explore_rounds,
             collection_stable_rounds,

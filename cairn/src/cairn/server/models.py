@@ -204,7 +204,6 @@ class ProjectMeta(BaseModel):
     reason: ProjectReason | None = None
     reasons: dict[TaskMode, ProjectReason | None] = Field(default_factory=empty_project_reasons)
     reason_pending: bool = False
-    collection_max_reason_rounds: int | None = None
     collection_reason_rounds: int = 0
     collection_explore_rounds: int = 0
     collection_stable_rounds: int = 0
@@ -254,7 +253,6 @@ class CreateProjectRequest(BaseModel):
     auth_mode: AuthMode | None = None
     parent_project_id: str | None = None
     parent_snapshot_id: str | None = None
-    collection_max_reason_rounds: int | None = 8
     hints: list[CreateHintInline] | None = None
     accounts: list[ProjectAccountCreate] | None = None
 
