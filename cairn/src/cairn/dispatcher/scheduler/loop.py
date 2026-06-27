@@ -11,7 +11,7 @@ import requests
 
 from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
-from cairn.dispatcher.protocol.client import CairnClient
+from cairn.dispatcher.protocol.client import CairnClient, ProtocolError
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.runtime.containers import ContainerManager
 from cairn.dispatcher.runtime.heartbeat import HEARTBEAT_FAILURE_GRACE_MULTIPLIER
@@ -93,7 +93,7 @@ class DispatcherLoop:
                     self._cancel_inactive_tasks(summaries)
                     self._queue_container_cleanups(summaries)
                     self._dispatch_available(summaries)
-                except requests.RequestException as exc:
+                except (requests.RequestException, ProtocolError) as exc:
                     if once:
                         raise
                     LOG.warning(
@@ -1018,12 +1018,22 @@ class DispatcherLoop:
                     self._update_reason_checkpoint_after_success(task)
             except Exception:
                 LOG.exception("task crashed project=%s task=%s worker=%s", task.project_id, task.task_type, task.worker_name)
+                self._release_crashed_task_lease(task)
+
+    def _release_crashed_task_lease(self, task: RunningTask) -> None:
+        if task.intent_id is not None:
+            self._best_effort_release(task.project_id, task.intent_id, task.worker_name)
+            return
+        if task.task_type not in ("collection_reason", "validation_reason"):
+            return
+        task_mode = task.reason_task_mode or self._task_mode_from_reason_task_type(task.task_type)
+        self._best_effort_release_reason(task.project_id, task.worker_name, task_mode)
 
     def _update_reason_checkpoint_after_success(self, task: RunningTask) -> None:
         task_mode = task.reason_task_mode or self._task_mode_from_reason_task_type(task.task_type)
         try:
             project = self.client.get_project(task.project_id)
-        except requests.RequestException as exc:
+        except (requests.RequestException, ProtocolError) as exc:
             checkpoint = self._reason_start_checkpoint(task, task_mode)
             self.reason_checkpoints[(task.project_id, task_mode)] = checkpoint
             LOG.warning(
@@ -1083,7 +1093,10 @@ class DispatcherLoop:
             container_name = self.container_manager.container_name(summary.id)
             if container_name in self._cleanup_pending:
                 continue
-            if not self.container_manager.needs_completed_cleanup(summary.id):
+            needs_cleanup = self._needs_completed_cleanup(summary.id)
+            if needs_cleanup is None:
+                continue
+            if not needs_cleanup:
                 self._inactive_cleanup_done[summary.id] = summary.status
                 continue
             future = self.cleanup_executor.submit(self.container_manager.cleanup_completed, summary.id)
@@ -1099,7 +1112,10 @@ class DispatcherLoop:
             container_name = self.container_manager.container_name(summary.id)
             if container_name in self._cleanup_pending:
                 continue
-            if not self.container_manager.needs_stopped_cleanup(summary.id):
+            needs_cleanup = self._needs_stopped_cleanup(summary.id)
+            if needs_cleanup is None:
+                continue
+            if not needs_cleanup:
                 self._inactive_cleanup_done[summary.id] = summary.status
                 continue
             future = self.cleanup_executor.submit(self.container_manager.cleanup_stopped, summary.id)
@@ -1113,11 +1129,35 @@ class DispatcherLoop:
                 continue
             if container_name in self._cleanup_pending:
                 continue
-            if not self.container_manager.needs_orphan_cleanup(container_name):
+            needs_cleanup = self._needs_orphan_cleanup(container_name)
+            if needs_cleanup is None:
+                continue
+            if not needs_cleanup:
                 continue
             future = self.cleanup_executor.submit(self.container_manager.cleanup_orphan, container_name)
             self.cleanup_futures[future] = (container_name, None, "orphan")
             self._cleanup_pending.add(container_name)
+
+    def _needs_completed_cleanup(self, project_id: str) -> bool | None:
+        try:
+            return self.container_manager.needs_completed_cleanup(project_id)
+        except Exception:
+            LOG.exception("completed container cleanup precheck failed project=%s", project_id)
+            return None
+
+    def _needs_stopped_cleanup(self, project_id: str) -> bool | None:
+        try:
+            return self.container_manager.needs_stopped_cleanup(project_id)
+        except Exception:
+            LOG.exception("stopped container cleanup precheck failed project=%s", project_id)
+            return None
+
+    def _needs_orphan_cleanup(self, container_name: str) -> bool | None:
+        try:
+            return self.container_manager.needs_orphan_cleanup(container_name)
+        except Exception:
+            LOG.exception("orphan container cleanup precheck failed container=%s", container_name)
+            return None
 
     def _queue_container_cleanups(self, summaries: list[ProjectSummary]) -> None:
         self._cleanup_completed_containers(summaries)

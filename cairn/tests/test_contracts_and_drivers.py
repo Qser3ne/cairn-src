@@ -22,6 +22,23 @@ def test_parse_json_output_extracts_object_from_markdown_noise() -> None:
     }
 
 
+def test_parse_json_output_prefers_fenced_json_over_earlier_example() -> None:
+    output = """
+Example shape:
+{"accepted": true, "data": {"description": "example only"}}
+
+Final answer:
+```json
+{"accepted": true, "data": {"description": "real finding"}}
+```
+"""
+
+    assert parse_json_output(output) == {
+        "accepted": True,
+        "data": {"description": "real finding"},
+    }
+
+
 def test_reason_payload_limits_number_of_intents() -> None:
     kind, intents = validate_reason_payload(
         {

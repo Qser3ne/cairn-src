@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, TypeVar
 import logging
 import threading
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 import requests
 from requests.adapters import HTTPAdapter
 
 from cairn.server.models import EphemeralJob, Intent, ProjectDetail, ProjectSummary, Settings
 
 LOG = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class ProtocolError(RuntimeError):
@@ -37,6 +38,7 @@ class CairnClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._summary_adapter = TypeAdapter(list[ProjectSummary])
+        self._ephemeral_jobs_adapter = TypeAdapter(list[EphemeralJob])
         self._local = threading.local()
         self._sessions: dict[int, requests.Session] = {}
         self._sessions_lock = threading.Lock()
@@ -49,19 +51,13 @@ class CairnClient:
             session.close()
 
     def list_projects(self) -> list[ProjectSummary]:
-        response = self._session().get(self._url("/projects"), timeout=self._timeout)
-        response.raise_for_status()
-        return self._summary_adapter.validate_python(response.json())
+        return self._get_validated("/projects", self._summary_adapter.validate_python)
 
     def get_project(self, project_id: str) -> ProjectDetail:
-        response = self._session().get(self._url(f"/projects/{project_id}"), timeout=self._timeout)
-        response.raise_for_status()
-        return ProjectDetail.model_validate(response.json())
+        return self._get_validated(f"/projects/{project_id}", ProjectDetail.model_validate)
 
     def get_settings(self) -> Settings:
-        response = self._session().get(self._url("/settings"), timeout=self._timeout)
-        response.raise_for_status()
-        return Settings.model_validate(response.json())
+        return self._get_validated("/settings", Settings.model_validate)
 
     def export_project(self, project_id: str) -> str:
         response = self._session().get(
@@ -198,13 +194,11 @@ class CairnClient:
         )
 
     def list_queued_ephemeral_jobs(self, job_type: str = "judge") -> list[EphemeralJob]:
-        response = self._session().get(
-            self._url("/ephemeral-jobs/queued"),
+        return self._get_validated(
+            "/ephemeral-jobs/queued",
+            self._ephemeral_jobs_adapter.validate_python,
             params={"job_type": job_type},
-            timeout=self._timeout,
         )
-        response.raise_for_status()
-        return [EphemeralJob.model_validate(item) for item in response.json()]
 
     def claim_ephemeral_job(self, job_id: str, worker: str) -> ApiResult:
         return self._request_json(
@@ -254,6 +248,32 @@ class CairnClient:
                 status_code = 0 if 200 <= response.status_code < 300 else response.status_code
                 return ApiResult(status_code=status_code, text=str(exc))
         return ApiResult(status_code=response.status_code, data=data, text=response.text)
+
+    def _get_validated(
+        self,
+        path: str,
+        validator: Callable[[Any], T],
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> T:
+        response = self._session().get(self._url(path), params=params, timeout=self._timeout)
+        response.raise_for_status()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ProtocolError(
+                f"invalid JSON from GET {path}: {exc}",
+                response.status_code,
+                response.text,
+            ) from exc
+        try:
+            return validator(payload)
+        except ValidationError as exc:
+            raise ProtocolError(
+                f"invalid response schema from GET {path}: {exc}",
+                response.status_code,
+                response.text,
+            ) from exc
 
     def _url(self, path: str) -> str:
         return f"{self._base_url}{path}"

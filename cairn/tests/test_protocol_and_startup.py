@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import requests
 
-from cairn.dispatcher.protocol.client import CairnClient
+import pytest
+
+from cairn.dispatcher.protocol.client import CairnClient, ProtocolError
 from cairn.dispatcher.runtime.startup_healthcheck import (
     StartupHealthcheckResult,
     _parse_stdout,
@@ -66,6 +68,58 @@ def test_client_malformed_error_json_preserves_http_status() -> None:
 
     assert result.status_code == 409
     assert "bad json" in result.text
+
+
+def test_client_malformed_get_json_raises_protocol_error() -> None:
+    class Response:
+        status_code = 200
+        text = "not json"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise ValueError("bad json")
+
+    class Session:
+        def get(self, *_args, **_kwargs):
+            return Response()
+
+    client = CairnClient("http://server/")
+    client._local.session = Session()
+
+    with pytest.raises(ProtocolError) as exc_info:
+        client.list_projects()
+
+    assert exc_info.value.status_code == 200
+    assert exc_info.value.response_text == "not json"
+    assert "bad json" in str(exc_info.value)
+
+
+def test_client_get_schema_drift_raises_protocol_error() -> None:
+    class Response:
+        status_code = 200
+        text = '[{"id":"proj_001"}]'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"id": "proj_001"}]
+
+    class Session:
+        def get(self, *_args, **_kwargs):
+            return Response()
+
+    client = CairnClient("http://server/")
+    client._local.session = Session()
+
+    with pytest.raises(ProtocolError) as exc_info:
+        client.list_projects()
+
+    assert exc_info.value.status_code == 200
+    assert exc_info.value.response_text == '[{"id":"proj_001"}]'
+    assert "schema" in str(exc_info.value)
 
 
 def test_startup_healthcheck_stdout_parser_extracts_status_and_compacts_preview() -> None:

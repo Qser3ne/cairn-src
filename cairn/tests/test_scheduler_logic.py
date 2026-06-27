@@ -8,7 +8,7 @@ import pytest
 import requests
 
 from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
-from cairn.dispatcher.protocol.client import ApiResult
+from cairn.dispatcher.protocol.client import ApiResult, ProtocolError
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
 from cairn.dispatcher.scheduler.worker_select import choose_worker
@@ -310,6 +310,57 @@ def test_reason_success_checkpoint_falls_back_to_start_counts_when_refresh_fails
     )
 
 
+@pytest.mark.parametrize("task_type", ["collection_explore", "validation_explore", "report"])
+def test_reap_crashed_intent_task_releases_intent_lease(task_type: str) -> None:
+    loop = _loop()
+    crashed: Future[str] = Future()
+    crashed.set_exception(RuntimeError("boom"))
+    loop.futures = {
+        crashed: RunningTask(
+            "proj_001",
+            task_type,
+            "worker",
+            TaskCancellation(),
+            intent_id="i001",
+        )
+    }
+    released: list[tuple[str, str, str]] = []
+    loop._best_effort_release = lambda project_id, intent_id, worker_name: released.append(
+        (project_id, intent_id, worker_name)
+    )
+
+    loop._reap_futures()
+
+    assert released == [("proj_001", "i001", "worker")]
+
+
+@pytest.mark.parametrize(
+    ("task_type", "task_mode"),
+    [("collection_reason", "collection"), ("validation_reason", "validation")],
+)
+def test_reap_crashed_reason_task_releases_reason_lease(task_type: str, task_mode: TaskMode) -> None:
+    loop = _loop()
+    crashed: Future[str] = Future()
+    crashed.set_exception(RuntimeError("boom"))
+    loop.futures = {
+        crashed: RunningTask(
+            "proj_001",
+            task_type,
+            "worker",
+            TaskCancellation(),
+            reason_task_mode=task_mode,
+        )
+    }
+    released: list[tuple[str, str, TaskMode]] = []
+    loop._best_effort_release_reason = lambda project_id, worker_name, mode: released.append(
+        (project_id, worker_name, mode)
+    )
+
+    loop._reap_futures()
+
+    assert released == [("proj_001", "worker", task_mode)]
+
+
 def test_refresh_runtime_projects_discards_active_and_changed_cleanup_markers() -> None:
     loop = _loop()
     loop.runtime_project_ids = {"active", "stopped", "deleted"}
@@ -361,6 +412,64 @@ def test_reap_orphan_cleanup_future_does_not_mark_inactive_project() -> None:
     assert loop.cleanup_futures == {}
     assert loop._cleanup_pending == set()
     assert loop._inactive_cleanup_done == {"proj_001": "stopped"}
+
+
+def test_queue_container_cleanups_isolates_completed_precheck_exception() -> None:
+    loop = _loop()
+    executor = _RecordingExecutor()
+    loop.cleanup_executor = executor
+
+    class Containers(_RecordingContainerManager):
+        def needs_completed_cleanup(self, _project_id: str) -> bool:
+            raise RuntimeError("docker unavailable")
+
+    loop.container_manager = Containers()
+
+    loop._queue_container_cleanups([_summary("proj_001", "completed")])
+
+    assert executor.submissions == []
+    assert loop.cleanup_futures == {}
+    assert loop._cleanup_pending == set()
+    assert loop._inactive_cleanup_done == {}
+
+
+def test_queue_container_cleanups_isolates_stopped_precheck_exception() -> None:
+    loop = _loop()
+    executor = _RecordingExecutor()
+    loop.cleanup_executor = executor
+
+    class Containers(_RecordingContainerManager):
+        def needs_stopped_cleanup(self, _project_id: str) -> bool:
+            raise RuntimeError("docker unavailable")
+
+    loop.container_manager = Containers()
+
+    loop._queue_container_cleanups([_summary("proj_001", "stopped")])
+
+    assert executor.submissions == []
+    assert loop.cleanup_futures == {}
+    assert loop._cleanup_pending == set()
+    assert loop._inactive_cleanup_done == {}
+
+
+def test_queue_container_cleanups_isolates_orphan_precheck_exception() -> None:
+    loop = _loop()
+    executor = _RecordingExecutor()
+    loop.cleanup_executor = executor
+
+    class Containers(_RecordingContainerManager):
+        def needs_orphan_cleanup(self, _name: str) -> bool:
+            raise RuntimeError("docker unavailable")
+
+    containers = Containers()
+    containers.managed_names = ["container-deleted"]
+    loop.container_manager = containers
+
+    loop._queue_container_cleanups([])
+
+    assert executor.submissions == []
+    assert loop.cleanup_futures == {}
+    assert loop._cleanup_pending == set()
 
 
 def test_queue_container_cleanups_removes_deleted_project_orphans() -> None:
@@ -1221,6 +1330,45 @@ def test_dispatcher_run_once_does_not_call_legacy_ephemeral_dispatchers() -> Non
     loop.run(once=True)
 
     assert called == []
+
+
+def test_dispatcher_run_retries_protocol_error_in_loop_mode(monkeypatch) -> None:
+    class StopLoop(Exception):
+        pass
+
+    loop = _loop()
+    config = make_config()
+    loop.config = config
+    loop.container_manager = _RecordingContainerManager()
+    loop.executor = _RecordingExecutor()
+    loop.cleanup_executor = _RecordingExecutor()
+    loop._settings_checked = True
+    loop._startup_healthchecks_checked = True
+    loop.close = lambda: None
+    sleeps: list[int] = []
+    monkeypatch.setattr("cairn.dispatcher.scheduler.loop.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    class Client:
+        def __init__(self) -> None:
+            self.settings_calls = 0
+
+        def get_settings(self):
+            self.settings_calls += 1
+            if self.settings_calls == 1:
+                raise ProtocolError("bad settings json", 200, "not json")
+            return loop.server_settings
+
+        def list_projects(self):
+            raise StopLoop()
+
+    client = Client()
+    loop.client = client
+
+    with pytest.raises(StopLoop):
+        loop.run(once=False)
+
+    assert client.settings_calls == 2
+    assert sleeps == [config.runtime.interval]
 
 
 def test_cancel_inactive_tasks_marks_stopped_and_deleted_projects() -> None:

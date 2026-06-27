@@ -12,6 +12,8 @@ from docker.models.containers import Container
 
 LOG = logging.getLogger(__name__)
 EXEC_KILL_JOIN_TIMEOUT_SECONDS = 5.0
+EXEC_KILL_INSPECT_ATTEMPTS = 3
+EXEC_KILL_INSPECT_RETRY_SECONDS = 0.05
 
 
 @dataclass(slots=True)
@@ -82,12 +84,18 @@ class ManagedProcess:
     def kill(self) -> None:
         if self._exec_id is None:
             return
-        try:
-            details = self._api.exec_inspect(self._exec_id)
-        except DockerException as exc:
-            LOG.warning("failed to inspect exec before kill exec_id=%s error=%s", self._exec_id, exc)
-            return
-        if not details.get("Running"):
+        details: dict[str, Any] | None = None
+        for attempt in range(EXEC_KILL_INSPECT_ATTEMPTS):
+            try:
+                details = self._api.exec_inspect(self._exec_id)
+            except DockerException as exc:
+                LOG.warning("failed to inspect exec before kill exec_id=%s error=%s", self._exec_id, exc)
+                return
+            if details.get("Running") and details.get("Pid"):
+                break
+            if attempt < EXEC_KILL_INSPECT_ATTEMPTS - 1:
+                time.sleep(EXEC_KILL_INSPECT_RETRY_SECONDS)
+        if details is None or not details.get("Running"):
             return
         pid = details.get("Pid")
         if not pid:

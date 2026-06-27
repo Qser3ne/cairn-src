@@ -18,6 +18,7 @@ Excluded from synchronization:
   .superpowers/
   .worktrees/
   .pytest_cache/
+  datas/
   datas.backup/
 
 Options:
@@ -60,6 +61,7 @@ rsync -a --delete \
   --exclude='.superpowers/' \
   --exclude='.worktrees/' \
   --exclude='.pytest_cache/' \
+  --exclude='datas/' \
   --exclude='datas.backup/' \
   --exclude='.gitignore' \
   "$DEV_DIR/" "$PROD_DIR/"

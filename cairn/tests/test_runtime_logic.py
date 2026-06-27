@@ -142,6 +142,43 @@ def test_managed_process_communicate_retries_kill_when_already_cancelled() -> No
     assert result.cancel_reason == "heartbeat failed: lost"
 
 
+def test_managed_process_kill_retries_transient_not_running_inspect(monkeypatch) -> None:
+    class FakeApi:
+        def __init__(self) -> None:
+            self.inspect_calls = 0
+
+        def exec_inspect(self, _exec_id: str) -> dict:
+            self.inspect_calls += 1
+            if self.inspect_calls == 1:
+                return {"Running": False, "Pid": 0}
+            return {"Running": True, "Pid": 1234}
+
+    class FakeExecContainer:
+        name = "container"
+
+        def __init__(self) -> None:
+            self.commands: list[list[str]] = []
+
+        def exec_run(self, command: list[str], stdout: bool, stderr: bool):
+            assert stdout is False
+            assert stderr is False
+            self.commands.append(command)
+            return type("Result", (), {"exit_code": 0})()
+
+    api = FakeApi()
+    container = FakeExecContainer()
+    process = ManagedProcess.__new__(ManagedProcess)
+    process._exec_id = "exec-001"
+    process._api = api
+    process._container = container
+    monkeypatch.setattr("cairn.dispatcher.runtime.process.time.sleep", lambda _seconds: None)
+
+    process.kill()
+
+    assert api.inspect_calls == 2
+    assert container.commands == [["kill", "-KILL", "1234"]]
+
+
 def test_container_manager_build_exec_process_wraps_command_with_timeout() -> None:
     manager = _manager()
     container = FakeContainer()

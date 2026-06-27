@@ -38,9 +38,8 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
 
 def _candidate_segments(text: str) -> list[str]:
-    segments = [text.strip()]
-    segments.extend(match.group(1).strip() for match in FENCED_BLOCK_RE.finditer(text))
-    return segments
+    fenced_segments = [match.group(1).strip() for match in FENCED_BLOCK_RE.finditer(text)]
+    return [*fenced_segments, text.strip()]
 
 
 def _object_start_positions(text: str) -> list[int]:

@@ -24,6 +24,7 @@ def test_deploy_script_directly_overwrites_with_local_exclusions() -> None:
     assert "--exclude='.superpowers/'" in content
     assert "--exclude='.worktrees/'" in content
     assert "--exclude='.pytest_cache/'" in content
+    assert "  datas/" in content
+    assert "--exclude='datas/'" in content
     assert "--exclude='datas.backup/'" in content
-    assert "--exclude='datas/'" not in content
     assert 'log "deployment completed"' in content
