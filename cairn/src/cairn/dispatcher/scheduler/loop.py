@@ -25,6 +25,7 @@ from cairn.server.models import Finding, ProjectDetail, ProjectSummary, Settings
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
 REJECTED_RETRY_AFTER_SECONDS = 5
+PROJECT_FAILURE_STOP_THRESHOLD = 3
 
 
 @dataclass(slots=True)
@@ -54,6 +55,7 @@ class DispatcherLoop:
         self.runtime_project_ids: set[str] = set()
         self.worker_unhealthy_until: dict[str, float] = {}
         self.worker_rejected_until: dict[tuple[str, str, str], float] = {}
+        self.project_failure_counts: dict[str, int] = {}
         self.server_settings: Settings | None = None
         self._log_state: dict[str, tuple[int, str, tuple[object, ...]]] = {}
         self._cleanup_pending: set[str] = set()
@@ -997,11 +999,74 @@ class DispatcherLoop:
                         task.worker_name,
                         retry_after_seconds,
                     )
+                if outcome == "success":
+                    self._clear_project_failure_count(task.project_id)
+                elif outcome in ("failed", "unhealthy", "rejected"):
+                    self._record_project_failure(task, outcome)
                 if outcome == "success" and task.task_type in ("collection_reason", "vulnerability_reason"):
                     self._update_reason_checkpoint_after_success(task)
             except Exception:
                 LOG.exception("task crashed project=%s task=%s worker=%s", task.project_id, task.task_type, task.worker_name)
                 self._release_crashed_task_lease(task)
+                self._record_project_failure(task, "exception")
+
+    def _clear_project_failure_count(self, project_id: str) -> None:
+        self.project_failure_counts.pop(project_id, None)
+
+    def _record_project_failure(self, task: RunningTask, outcome: str) -> None:
+        failure_count = self.project_failure_counts.get(task.project_id, 0) + 1
+        self.project_failure_counts[task.project_id] = failure_count
+        LOG.warning(
+            "project task failure recorded project=%s task=%s worker=%s outcome=%s consecutive_failures=%s",
+            task.project_id,
+            task.task_type,
+            task.worker_name,
+            outcome,
+            failure_count,
+        )
+        if failure_count >= PROJECT_FAILURE_STOP_THRESHOLD:
+            self._stop_project_after_consecutive_failures(task.project_id, failure_count)
+
+    def _stop_project_after_consecutive_failures(self, project_id: str, failure_count: int) -> None:
+        response = self.client.update_project_status(project_id, "stopped")
+        if not response.ok:
+            LOG.warning(
+                "failed to stop project after consecutive task failures project=%s consecutive_failures=%s status=%s",
+                project_id,
+                failure_count,
+                response.status_code,
+            )
+            return
+        LOG.warning(
+            "project stopped after consecutive task failures project=%s consecutive_failures=%s",
+            project_id,
+            failure_count,
+        )
+        self._cleanup_stopped_project_state(project_id)
+
+    def _cleanup_stopped_project_state(self, project_id: str) -> None:
+        self._clear_project_failure_count(project_id)
+        self.runtime_project_ids.discard(project_id)
+        self.collection_warmup_released.discard(project_id)
+        self.collection_expansion_requests.pop(project_id, None)
+        self.authenticated_wait_queues.pop(project_id, None)
+        self.account_leases.pop(project_id, None)
+        self._inactive_cleanup_done.pop(project_id, None)
+        for key in list(self.reason_checkpoints):
+            if key[0] == project_id:
+                self.reason_checkpoints.pop(key, None)
+        for key in list(self.worker_rejected_until):
+            if key[0] == project_id:
+                self.worker_rejected_until.pop(key, None)
+        self._clear_project_log_state(project_id)
+        for task in self.futures.values():
+            if task.project_id == project_id and task.cancellation.cancel("stopped"):
+                LOG.info(
+                    "cancelling running task for stopped project project=%s task=%s worker=%s",
+                    task.project_id,
+                    task.task_type,
+                    task.worker_name,
+                )
 
     def _release_crashed_task_lease(self, task: RunningTask) -> None:
         if task.intent_id is not None:
@@ -1170,6 +1235,9 @@ class DispatcherLoop:
         for project_id in list(self.collection_expansion_requests):
             if project_id not in active_ids:
                 self.collection_expansion_requests.pop(project_id, None)
+        for project_id in list(self.project_failure_counts):
+            if project_id not in active_ids:
+                self.project_failure_counts.pop(project_id, None)
         inactive_status_by_id = {summary.id: summary.status for summary in summaries if summary.status != "active"}
         for project_id, status in list(self._inactive_cleanup_done.items()):
             current_status = inactive_status_by_id.get(project_id)

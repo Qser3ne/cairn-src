@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 
@@ -7,8 +8,9 @@ from cairn.dispatcher.models import ReasonCheckpoint, RunningTask
 from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.runtime.cancellation import TaskCancellation
 from cairn.dispatcher.scheduler.loop import DispatcherLoop
+from cairn.server.models import ProjectAccount
 from cairn.server.models import Finding, ProjectSummary, Settings
-from conftest import FakeContainerManager, make_config, make_intent, make_project
+from conftest import FakeContainerManager, make_account, make_config, make_intent, make_project
 
 
 class SchedulerContainer(FakeContainerManager):
@@ -41,6 +43,9 @@ class SchedulerClient:
     claims: list[tuple[str, str, str, str]] = field(default_factory=list)
     heartbeats: list[tuple[str, str, str]] = field(default_factory=list)
     exported: list[str] = field(default_factory=list)
+    released: list[tuple[str, str, str]] = field(default_factory=list)
+    released_reasons: list[tuple[str, str, str]] = field(default_factory=list)
+    status_updates: list[tuple[str, str]] = field(default_factory=list)
 
     def get_project(self, _project_id: str):
         return self.project
@@ -60,10 +65,16 @@ class SchedulerClient:
         self.heartbeats.append((project_id, task_id, worker))
         return ApiResult(200, {})
 
-    def release_reason(self, *_args) -> ApiResult:
+    def update_project_status(self, project_id: str, status: str) -> ApiResult:
+        self.status_updates.append((project_id, status))
         return ApiResult(200, {})
 
-    def release(self, *_args) -> ApiResult:
+    def release_reason(self, project_id: str, worker: str, task_mode: str) -> ApiResult:
+        self.released_reasons.append((project_id, worker, task_mode))
+        return ApiResult(200, {})
+
+    def release(self, project_id: str, task_id: str, worker: str) -> ApiResult:
+        self.released.append((project_id, task_id, worker))
         return ApiResult(200, {})
 
 
@@ -116,12 +127,39 @@ def _loop(project=None, *, collection_limit: int = 1) -> DispatcherLoop:
     loop.runtime_project_ids = set()
     loop.worker_unhealthy_until = {}
     loop.worker_rejected_until = {}
+    loop.project_failure_counts = {}
     loop.server_settings = None
     loop._log_state = {}
     loop._cleanup_pending = set()
     loop._inactive_cleanup_done = {}
     loop.project_cursor = 0
     return loop
+
+
+def _reap_task_outcome(
+    loop: DispatcherLoop,
+    outcome: str | None = None,
+    *,
+    project_id: str = "proj_001",
+    task_type: str = "vulnerability_explore",
+    intent_id: str | None = "t1",
+    account: ProjectAccount | None = None,
+    exception: Exception | None = None,
+) -> None:
+    future: Future = Future()
+    if exception is not None:
+        future.set_exception(exception)
+    else:
+        future.set_result(outcome)
+    loop.futures[future] = RunningTask(
+        project_id,
+        task_type,
+        "test-worker",
+        TaskCancellation(),
+        intent_id=intent_id,
+        account=account,
+    )
+    loop._reap_futures()
 
 
 def test_task_type_mapping_uses_vulnerability_names() -> None:
@@ -230,3 +268,81 @@ def test_reason_trigger_tracks_per_mode_open_tasks() -> None:
     assert loop._reason_trigger(project, "vulnerability") is None
     project.tasks = []
     assert loop._reason_trigger(project, "vulnerability") == "open_tasks:1->0"
+
+
+def test_two_consecutive_project_task_failures_do_not_stop_project() -> None:
+    loop = _loop()
+
+    _reap_task_outcome(loop, "failed", intent_id="t1")
+    _reap_task_outcome(loop, "unhealthy", intent_id="t2")
+
+    assert loop.project_failure_counts == {"proj_001": 2}
+    assert loop.client.status_updates == []
+
+
+def test_third_consecutive_project_task_failure_stops_project_and_cleans_local_state() -> None:
+    loop = _loop()
+    other_future: Future = Future()
+    other_cancellation = TaskCancellation()
+    loop.futures[other_future] = RunningTask(
+        "proj_001",
+        "vulnerability_explore",
+        "other-worker",
+        other_cancellation,
+        intent_id="t-running",
+    )
+    loop.runtime_project_ids.add("proj_001")
+    loop.collection_warmup_released.add("proj_001")
+    loop.collection_expansion_requests["proj_001"] = "vulnerability_converged"
+    loop.authenticated_wait_queues["proj_001"] = deque(["t-auth"])
+    loop.account_leases["proj_001"] = {"a001": "t-auth"}
+
+    _reap_task_outcome(loop, "failed", intent_id="t1")
+    _reap_task_outcome(loop, "failed", intent_id="t2")
+    _reap_task_outcome(loop, "rejected", intent_id="t3")
+
+    assert loop.client.status_updates == [("proj_001", "stopped")]
+    assert "proj_001" not in loop.runtime_project_ids
+    assert "proj_001" not in loop.collection_warmup_released
+    assert "proj_001" not in loop.collection_expansion_requests
+    assert "proj_001" not in loop.authenticated_wait_queues
+    assert "proj_001" not in loop.account_leases
+    assert loop.worker_rejected_until == {}
+    assert other_cancellation.reason == "stopped"
+
+
+def test_project_task_success_resets_consecutive_failure_count() -> None:
+    loop = _loop()
+
+    _reap_task_outcome(loop, "failed", intent_id="t1")
+    _reap_task_outcome(loop, "failed", intent_id="t2")
+    _reap_task_outcome(loop, "success", intent_id="t3")
+    _reap_task_outcome(loop, "failed", intent_id="t4")
+    _reap_task_outcome(loop, "failed", intent_id="t5")
+
+    assert loop.project_failure_counts == {"proj_001": 2}
+    assert loop.client.status_updates == []
+
+
+def test_cancelled_project_task_does_not_increment_or_reset_failure_count() -> None:
+    loop = _loop()
+
+    _reap_task_outcome(loop, "failed", intent_id="t1")
+    _reap_task_outcome(loop, "failed", intent_id="t2")
+    _reap_task_outcome(loop, "cancelled", intent_id="t3")
+
+    assert loop.project_failure_counts == {"proj_001": 2}
+    assert loop.client.status_updates == []
+
+
+def test_future_exception_counts_as_project_failure_and_releases_lease() -> None:
+    loop = _loop()
+    account = make_account("a001")
+    loop.account_leases["proj_001"] = {"a001": "t3"}
+
+    _reap_task_outcome(loop, "failed", intent_id="t1")
+    _reap_task_outcome(loop, "failed", intent_id="t2")
+    _reap_task_outcome(loop, intent_id="t3", account=account, exception=RuntimeError("boom"))
+
+    assert loop.client.released == [("proj_001", "t3", "test-worker")]
+    assert loop.client.status_updates == [("proj_001", "stopped")]

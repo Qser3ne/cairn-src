@@ -44,6 +44,11 @@ class InProcessClient:
         response.raise_for_status()
         return Settings.model_validate(response.json())
 
+    def update_project_status(self, project_id: str, status: str) -> ApiResult:
+        response = self.http.put(f"/projects/{project_id}/status", json={"status": status})
+        data = response.json() if response.headers.get("content-type", "").startswith("application/json") else None
+        return ApiResult(response.status_code, data, response.text)
+
     def export_project(self, project_id: str) -> str:
         response = self.http.get(f"/projects/{project_id}/export?format=yaml")
         response.raise_for_status()
@@ -347,6 +352,7 @@ def _loop(config: DispatchConfig, client: InProcessClient, containers: LocalCont
     loop.runtime_project_ids = set()
     loop.worker_unhealthy_until = {}
     loop.worker_rejected_until = {}
+    loop.project_failure_counts = {}
     loop.server_settings = client.get_settings()
     loop._log_state = {}
     loop._cleanup_pending = set()
