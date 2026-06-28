@@ -56,6 +56,9 @@ class CairnClient:
     def get_project(self, project_id: str) -> ProjectDetail:
         return self._get_validated(f"/projects/{project_id}", ProjectDetail.model_validate)
 
+    def update_project_status(self, project_id: str, status: str) -> ApiResult:
+        return self._request_json("PUT", f"/projects/{project_id}/status", json={"status": status})
+
     def get_settings(self) -> Settings:
         return self._get_validated("/settings", Settings.model_validate)
 

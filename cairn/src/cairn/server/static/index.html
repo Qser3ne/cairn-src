@@ -1623,6 +1623,18 @@ function cairnApp() {
       return (this.project?.tasks || []).filter(task => this.taskMode(task) === mode);
     },
 
+    factCountByType(type) {
+      return (this.project?.facts || []).filter(fact => fact.type === type).length;
+    },
+
+    collectionFactCount() {
+      return this.factCountByType('collection_fact');
+    },
+
+    vulnerabilityFactCount() {
+      return this.factCountByType('vulnerability_fact');
+    },
+
     collectionRoundSummary() {
       const project = this.project?.project || {};
       return `${project.collection_reason_rounds || 0} reason rounds`;
@@ -1631,13 +1643,13 @@ function cairnApp() {
     collectionCoverageSummary() {
       const project = this.project?.project || {};
       const count = this.intentsByTaskMode('collection').length;
-      return `${count} collection tasks · ${project.collection_explore_rounds || 0} explore rounds · ${project.collection_stable_rounds || 0} stable rounds`;
+      return `${this.collectionFactCount()} collection facts · ${count} collection tasks · ${project.collection_explore_rounds || 0} explore rounds · ${project.collection_stable_rounds || 0} stable rounds`;
     },
 
     vulnerabilityWorkSummary() {
       const count = this.intentsByTaskMode('vulnerability').length;
       const findings = (this.project?.findings || []).length;
-      return `${count} vulnerability tasks · ${findings} findings`;
+      return `${this.vulnerabilityFactCount()} vulnerability facts · ${count} vulnerability tasks · ${findings} findings`;
     },
 
     reportQueueSummary() {
