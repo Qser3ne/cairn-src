@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - "cairn/**"
+      - "scripts/**"
+      - "dispatch*.yaml"
       - ".github/workflows/python-ci.yml"
   push:
     branches:
       - main
     paths:
       - "cairn/**"
+      - "scripts/**"
+      - "dispatch*.yaml"
       - ".github/workflows/python-ci.yml"
 
 jobs:

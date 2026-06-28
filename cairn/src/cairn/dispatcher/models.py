@@ -21,12 +21,12 @@ class RunningTask:
     # checkpoint should describe the graph baseline after a successful task.
     reason_start_fact_count: int | None = None
     reason_start_hint_count: int | None = None
-    reason_start_open_intent_count: int | None = None
+    reason_start_open_task_count: int | None = None
 
 
 @dataclass(slots=True)
 class ReasonCheckpoint:
     fact_count: int
     hint_count: int
-    open_intent_count: int
+    open_task_count: int
     task_mode: TaskMode = "collection"

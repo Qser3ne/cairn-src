@@ -1,0 +1,33 @@
+project:
+  id: proj_fixture
+  title: Example collection with open tasks
+  project_kind: vuln
+  auth_mode: dual
+  parent_project_id: null
+  parent_snapshot_id: null
+origin:
+  id: origin
+  description: "Origin target is https://app.example.test/ for an authorized synthetic collection fixture."
+tasks:
+  - id: t1
+    type: collection_task
+    description: "[asset_discovery] Establish anonymous baseline for public pages, static assets, redirects, and unauthenticated API samples on app.example.test; auth_scope=anonymous; dedupe boundary is the root host public surface."
+    creation_time: 2026-01-01T00:00:01Z
+    completion_time: null
+    from:
+      - origin
+    to: []
+    worker: null
+    auth_scope: anonymous
+  - id: t2
+    type: collection_task
+    description: "[endpoint_sampling] Establish authenticated baseline for dashboard pages, account settings, and login-only API samples on app.example.test; auth_scope=authenticated; dedupe boundary is the default demo account session."
+    creation_time: 2026-01-01T00:00:02Z
+    completion_time: null
+    from:
+      - origin
+    to: []
+    worker: null
+    auth_scope: authenticated
+facts: []
+findings: []

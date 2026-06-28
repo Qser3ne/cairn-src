@@ -20,7 +20,7 @@ from cairn.dispatcher.scheduler.worker_select import choose_worker
 from cairn.dispatcher.tasks.explore import run_explore_task
 from cairn.dispatcher.tasks.reason import run_reason_task
 from cairn.dispatcher.tasks.report import run_report_task
-from cairn.server.models import Intent, ProjectDetail, ProjectSummary, Settings, TaskMode
+from cairn.server.models import Finding, ProjectDetail, ProjectSummary, Settings, Task, TaskMode
 
 LOG = logging.getLogger(__name__)
 UNHEALTHY_RETRY_AFTER_SECONDS = 5
@@ -188,7 +188,7 @@ class DispatcherLoop:
         for summary in summaries:
             if summary.status != "active":
                 continue
-            if summary.unclaimed_intent_count <= 0:
+            if summary.unclaimed_task_count <= 0:
                 continue
             try:
                 project = self.client.get_project(summary.id)
@@ -259,11 +259,17 @@ class DispatcherLoop:
         if queued_intent is not None:
             export_yaml = self.client.export_project(summary.id)
             return self._dispatch_explore(project, export_yaml, queued_intent)
+        if collection_warmup_complete:
+            report_finding = self._next_unreported_finding(project)
+            if report_finding is not None:
+                export_yaml = self.client.export_project(summary.id)
+                if self._dispatch_report(project, export_yaml, report_finding):
+                    return True
         running_intent_ids = self._project_running_explore_intents(summary.id)
         unclaimed_intents = [
             intent
-            for intent in project.intents
-            if intent.to is None
+            for intent in project.tasks
+            if intent.completion_time is None
             and intent.worker is None
             and intent.id not in running_intent_ids
         ]
@@ -282,16 +288,13 @@ class DispatcherLoop:
                 if collection_intent is not None:
                     return self._dispatch_explore(project, export_yaml, collection_intent)
             else:
-                report_intent = self._newest_unclaimed_intent(unclaimed_intents, intent_kind="report")
-                if report_intent is not None:
-                    return self._dispatch_report(project, export_yaml, report_intent)
-                validation_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="validation")
-                if validation_intent is not None:
-                    return self._dispatch_explore(project, export_yaml, validation_intent)
+                vulnerability_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="vulnerability")
+                if vulnerability_intent is not None:
+                    return self._dispatch_explore(project, export_yaml, vulnerability_intent)
                 collection_intent = self._newest_unclaimed_intent(unclaimed_intents, task_mode="collection")
                 if collection_intent is not None:
                     return self._dispatch_explore(project, export_yaml, collection_intent)
-        reason_task_modes: tuple[TaskMode, ...] = ("validation", "collection") if collection_warmup_complete else ("collection",)
+        reason_task_modes: tuple[TaskMode, ...] = ("vulnerability", "collection") if collection_warmup_complete else ("collection",)
         for task_mode in reason_task_modes:
             reason = self._reason_claimed(project, task_mode)
             if reason is not None:
@@ -313,12 +316,12 @@ class DispatcherLoop:
         self._log_changed(
             f"{skip_scope}:graph_unchanged",
             logging.DEBUG,
-            "skip reason project=%s because reason state unchanged facts=%s hints=%s open_intents=%s intents=%s",
+            "skip reason project=%s because reason state unchanged facts=%s hints=%s open_tasks=%s tasks=%s",
             summary.id,
             len(project.facts),
             len(project.hints),
-            self._project_open_intent_count(project),
-            len(project.intents),
+            self._project_open_task_count(project),
+            len(project.tasks),
         )
         return False
 
@@ -402,7 +405,7 @@ class DispatcherLoop:
             reason_task_mode=task_mode,
             reason_start_fact_count=len(project.facts),
             reason_start_hint_count=len(project.hints),
-            reason_start_open_intent_count=self._project_open_intent_count_for_mode(project, task_mode),
+            reason_start_open_task_count=self._project_open_task_count_for_mode(project, task_mode),
         )
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
@@ -410,8 +413,8 @@ class DispatcherLoop:
         return True
 
     def _reason_task_mode(self, project: ProjectDetail) -> TaskMode:
-        if project.project.judge_status == "ready" or project.findings:
-            return "validation"
+        if project.findings:
+            return "vulnerability"
         return "collection"
 
     def _reason_task_type(self, task_mode: TaskMode) -> str:
@@ -419,59 +422,49 @@ class DispatcherLoop:
 
     def _newest_unclaimed_intent(
         self,
-        intents: list[Intent],
+        intents: list[Task],
         *,
-        intent_kind: str | None = None,
         task_mode: TaskMode | None = None,
-    ) -> Intent | None:
+    ) -> Task | None:
         candidates = [
             intent
             for intent in intents
-            if (intent_kind is None or intent.intent_kind == intent_kind)
-            and (task_mode is None or intent.task_mode == task_mode)
+            if task_mode is None or intent.task_mode == task_mode
         ]
         if not candidates:
             return None
-        return max(candidates, key=lambda item: item.created_at)
+        return max(candidates, key=lambda item: (item.created_at, item.id))
 
     def _reason_claimed(self, project: ProjectDetail, task_mode: TaskMode):
         return project.project.reasons.get(task_mode)
 
-    def _dispatch_report(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
+    def _next_unreported_finding(self, project: ProjectDetail) -> Finding | None:
+        running = {
+            task.intent_id
+            for task in self.futures.values()
+            if task.project_id == project.project.id and task.task_type == "report"
+        }
+        for finding in project.findings:
+            if finding.report is None and finding.id not in running:
+                return finding
+        return None
+
+    def _dispatch_report(self, project: ProjectDetail, export_yaml: str, finding: Finding) -> bool:
         selection = self._select_worker(project.project.id, "report")
         worker = selection.worker
         if worker is None:
             self._log_changed(
                 f"project:{project.project.id}:worker:report",
                 logging.INFO,
-                "no worker available for report project=%s intent=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
+                "no worker available for report project=%s finding=%s blocked_busy=%s blocked_unhealthy=%s blocked_rejected=%s",
                 project.project.id,
-                intent.id,
+                finding.id,
                 selection.blocked_busy,
                 selection.blocked_unhealthy,
                 selection.blocked_rejected,
             )
             return False
         self._clear_log_state(f"project:{project.project.id}:worker:report")
-        claim = self.client.heartbeat(project.project.id, intent.id, worker.name)
-        if claim.status_code in (403, 409):
-            LOG.info(
-                "report claim failed project=%s intent=%s worker=%s status=%s",
-                project.project.id,
-                intent.id,
-                worker.name,
-                claim.status_code,
-            )
-            return False
-        if not claim.ok:
-            LOG.warning(
-                "report claim failed project=%s intent=%s worker=%s status=%s",
-                project.project.id,
-                intent.id,
-                worker.name,
-                claim.status_code,
-            )
-            return False
         try:
             future = self.executor.submit(
                 run_report_task,
@@ -480,27 +473,26 @@ class DispatcherLoop:
                 self.container_manager,
                 project,
                 export_yaml,
-                intent,
+                finding,
                 worker,
                 cancellation := TaskCancellation(),
             )
         except Exception:
-            LOG.exception("failed to submit report task project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
-            self._best_effort_release(project.project.id, intent.id, worker.name)
+            LOG.exception("failed to submit report task project=%s finding=%s worker=%s", project.project.id, finding.id, worker.name)
             return False
         self.futures[future] = RunningTask(
             project_id=project.project.id,
             task_type="report",
             worker_name=worker.name,
             cancellation=cancellation,
-            intent_id=intent.id,
+            intent_id=finding.id,
         )
         self.runtime_project_ids.add(project.project.id)
         self._clear_project_log_state(project.project.id)
-        LOG.info("dispatched report project=%s intent=%s worker=%s", project.project.id, intent.id, worker.name)
+        LOG.info("dispatched report project=%s finding=%s worker=%s", project.project.id, finding.id, worker.name)
         return True
 
-    def _dispatch_explore(self, project: ProjectDetail, export_yaml: str, intent: Intent) -> bool:
+    def _dispatch_explore(self, project: ProjectDetail, export_yaml: str, intent: Task) -> bool:
         task_type = self._explore_task_type(intent.task_mode)
         if self._is_collection_task_type(task_type) and not self._collection_capacity_available():
             self._log_changed(
@@ -633,7 +625,7 @@ class DispatcherLoop:
     def _explore_task_type(self, task_mode: str) -> str:
         if task_mode == "collection":
             return "collection_explore"
-        return "validation_explore"
+        return "vulnerability_explore"
 
     def _select_worker(self, project_id: str, task_type: str) -> WorkerSelection:
         now = time.time()
@@ -738,16 +730,15 @@ class DispatcherLoop:
             task.intent_id
             for task in self.futures.values()
             if task.project_id == project_id
-            and task.task_type in ("collection_explore", "validation_explore", "report")
+            and task.task_type in ("collection_explore", "vulnerability_explore", "report")
             and task.intent_id is not None
         }
 
     def _project_uses_account_pool(self, project: ProjectDetail) -> bool:
         return any(
-            intent.to is None
-            and intent.intent_kind == "explore"
+            intent.completion_time is None
             and intent.auth_scope == "authenticated"
-            for intent in project.intents
+            for intent in project.tasks
         )
 
     def _enqueue_current_authenticated_waiters(self, project: ProjectDetail) -> None:
@@ -760,16 +751,15 @@ class DispatcherLoop:
         running_intent_ids = self._project_running_explore_intents(project.project.id)
         blocked = [
             intent
-            for intent in project.intents
-            if intent.to is None
+            for intent in project.tasks
+            if intent.completion_time is None
             and intent.worker is None
             and intent.id not in running_intent_ids
-            and intent.intent_kind == "explore"
             and intent.auth_scope == "authenticated"
         ]
         self._enqueue_authenticated_waiting_intents(project.project.id, blocked)
 
-    def _enqueue_authenticated_waiting_intents(self, project_id: str, intents: list[Intent]) -> None:
+    def _enqueue_authenticated_waiting_intents(self, project_id: str, intents: list[Task]) -> None:
         if not intents:
             return
         queue = self.authenticated_wait_queues.setdefault(project_id, deque())
@@ -786,7 +776,7 @@ class DispatcherLoop:
                 len(queue),
             )
 
-    def _next_authenticated_waiting_intent(self, project: ProjectDetail) -> Intent | None:
+    def _next_authenticated_waiting_intent(self, project: ProjectDetail) -> Task | None:
         if not self._project_uses_account_pool(project):
             self.authenticated_wait_queues.pop(project.project.id, None)
             return None
@@ -796,15 +786,14 @@ class DispatcherLoop:
         queue = self.authenticated_wait_queues.get(project.project.id)
         if not queue:
             return None
-        intents_by_id = {intent.id: intent for intent in project.intents}
+        intents_by_id = {intent.id: intent for intent in project.tasks}
         while queue:
             intent_id = queue[0]
             intent = intents_by_id.get(intent_id)
             if (
                 intent is not None
-                and intent.to is None
+                and intent.completion_time is None
                 and intent.worker is None
-                and intent.intent_kind == "explore"
                 and intent.auth_scope == "authenticated"
             ):
                 LOG.debug(
@@ -858,7 +847,7 @@ class DispatcherLoop:
                 )
                 self.account_leases.pop(project_id, None)
 
-    def _lease_account(self, project: ProjectDetail, intent: Intent):
+    def _lease_account(self, project: ProjectDetail, intent: Task):
         leased = self.account_leases.setdefault(project.project.id, {})
         for account in project.accounts:
             if account.id in leased:
@@ -881,14 +870,14 @@ class DispatcherLoop:
     def _busy_account_count(self, project_id: str) -> int:
         return len(self.account_leases.get(project_id, {}))
 
-    def _stale_authenticated_wait_reason(self, intent: Intent | None) -> str:
+    def _stale_authenticated_wait_reason(self, intent: Task | None) -> str:
         if intent is None:
             return "missing"
-        if intent.to is not None:
+        if intent.completion_time is not None:
             return "concluded"
         if intent.worker is not None:
             return "claimed"
-        if intent.intent_kind != "explore" or intent.auth_scope != "authenticated":
+        if intent.auth_scope != "authenticated":
             return "non-authenticated"
         return "unknown"
 
@@ -896,19 +885,18 @@ class DispatcherLoop:
         active_ids = {summary.id for summary in summaries if summary.status == "active"}
         return len(self.runtime_project_ids & active_ids)
 
-    def _project_open_intent_count(self, project: ProjectDetail) -> int:
-        return sum(1 for intent in project.intents if intent.to is None)
+    def _project_open_task_count(self, project: ProjectDetail) -> int:
+        return sum(1 for intent in project.tasks if intent.completion_time is None)
 
-    def _project_open_intent_count_for_mode(self, project: ProjectDetail, task_mode: TaskMode) -> int:
+    def _project_open_task_count_for_mode(self, project: ProjectDetail, task_mode: TaskMode) -> int:
         return sum(
             1
-            for intent in project.intents
-            if intent.to is None and intent.task_mode == task_mode
+            for intent in project.tasks
+            if intent.completion_time is None and intent.task_mode == task_mode
         )
 
     def _is_initial_project(self, project: ProjectDetail) -> bool:
-        fact_ids = {fact.id for fact in project.facts}
-        return fact_ids == {"origin"} and len(project.facts) == 1 and not project.intents
+        return not project.facts and not project.tasks
 
     def _collection_warmup_complete(self, project: ProjectDetail) -> bool:
         if project.project.id in self.collection_warmup_released:
@@ -926,7 +914,7 @@ class DispatcherLoop:
     def _collection_warmup_converged(self, project: ProjectDetail) -> bool:
         if project.project.collection_reason_rounds <= 0:
             return False
-        if any(intent.to is None and intent.task_mode == "collection" for intent in project.intents):
+        if any(intent.completion_time is None and intent.task_mode == "collection" for intent in project.tasks):
             return False
         if self._reason_claimed(project, "collection") is not None:
             return False
@@ -934,15 +922,13 @@ class DispatcherLoop:
 
     def _reason_trigger(self, project: ProjectDetail, task_mode: TaskMode) -> str | None:
         # Reason checkpoint is the last successful reason baseline. Trigger on
-        # new facts, new hints, or the transition from some open intents to none.
-        if task_mode == "validation" and not self._has_validation_signal(project):
-            return None
+        # new facts, new hints, or the transition from some open tasks to none.
         changes = []
         if task_mode == "collection":
-            validation_trigger = self.collection_expansion_requests.get(project.project.id)
-            if validation_trigger is not None:
-                changes.append(validation_trigger)
-        open_intent_count = self._project_open_intent_count_for_mode(project, task_mode)
+            vulnerability_trigger = self.collection_expansion_requests.get(project.project.id)
+            if vulnerability_trigger is not None:
+                changes.append(vulnerability_trigger)
+        open_task_count = self._project_open_task_count_for_mode(project, task_mode)
         checkpoint = self.reason_checkpoints.get((project.project.id, task_mode))
         if project.project.reason_pending:
             if checkpoint is None:
@@ -954,14 +940,11 @@ class DispatcherLoop:
             changes.append(f"facts:{checkpoint.fact_count}->{len(project.facts)}")
         if len(project.hints) > checkpoint.hint_count:
             changes.append(f"hints:{checkpoint.hint_count}->{len(project.hints)}")
-        if checkpoint.open_intent_count > 0 and open_intent_count == 0:
-            changes.append(f"open_intents:{checkpoint.open_intent_count}->0")
+        if checkpoint.open_task_count > 0 and open_task_count == 0:
+            changes.append(f"open_tasks:{checkpoint.open_task_count}->0")
         if not changes:
             return None
         return ",".join(changes)
-
-    def _has_validation_signal(self, project: ProjectDetail) -> bool:
-        return bool(project.findings) or any(intent.task_mode == "validation" for intent in project.intents)
 
     def _reap_futures(self) -> None:
         done = [future for future in self.futures if future.done()]
@@ -1014,7 +997,7 @@ class DispatcherLoop:
                         task.worker_name,
                         retry_after_seconds,
                     )
-                if outcome == "success" and task.task_type in ("collection_reason", "validation_reason"):
+                if outcome == "success" and task.task_type in ("collection_reason", "vulnerability_reason"):
                     self._update_reason_checkpoint_after_success(task)
             except Exception:
                 LOG.exception("task crashed project=%s task=%s worker=%s", task.project_id, task.task_type, task.worker_name)
@@ -1024,7 +1007,7 @@ class DispatcherLoop:
         if task.intent_id is not None:
             self._best_effort_release(task.project_id, task.intent_id, task.worker_name)
             return
-        if task.task_type not in ("collection_reason", "validation_reason"):
+        if task.task_type not in ("collection_reason", "vulnerability_reason"):
             return
         task_mode = task.reason_task_mode or self._task_mode_from_reason_task_type(task.task_type)
         self._best_effort_release_reason(task.project_id, task.worker_name, task_mode)
@@ -1037,51 +1020,51 @@ class DispatcherLoop:
             checkpoint = self._reason_start_checkpoint(task, task_mode)
             self.reason_checkpoints[(task.project_id, task_mode)] = checkpoint
             LOG.warning(
-                "reason checkpoint refresh failed project=%s worker=%s trigger=%s error=%s fallback_facts=%s fallback_hints=%s fallback_open_intents=%s",
+                "reason checkpoint refresh failed project=%s worker=%s trigger=%s error=%s fallback_facts=%s fallback_hints=%s fallback_open_tasks=%s",
                 task.project_id,
                 task.worker_name,
                 task.reason_trigger,
                 exc,
                 checkpoint.fact_count,
                 checkpoint.hint_count,
-                checkpoint.open_intent_count,
+                checkpoint.open_task_count,
             )
             return
         checkpoint = ReasonCheckpoint(
             fact_count=len(project.facts),
             hint_count=len(project.hints),
-            open_intent_count=self._project_open_intent_count_for_mode(project, task_mode),
+            open_task_count=self._project_open_task_count_for_mode(project, task_mode),
             task_mode=task_mode,
         )
         self.reason_checkpoints[(task.project_id, task_mode)] = checkpoint
         if task_mode == "collection":
             self.collection_expansion_requests.pop(task.project_id, None)
-        if task_mode == "validation" and checkpoint.open_intent_count == 0:
-            self.collection_expansion_requests[task.project_id] = "validation_converged"
+        if task_mode == "vulnerability" and checkpoint.open_task_count == 0:
+            self.collection_expansion_requests[task.project_id] = "vulnerability_converged"
         LOG.debug(
-            "reason checkpoint updated project=%s worker=%s trigger=%s facts=%s hints=%s open_intents=%s source=latest",
+            "reason checkpoint updated project=%s worker=%s trigger=%s facts=%s hints=%s open_tasks=%s source=latest",
             task.project_id,
             task.worker_name,
             task.reason_trigger,
             checkpoint.fact_count,
             checkpoint.hint_count,
-            checkpoint.open_intent_count,
+            checkpoint.open_task_count,
         )
 
     def _reason_start_checkpoint(self, task: RunningTask, task_mode: TaskMode) -> ReasonCheckpoint:
         assert task.reason_start_fact_count is not None
         assert task.reason_start_hint_count is not None
-        assert task.reason_start_open_intent_count is not None
+        assert task.reason_start_open_task_count is not None
         return ReasonCheckpoint(
             fact_count=task.reason_start_fact_count,
             hint_count=task.reason_start_hint_count,
-            open_intent_count=task.reason_start_open_intent_count,
+            open_task_count=task.reason_start_open_task_count,
             task_mode=task_mode,
         )
 
     def _task_mode_from_reason_task_type(self, task_type: str) -> TaskMode:
-        if task_type == "validation_reason":
-            return "validation"
+        if task_type == "vulnerability_reason":
+            return "vulnerability"
         return "collection"
 
     def _cleanup_completed_containers(self, summaries: list[ProjectSummary]) -> None:
@@ -1210,28 +1193,28 @@ class DispatcherLoop:
         for summary in summaries:
             if summary.status != "active":
                 continue
-            open_intent_count = summary.working_intent_count + summary.unclaimed_intent_count
-            if open_intent_count == 0:
+            open_task_count = summary.working_task_count + summary.unclaimed_task_count
+            if open_task_count == 0:
                 continue
             project = self.client.get_project(summary.id)
-            for task_mode in ("collection", "validation"):
+            for task_mode in ("collection", "vulnerability"):
                 key = (summary.id, task_mode)
                 if key in self.reason_checkpoints:
                     continue
-                task_mode_open_intent_count = self._project_open_intent_count_for_mode(project, task_mode)
+                task_mode_open_task_count = self._project_open_task_count_for_mode(project, task_mode)
                 self.reason_checkpoints[key] = ReasonCheckpoint(
                     fact_count=summary.fact_count,
                     hint_count=summary.hint_count,
-                    open_intent_count=task_mode_open_intent_count,
+                    open_task_count=task_mode_open_task_count,
                     task_mode=task_mode,
                 )
                 LOG.debug(
-                    "reason checkpoint initialized project=%s task_mode=%s facts=%s hints=%s open_intents=%s",
+                    "reason checkpoint initialized project=%s task_mode=%s facts=%s hints=%s open_tasks=%s",
                     summary.id,
                     task_mode,
                     summary.fact_count,
                     summary.hint_count,
-                    task_mode_open_intent_count,
+                    task_mode_open_task_count,
                 )
 
     def _best_effort_release(self, project_id: str, intent_id: str, worker_name: str) -> None:
@@ -1270,7 +1253,7 @@ class DispatcherLoop:
         settings = settings or self.client.get_settings()
         interval = self.config.runtime.interval
         heartbeat_grace = max(interval, interval * HEARTBEAT_FAILURE_GRACE_MULTIPLIER)
-        for name, value in (("intent_timeout", settings.intent_timeout), ("reason_timeout", settings.reason_timeout)):
+        for name, value in (("task_timeout", settings.task_timeout), ("reason_timeout", settings.reason_timeout)):
             if value <= heartbeat_grace:
                 raise RuntimeError(
                     f"server {name}={value}s must be greater than heartbeat grace={heartbeat_grace}s "

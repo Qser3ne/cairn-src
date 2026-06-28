@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from cairn.dispatcher.config import DispatchConfig
 from cairn.dispatcher.protocol.client import ApiResult
 from cairn.dispatcher.workers.base import DriverResult
-from cairn.server.models import Fact, Hint, Intent, ProjectAccount, ProjectDetail, ProjectMeta
+from cairn.server.models import Fact, Hint, Origin, ProjectAccount, ProjectDetail, ProjectMeta, Task
 
 
 def make_config() -> DispatchConfig:
@@ -21,7 +21,7 @@ def make_config() -> DispatchConfig:
                 "prompt_group": "default",
             },
             "tasks": {
-                "reason": {"timeout": 10, "max_intents": 3},
+                "reason": {"timeout": 10, "max_tasks": 3},
                 "explore": {"timeout": 10, "conclude_timeout": 5},
                 "judge": {"timeout": 10},
                 "report": {"timeout": 10},
@@ -38,8 +38,8 @@ def make_config() -> DispatchConfig:
                     "task_types": [
                         "collection_reason",
                         "collection_explore",
-                        "validation_reason",
-                        "validation_explore",
+                        "vulnerability_reason",
+                        "vulnerability_explore",
                         "report",
                     ],
                     "max_running": 1,
@@ -50,7 +50,7 @@ def make_config() -> DispatchConfig:
     )
 
 
-def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
+def make_project(*, tasks: list[Task] | None = None) -> ProjectDetail:
     return ProjectDetail(
         project=ProjectMeta(
             id="proj_001",
@@ -60,14 +60,22 @@ def make_project(*, intents: list[Intent] | None = None) -> ProjectDetail:
             auth_mode="anonymous",
             created_at="2026-01-01T00:00:00Z",
         ),
+        origin=Origin(description="start"),
         facts=[
-            Fact(id="origin", description="start"),
-            Fact(id="f001", description="known fact"),
+            Fact(
+                id="f1",
+                type="collection_fact",
+                description="known fact",
+                creation_time="2026-01-01T00:00:01Z",
+                from_=["origin"],
+                from_task="t0",
+                evidence="/tmp/evidence/f1.json",
+            ),
         ],
-        intents=intents or [],
+        tasks=tasks or [],
         hints=[
             Hint(
-                id="h001",
+                id="h1",
                 content="use the clue",
                 creator="human",
                 created_at="2026-01-01T00:00:01Z",
@@ -91,14 +99,15 @@ def make_account(account_id: str = "a001") -> ProjectAccount:
     )
 
 
-def make_intent(intent_id: str = "i001") -> Intent:
-    return Intent(
+def make_intent(intent_id: str = "t1") -> Task:
+    return Task(
         id=intent_id,
-        from_=["f001"],
+        type="vulnerability_task",
+        from_=["f1"],
+        to=[],
         description="investigate",
-        creator="reasoner",
         worker="test-worker",
-        created_at="2026-01-01T00:00:02Z",
+        creation_time="2026-01-01T00:00:02Z",
         auth_scope="anonymous",
     )
 
@@ -190,12 +199,11 @@ class FakeClient:
     def conclude_report(
         self,
         project_id: str,
-        intent_id: str,
+        finding_id: str,
         worker: str,
-        report_markdown: str,
-        report_json: dict,
+        report: str,
     ) -> ApiResult:
-        return ApiResult(200, {"report_markdown": report_markdown, "report_json": report_json})
+        return ApiResult(200, {"report": report})
 
     def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
         self.released.append((project_id, intent_id, worker))

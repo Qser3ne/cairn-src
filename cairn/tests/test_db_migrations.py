@@ -14,10 +14,9 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
 
     with db.get_conn() as conn:
         project_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+        task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+        task_source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_sources)")}
         fact_columns = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
-        intent_column_rows = conn.execute("PRAGMA table_info(intents)").fetchall()
-        intent_columns = {row["name"] for row in intent_column_rows}
-        intent_defaults = {row["name"]: row["dflt_value"] for row in intent_column_rows}
         project_defaults = {
             row["name"]: row["dflt_value"]
             for row in conn.execute("PRAGMA table_info(projects)")
@@ -35,18 +34,45 @@ def test_new_database_has_src_only_schema(tmp_path, monkeypatch) -> None:
     assert "bootstrap_enabled" not in project_columns
     assert "session_lock_enabled" not in project_columns
     assert "collection_max_reason_rounds" not in project_columns
-    assert {"project_kind", "auth_mode", "parent_project_id", "parent_snapshot_id", "reason_pending"} <= project_columns
-    assert {"fact_type", "title", "summary", "details_json"} <= fact_columns
-    assert {"intent_kind", "finding_id", "auth_scope", "task_mode"} <= intent_columns
-    assert intent_defaults["task_mode"] == "'validation'"
+    assert {"origin", "project_kind", "auth_mode", "parent_project_id", "parent_snapshot_id", "reason_pending"} <= project_columns
+    assert {"id", "type", "description", "creation_time", "completion_time", "to", "worker"} <= task_columns
+    assert {"task_id", "project_id", "source_id"} <= task_source_columns
+    assert {"id", "type", "description", "creation_time", "from", "from_task", "to", "evidence"} <= fact_columns
     assert project_defaults["project_kind"] == "'vuln'"
-    assert "session_lock" not in intent_columns
-    assert {"research_value", "next_action", "report_status", "report_intent_id"} <= finding_columns
+    assert {"id", "type", "description", "creation_time", "from", "from_task", "to", "report"} <= finding_columns
     assert "input_json" in ephemeral_columns
     assert {"initial_collection_rounds", "collection_worker_limit"} <= settings_columns
     assert settings["initial_collection_rounds"] == 5
     assert settings["collection_worker_limit"] == 1
-    assert {"project_accounts", "project_snapshots", "ephemeral_jobs", "finding_reports"} <= tables
+    assert {"project_accounts", "project_snapshots", "ephemeral_jobs", "tasks", "task_sources"} <= tables
+    assert {"intents", "intent_sources", "finding_reports"}.isdisjoint(tables)
+
+
+def test_new_database_has_blackboard_schema_without_public_legacy_tables(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "blackboard.db"
+    monkeypatch.setattr(db, "_db_path", None)
+    db.configure(path)
+
+    with db.get_conn() as conn:
+        tables = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        project_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+        task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+        task_source_columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_sources)")}
+        fact_columns = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
+        finding_columns = {row["name"] for row in conn.execute("PRAGMA table_info(findings)")}
+
+    assert {"tasks", "task_sources", "facts", "findings"} <= tables
+    assert "intents" not in tables
+    assert "intent_sources" not in tables
+    assert "finding_reports" not in tables
+    assert "origin" in project_columns
+    assert {"id", "type", "description", "creation_time", "completion_time", "to", "worker"} <= task_columns
+    assert {"task_id", "project_id", "source_id"} <= task_source_columns
+    assert {"id", "type", "description", "creation_time", "from", "from_task", "to", "evidence"} <= fact_columns
+    assert {"id", "type", "description", "creation_time", "from", "from_task", "to", "report"} <= finding_columns
 
 
 def test_legacy_settings_table_gains_collection_scheduling_columns(tmp_path, monkeypatch) -> None:
@@ -68,7 +94,7 @@ def test_legacy_settings_table_gains_collection_scheduling_columns(tmp_path, mon
     with db.get_conn() as conn:
         row = conn.execute("SELECT * FROM settings WHERE rowid = 1").fetchone()
 
-    assert row["intent_timeout"] == 30
+    assert row["task_timeout"] == 30
     assert row["reason_timeout"] == 31
     assert row["initial_collection_rounds"] == 5
     assert row["collection_worker_limit"] == 1
@@ -87,14 +113,13 @@ def test_new_database_has_query_indexes(tmp_path, monkeypatch) -> None:
 
     assert {
         "idx_facts_project",
-        "idx_intents_project_open_worker",
+        "idx_tasks_project_open_worker",
         "idx_hints_project_created",
         "idx_findings_project_created",
         "idx_project_accounts_project",
         "idx_project_snapshots_project_created",
-        "idx_intent_sources_project_intent",
+        "idx_task_sources_project_task",
         "idx_ephemeral_jobs_queue",
-        "idx_finding_reports_project_created",
     } <= indexes
 
 
@@ -324,7 +349,7 @@ def test_legacy_project_retired_columns_are_removed_without_session_lock(tmp_pat
     assert project["collection_stable_rounds"] == 1
 
 
-def test_legacy_intent_session_lock_column_is_removed_and_new_columns_added(tmp_path, monkeypatch) -> None:
+def test_legacy_intent_session_lock_column_is_removed_and_migrated_to_task(tmp_path, monkeypatch) -> None:
     path = tmp_path / "legacy-intents.db"
     with sqlite3.connect(path) as conn:
         conn.executescript(
@@ -363,12 +388,16 @@ def test_legacy_intent_session_lock_column_is_removed_and_new_columns_added(tmp_
     db.configure(path)
 
     with db.get_conn() as conn:
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(intents)")}
-        row = conn.execute("SELECT id, description, intent_kind, finding_id, auth_scope FROM intents WHERE id = 'i001'").fetchone()
+        tables = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+        row = conn.execute("SELECT id, type, description, auth_scope FROM tasks WHERE id = 't1'").fetchone()
+    assert "intents" not in tables
     assert "session_lock" not in columns
     assert row["description"] == "old work"
-    assert row["intent_kind"] == "explore"
-    assert row["finding_id"] is None
+    assert row["type"] == "vulnerability_task"
     assert row["auth_scope"] == "anonymous"
 
 
@@ -469,7 +498,7 @@ def test_legacy_collection_max_reason_rounds_column_is_removed(tmp_path, monkeyp
     assert project["collection_stable_rounds"] == 1
 
 
-def test_legacy_recon_and_vuln_intents_backfill_task_mode(tmp_path, monkeypatch) -> None:
+def test_legacy_recon_and_vuln_intents_migrate_to_task_types(tmp_path, monkeypatch) -> None:
     path = tmp_path / "legacy-task-mode.db"
     with sqlite3.connect(path) as conn:
         conn.executescript(
@@ -512,19 +541,17 @@ def test_legacy_recon_and_vuln_intents_backfill_task_mode(tmp_path, monkeypatch)
     db.configure(path)
 
     with db.get_conn() as conn:
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(intents)")}
         projects = {
             row["id"]: row["project_kind"]
             for row in conn.execute("SELECT id, project_kind FROM projects ORDER BY id")
         }
-        intents = {
-            row["id"]: row["task_mode"]
-            for row in conn.execute("SELECT id, task_mode FROM intents ORDER BY id")
+        tasks = {
+            row["id"]: row["type"]
+            for row in conn.execute("SELECT id, type FROM tasks ORDER BY id")
         }
 
-    assert "task_mode" in columns
     assert projects == {"proj_recon": "vuln", "proj_vuln": "vuln"}
-    assert intents == {"i_recon": "collection", "i_vuln": "validation"}
+    assert tasks == {"ti_recon": "collection_task", "ti_vuln": "vulnerability_task"}
 
 
 def test_legacy_goal_facts_are_removed_on_startup(tmp_path, monkeypatch) -> None:
@@ -570,16 +597,18 @@ def test_legacy_goal_facts_are_removed_on_startup(tmp_path, monkeypatch) -> None
             row["id"]
             for row in conn.execute("SELECT id FROM facts WHERE project_id = 'proj_001' ORDER BY id")
         ]
-        source_ids = [
-            row["fact_id"]
-            for row in conn.execute("SELECT fact_id FROM intent_sources WHERE project_id = 'proj_001'")
-        ]
+        origin = conn.execute("SELECT origin FROM projects WHERE id = 'proj_001'").fetchone()["origin"]
+        tables = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
 
-    assert fact_ids == ["f001", "origin"]
-    assert source_ids == []
+    assert fact_ids == ["f1"]
+    assert origin == "start"
+    assert "intent_sources" not in tables
 
 
-def test_legacy_facts_gain_structured_fact_columns(tmp_path, monkeypatch) -> None:
+def test_legacy_origin_fact_moves_to_project_origin(tmp_path, monkeypatch) -> None:
     path = tmp_path / "legacy-facts.db"
     with sqlite3.connect(path) as conn:
         conn.executescript(
@@ -608,12 +637,9 @@ def test_legacy_facts_gain_structured_fact_columns(tmp_path, monkeypatch) -> Non
 
     with db.get_conn() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
-        fact = conn.execute(
-            "SELECT fact_type, title, summary, details_json FROM facts WHERE id = 'origin'"
-        ).fetchone()
+        project = conn.execute("SELECT origin FROM projects WHERE id = 'proj_001'").fetchone()
+        fact_count = conn.execute("SELECT COUNT(*) AS count FROM facts WHERE project_id = 'proj_001'").fetchone()["count"]
 
-    assert {"fact_type", "title", "summary", "details_json"} <= columns
-    assert fact["fact_type"] == "observation"
-    assert fact["title"] is None
-    assert fact["summary"] is None
-    assert fact["details_json"] == "{}"
+    assert {"type", "creation_time", "from", "from_task", "to", "evidence"} <= columns
+    assert project["origin"] == "https://target.test"
+    assert fact_count == 0

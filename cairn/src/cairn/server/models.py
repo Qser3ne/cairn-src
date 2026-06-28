@@ -6,122 +6,99 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 ProjectKind = Literal["vuln"]
-TaskMode = Literal["collection", "validation", "report"]
-AuthMode = Literal["anonymous", "authenticated", "dual"]
 ProjectStatus = Literal["active", "stopped", "completed"]
-JudgeStatus = Literal["not_judged", "ready", "not_ready", "blocked"]
-ResearchValue = Literal["unknown", "high", "medium", "low", "none"]
-FindingNextAction = Literal["triage", "follow_up", "report", "close"]
-ReportStatus = Literal["not_started", "queued", "drafted", "submitted", "closed"]
-IntentKind = Literal["explore", "report"]
+AuthMode = Literal["anonymous", "authenticated", "dual"]
 AuthScope = Literal["anonymous", "authenticated"]
+TaskMode = Literal["collection", "vulnerability", "report"]
+TaskType = Literal["collection_task", "vulnerability_task"]
+FactType = Literal["collection_fact", "vulnerability_fact"]
+FindingType = Literal["findings"]
 EphemeralJobStatus = Literal["queued", "running", "succeeded", "failed", "expired"]
-FactType = Literal["observation", "feature_surface"]
 
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    intent_timeout: int = Field(ge=5)
+    task_timeout: int = Field(ge=5)
     reason_timeout: int = Field(ge=5)
     initial_collection_rounds: int = Field(ge=0)
     collection_worker_limit: int = Field(ge=1)
 
 
+class Origin(BaseModel):
+    id: Literal["origin"] = "origin"
+    description: str
+
+
+class Task(BaseModel):
+    id: str
+    type: TaskType
+    description: str
+    creation_time: str
+    completion_time: str | None = None
+    from_: list[str] = Field(alias="from")
+    to: list[str] = Field(default_factory=list)
+    worker: str | None = None
+    last_heartbeat_at: str | None = None
+    auth_scope: AuthScope | None = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @property
+    def task_mode(self) -> TaskMode:
+        return "collection" if self.type == "collection_task" else "vulnerability"
+
+    @task_mode.setter
+    def task_mode(self, value: str) -> None:
+        self.type = "collection_task" if value == "collection" else "vulnerability_task"
+
+    @property
+    def created_at(self) -> str:
+        return self.creation_time
+
+    @property
+    def concluded_at(self) -> str | None:
+        return self.completion_time
+
+
 class Fact(BaseModel):
     id: str
+    type: FactType = "collection_fact"
     description: str
-    fact_type: FactType = "observation"
-    title: str | None = None
-    summary: str | None = None
-    details: dict[str, Any] = Field(default_factory=dict)
+    creation_time: str = "2026-01-01T00:00:00Z"
+    from_: list[str] = Field(default_factory=lambda: ["origin"], alias="from")
+    from_task: str = "t0"
+    to: list[str] = Field(default_factory=list)
+    evidence: str = "legacy:test"
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class Finding(BaseModel):
     id: str
-    title: str
-    vulnerability_type: str
-    severity: str
-    target: str
-    location: str
-    impact: str
-    evidence: str
-    reproduction: str
-    remediation: str
-    status: str
-    research_value: ResearchValue = "unknown"
-    next_action: FindingNextAction = "triage"
-    followup_reason: str = ""
-    followup_intent_description: str = ""
-    followup_intent_id: str | None = None
-    report_status: ReportStatus = "not_started"
-    report_intent_id: str | None = None
-    triaged_at: str | None = None
-    fact_id: str
-    intent_id: str
-    created_at: str
+    type: FindingType = "findings"
+    description: str
+    creation_time: str
+    from_: list[str] = Field(alias="from")
+    from_task: str
+    to: list[str] = Field(default_factory=list)
+    report: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class FindingCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    title: str
-    vulnerability_type: str = "unknown"
-    severity: str = "unknown"
-    target: str = ""
-    location: str = ""
-    impact: str = ""
-    evidence: str = ""
-    reproduction: str = ""
-    remediation: str = ""
-    status: str = "open"
-    research_value: ResearchValue = "unknown"
-    next_action: FindingNextAction = "triage"
-    followup_reason: str = ""
-    followup_intent_description: str = ""
-
-    @field_validator(
-        "title",
-        "vulnerability_type",
-        "severity",
-        "target",
-        "location",
-        "impact",
-        "evidence",
-        "reproduction",
-        "remediation",
-        "status",
-        "followup_reason",
-        "followup_intent_description",
-    )
-    @classmethod
-    def validate_text(cls, value: str) -> str:
-        text = value.strip()
-        return text
-
-    @model_validator(mode="after")
-    def validate_next_action(self) -> "FindingCreate":
-        if self.next_action == "follow_up" and not self.followup_intent_description.strip():
-            raise ValueError("followup_intent_description is required when next_action=follow_up")
-        return self
-
-
-class Intent(BaseModel):
-    id: str
-    from_: list[str] = Field(alias="from")
-    to: str | None = None
     description: str
-    creator: str
-    worker: str | None = None
-    last_heartbeat_at: str | None = None
-    created_at: str
-    concluded_at: str | None = None
-    intent_kind: IntentKind = "explore"
-    task_mode: TaskMode = "validation"
-    finding_id: str | None = None
-    auth_scope: AuthScope | None = None
 
-    model_config = {"populate_by_name": True}
+    @field_validator("description")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
 
 
 class Hint(BaseModel):
@@ -191,7 +168,7 @@ class ProjectReason(BaseModel):
 
 
 def empty_project_reasons() -> dict[TaskMode, ProjectReason | None]:
-    return {"collection": None, "validation": None, "report": None}
+    return {"collection": None, "vulnerability": None, "report": None}
 
 
 class ProjectMeta(BaseModel):
@@ -209,23 +186,22 @@ class ProjectMeta(BaseModel):
     collection_reason_rounds: int = 0
     collection_explore_rounds: int = 0
     collection_stable_rounds: int = 0
-    judge_status: JudgeStatus = "not_judged"
-    judged_at: str | None = None
 
 
 class ProjectSummary(ProjectMeta):
     fact_count: int
-    intent_count: int
-    working_intent_count: int
-    unclaimed_intent_count: int
+    task_count: int = 0
+    working_task_count: int = 0
+    unclaimed_task_count: int = 0
     hint_count: int
     finding_count: int
 
 
 class ProjectDetail(BaseModel):
     project: ProjectMeta
+    origin: Origin
+    tasks: list[Task]
     facts: list[Fact]
-    intents: list[Intent]
     hints: list[Hint]
     findings: list[Finding] = Field(default_factory=list)
     accounts: list[ProjectAccount] = Field(default_factory=list)
@@ -295,21 +271,18 @@ class CreateHintRequest(BaseModel):
         return text
 
 
-class CreateIntentRequest(BaseModel):
+class CreateTaskRequest(BaseModel):
     from_: list[str] = Field(alias="from", min_length=1)
+    type: TaskType
     description: str
-    creator: str
     worker: str | None = None
-    intent_kind: IntentKind = "explore"
-    task_mode: TaskMode | None = None
-    finding_id: str | None = None
     auth_scope: AuthScope | None = None
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    @field_validator("description", "creator", "worker")
+    @field_validator("description", "worker")
     @classmethod
-    def validate_non_empty_text(cls, value: str | None) -> str | None:
+    def validate_optional_non_empty_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         text = value.strip()
@@ -319,15 +292,15 @@ class CreateIntentRequest(BaseModel):
 
     @field_validator("from_")
     @classmethod
-    def validate_fact_ids(cls, value: list[str]) -> list[str]:
+    def validate_sources(cls, value: list[str]) -> list[str]:
         cleaned = []
         seen = set()
         for item in value:
             text = item.strip()
             if not text:
-                raise ValueError("fact ids must not be empty")
+                raise ValueError("sources must not be empty")
             if text in seen:
-                raise ValueError("fact ids must be unique")
+                raise ValueError("sources must be unique")
             seen.add(text)
             cleaned.append(text)
         return cleaned
@@ -378,18 +351,15 @@ class ReasonHeartbeatRequest(BaseModel):
         return text
 
 
-class ConcludeRequest(BaseModel):
+class ConcludeTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     worker: str
     description: str
-    fact_type: FactType = "observation"
-    title: str | None = None
-    summary: str | None = None
-    details: dict[str, Any] = Field(default_factory=dict)
+    evidence: str
     findings: list[FindingCreate] | None = None
 
-    @field_validator("worker", "description")
+    @field_validator("worker", "description", "evidence")
     @classmethod
     def validate_non_empty_text(cls, value: str) -> str:
         text = value.strip()
@@ -397,19 +367,26 @@ class ConcludeRequest(BaseModel):
             raise ValueError("must not be empty")
         return text
 
-    @field_validator("title", "summary")
-    @classmethod
-    def validate_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        text = value.strip()
-        return text or None
 
-
-class ConcludeResponse(BaseModel):
+class ConcludeTaskResponse(BaseModel):
     fact: Fact
-    intent: Intent
+    task: Task
     findings: list[Finding] = Field(default_factory=list)
+
+
+class ReportPathRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    worker: str
+    report: str
+
+    @field_validator("worker", "report")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
 
 
 class UpdateProjectStatusRequest(BaseModel):
@@ -441,16 +418,8 @@ class CollectionReasonRoundRequest(BaseModel):
 class ProjectSnapshotCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    snapshot_type: str = "recon_fork"
+    snapshot_type: str = "blackboard"
     selected_fact_ids: list[str] = Field(default_factory=list)
-
-    @field_validator("snapshot_type")
-    @classmethod
-    def validate_snapshot_type(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
 
 
 class ProjectSnapshot(BaseModel):
@@ -472,53 +441,9 @@ class ForkVulnRequest(BaseModel):
     candidate_limit: int | None = Field(default=None, ge=1)
     accounts: list[ProjectAccountCreate] | None = None
 
-    @field_validator("title", "snapshot_id")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
 
-    @model_validator(mode="after")
-    def validate_accounts(self) -> "ForkVulnRequest":
-        accounts = self.accounts or []
-        if self.auth_mode == "dual":
-            raise ValueError("vuln project auth_mode must be anonymous or authenticated")
-        if self.auth_mode != "authenticated" and accounts:
-            raise ValueError("accounts are only supported for authenticated projects")
-        if self.auth_mode == "authenticated" and not accounts:
-            raise ValueError("authenticated vuln project requires at least one cookie session")
-        return self
-
-
-class ForkVulnSeedJobRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str
-    auth_mode: AuthMode = "anonymous"
-    snapshot_id: str
+class ForkVulnSeedJobRequest(ForkVulnRequest):
     candidate_limit: int | None = Field(default=8, ge=1)
-    accounts: list[ProjectAccountCreate] | None = None
-
-    @field_validator("title", "snapshot_id")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
-    @model_validator(mode="after")
-    def validate_accounts(self) -> "ForkVulnSeedJobRequest":
-        accounts = self.accounts or []
-        if self.auth_mode == "dual":
-            raise ValueError("vuln project auth_mode must be anonymous or authenticated")
-        if self.auth_mode != "authenticated" and accounts:
-            raise ValueError("accounts are only supported for authenticated projects")
-        if self.auth_mode == "authenticated" and not accounts:
-            raise ValueError("authenticated vuln project requires at least one cookie session")
-        return self
 
 
 class ForkSeedFact(BaseModel):
@@ -529,59 +454,6 @@ class ForkSeedFact(BaseModel):
     candidate_type: str
     derived_from: list[str] = Field(min_length=1)
     description: str
-    feature_summary: str | None = None
-    user_actions: list[str] = Field(default_factory=list)
-    routes: list[str] = Field(default_factory=list)
-    apis: list[str] = Field(default_factory=list)
-    vuln_validation_focus: list[str] = Field(default_factory=list)
-    known_constraints: list[str] = Field(default_factory=list)
-    evidence_refs: list[str] = Field(default_factory=list)
-
-    @field_validator("title", "candidate_type", "description")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
-    @field_validator("feature_summary")
-    @classmethod
-    def validate_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        text = value.strip()
-        return text or None
-
-    @field_validator(
-        "user_actions",
-        "routes",
-        "apis",
-        "vuln_validation_focus",
-        "known_constraints",
-        "evidence_refs",
-    )
-    @classmethod
-    def validate_text_list(cls, value: list[str]) -> list[str]:
-        cleaned = []
-        for item in value:
-            text = item.strip()
-            if text:
-                cleaned.append(text)
-        return cleaned
-
-    @field_validator("derived_from")
-    @classmethod
-    def validate_derived_from(cls, value: list[str]) -> list[str]:
-        cleaned = []
-        for item in value:
-            text = item.strip()
-            if not text:
-                raise ValueError("derived_from fact ids must not be empty")
-            cleaned.append(text)
-        if len(set(cleaned)) != len(cleaned):
-            raise ValueError("derived_from fact ids must be unique")
-        return cleaned
 
 
 class ForkSeedFinishRequest(BaseModel):
@@ -589,14 +461,6 @@ class ForkSeedFinishRequest(BaseModel):
 
     worker: str
     seed_facts: list[ForkSeedFact] = Field(min_length=1, max_length=10)
-
-    @field_validator("worker")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
 
 
 class ForkSeedJobCreateResponse(BaseModel):
@@ -642,14 +506,6 @@ class EphemeralJobClaimRequest(BaseModel):
 
     worker: str
 
-    @field_validator("worker")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
 
 class EphemeralJobFinishRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -657,51 +513,9 @@ class EphemeralJobFinishRequest(BaseModel):
     worker: str
     result: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("worker")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
 
 class EphemeralJobFailRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     worker: str
     error: str
-
-    @field_validator("worker", "error")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text
-
-
-class FindingReport(BaseModel):
-    id: str
-    project_id: str
-    finding_id: str
-    intent_id: str
-    report_markdown: str
-    report_json: dict[str, Any] = Field(default_factory=dict)
-    created_at: str
-
-
-class ReportConcludeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    worker: str
-    report_markdown: str
-    report_json: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("worker", "report_markdown")
-    @classmethod
-    def validate_non_empty_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        return text

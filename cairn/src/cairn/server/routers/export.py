@@ -1,11 +1,19 @@
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import Response
+from __future__ import annotations
+
 from datetime import datetime
 import json
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 import yaml
 
 from cairn.server.db import get_conn
-from cairn.server.services import expire_reason_leases, expire_workers, get_project_or_404, safe_json_object
+from cairn.server.services import (
+    expire_reason_leases,
+    expire_workers,
+    get_project_or_404,
+    safe_json_list,
+)
 
 router = APIRouter(tags=["export"])
 
@@ -30,287 +38,189 @@ def _account_cookies(account) -> list[dict]:
     return [cookie for cookie in cookies if isinstance(cookie, dict)]
 
 
-def _fact_details(fact) -> dict:
-    try:
-        details = json.loads(fact["details_json"] or "{}")
-    except (TypeError, json.JSONDecodeError):
-        return {}
-    return details if isinstance(details, dict) else {}
-
-
-def _fact_entry(fact) -> dict:
-    entry = {"id": fact["id"], "description": fact["description"]}
-    fact_type = fact["fact_type"] if "fact_type" in fact.keys() else "observation"
-    title = fact["title"] if "title" in fact.keys() else None
-    summary = fact["summary"] if "summary" in fact.keys() else None
-    details = _fact_details(fact) if "details_json" in fact.keys() else {}
-    if fact_type != "observation":
-        entry["fact_type"] = fact_type
-    if title:
-        entry["title"] = title
-    if summary:
-        entry["summary"] = summary
-    if details:
-        entry["details"] = details
-    return entry
-
-
 def _load_project_data(conn, project_id: str):
     expire_workers(conn, project_id)
     expire_reason_leases(conn, project_id)
-    proj = get_project_or_404(conn, project_id)
-
+    project = get_project_or_404(conn, project_id)
+    tasks = conn.execute(
+        "SELECT * FROM tasks WHERE project_id = ? ORDER BY creation_time, id",
+        (project_id,),
+    ).fetchall()
+    task_sources = conn.execute(
+        "SELECT task_id, source_id FROM task_sources WHERE project_id = ? ORDER BY task_id, rowid",
+        (project_id,),
+    ).fetchall()
     facts = conn.execute(
-        "SELECT * FROM facts WHERE project_id = ? ORDER BY CASE WHEN id = 'origin' THEN 0 ELSE 1 END, id",
+        "SELECT * FROM facts WHERE project_id = ? ORDER BY creation_time, id",
+        (project_id,),
+    ).fetchall()
+    findings = conn.execute(
+        "SELECT * FROM findings WHERE project_id = ? ORDER BY creation_time, id",
         (project_id,),
     ).fetchall()
     hints = conn.execute(
         "SELECT id, content, creator, created_at FROM hints WHERE project_id = ? ORDER BY created_at, id",
         (project_id,),
     ).fetchall()
-    findings = conn.execute(
-        "SELECT * FROM findings WHERE project_id = ? ORDER BY created_at, id",
-        (project_id,),
-    ).fetchall()
     accounts = conn.execute(
         "SELECT * FROM project_accounts WHERE project_id = ? ORDER BY id",
         (project_id,),
     ).fetchall()
-    intents = conn.execute(
-        "SELECT * FROM intents WHERE project_id = ? ORDER BY created_at, id",
-        (project_id,),
-    ).fetchall()
-    reports = conn.execute(
-        "SELECT * FROM finding_reports WHERE project_id = ? ORDER BY created_at, id",
-        (project_id,),
-    ).fetchall()
 
-    sources_by_intent = {}
-    source_rows = conn.execute(
-        "SELECT intent_id, fact_id FROM intent_sources WHERE project_id = ? ORDER BY intent_id, rowid",
-        (project_id,),
-    ).fetchall()
-    for row in source_rows:
-        sources_by_intent.setdefault(row["intent_id"], []).append(row["fact_id"])
+    sources_by_task = {}
+    for row in task_sources:
+        sources_by_task.setdefault(row["task_id"], []).append(row["source_id"])
 
-    return proj, facts, hints, findings, accounts, intents, sources_by_intent, reports
+    return project, tasks, sources_by_task, facts, findings, hints, accounts
+
+
+def _task_entry(task, sources_by_task: dict[str, list[str]]) -> dict:
+    return {
+        "id": task["id"],
+        "type": task["type"],
+        "description": task["description"],
+        "creation_time": format_export_timestamp(task["creation_time"]),
+        "completion_time": format_export_timestamp(task["completion_time"]),
+        "from": sources_by_task.get(task["id"], []),
+        "to": safe_json_list(task["to"]),
+        "worker": task["worker"],
+        "auth_scope": task["auth_scope"],
+    }
+
+
+def _fact_entry(fact) -> dict:
+    return {
+        "id": fact["id"],
+        "type": fact["type"],
+        "description": fact["description"],
+        "creation_time": format_export_timestamp(fact["creation_time"]),
+        "from": safe_json_list(fact["from"]),
+        "from_task": fact["from_task"],
+        "to": safe_json_list(fact["to"]),
+        "evidence": fact["evidence"],
+    }
+
+
+def _finding_entry(finding) -> dict:
+    return {
+        "id": finding["id"],
+        "type": finding["type"],
+        "description": finding["description"],
+        "creation_time": format_export_timestamp(finding["creation_time"]),
+        "from": safe_json_list(finding["from"]),
+        "from_task": finding["from_task"],
+        "to": safe_json_list(finding["to"]),
+        "report": finding["report"],
+    }
 
 
 def _export_yaml(conn, project_id: str) -> str:
-    proj, facts, hints, findings, accounts, intents, sources_by_intent, reports = _load_project_data(conn, project_id)
-
-    origin_desc = ""
-    for f in facts:
-        if f["id"] == "origin":
-            origin_desc = f["description"]
-
+    project, tasks, sources_by_task, facts, findings, hints, accounts = _load_project_data(conn, project_id)
     data: dict = {
         "project": {
-            "title": proj["title"],
-            "origin": origin_desc,
-            "project_kind": proj["project_kind"],
-            "auth_mode": proj["auth_mode"],
-            "parent_project_id": proj["parent_project_id"],
-            "parent_snapshot_id": proj["parent_snapshot_id"],
-        }
+            "id": project["id"],
+            "title": project["title"],
+            "project_kind": project["project_kind"],
+            "auth_mode": project["auth_mode"],
+            "parent_project_id": project["parent_project_id"],
+            "parent_snapshot_id": project["parent_snapshot_id"],
+        },
+        "origin": {
+            "id": "origin",
+            "description": project["origin"],
+        },
+        "tasks": [_task_entry(task, sources_by_task) for task in tasks],
+        "facts": [_fact_entry(fact) for fact in facts],
+        "findings": [_finding_entry(finding) for finding in findings],
     }
-
-    data["collection"] = {
-        "reason_rounds": proj["collection_reason_rounds"],
-        "explore_rounds": proj["collection_explore_rounds"],
-        "stable_rounds": proj["collection_stable_rounds"],
-        "judge_status": proj["judge_status"],
-        "judged_at": format_export_timestamp(proj["judged_at"]),
-    }
-
     if hints:
         data["hints"] = [
             {
-                "content": h["content"],
-                "creator": h["creator"],
-                "created_at": format_export_timestamp(h["created_at"]),
+                "content": hint["content"],
+                "creator": hint["creator"],
+                "created_at": format_export_timestamp(hint["created_at"]),
             }
-            for h in hints
+            for hint in hints
         ]
-
-    data["facts"] = [_fact_entry(f) for f in facts]
-
-    if findings:
-        data["findings"] = [
-            {
-                "id": f["id"],
-                "title": f["title"],
-                "vulnerability_type": f["vulnerability_type"],
-                "severity": f["severity"],
-                "target": f["target"],
-                "location": f["location"],
-                "impact": f["impact"],
-                "evidence": f["evidence"],
-                "reproduction": f["reproduction"],
-                "remediation": f["remediation"],
-                "status": f["status"],
-                "research_value": f["research_value"],
-                "next_action": f["next_action"],
-                "followup_reason": f["followup_reason"],
-                "followup_intent_description": f["followup_intent_description"],
-                "followup_intent_id": f["followup_intent_id"],
-                "report_status": f["report_status"],
-                "report_intent_id": f["report_intent_id"],
-                "triaged_at": format_export_timestamp(f["triaged_at"]),
-                "fact_id": f["fact_id"],
-                "intent_id": f["intent_id"],
-                "created_at": format_export_timestamp(f["created_at"]),
-            }
-            for f in findings
-        ]
-
     if accounts:
         data["accounts"] = [
-            {
-                "id": account["id"],
-                "label": account["label"],
-                "cookies": cookies,
-            }
+            {"id": account["id"], "label": account["label"], "cookies": cookies}
             for account in accounts
             if (cookies := _account_cookies(account))
         ]
-
-    intent_list = []
-    for i in intents:
-        entry: dict = {
-            "from": sources_by_intent.get(i["id"], []),
-            "to": i["to_fact_id"],
-            "description": i["description"],
-            "creator": i["creator"],
-            "worker": i["worker"],
-            "created_at": format_export_timestamp(i["created_at"]),
-            "concluded_at": format_export_timestamp(i["concluded_at"]),
-            "intent_kind": i["intent_kind"],
-            "task_mode": i["task_mode"],
-            "finding_id": i["finding_id"],
-            "auth_scope": i["auth_scope"],
-        }
-        intent_list.append(entry)
-
-    if intent_list:
-        data["intents"] = intent_list
-
-    if reports:
-        data["reports"] = [
-            {
-                "id": report["id"],
-                "finding_id": report["finding_id"],
-                "intent_id": report["intent_id"],
-                "report_markdown": report["report_markdown"],
-                "report_json": safe_json_object(report["report_json"]),
-                "created_at": format_export_timestamp(report["created_at"]),
-            }
-            for report in reports
-        ]
-
     return yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
 
 def _export_timeline(conn, project_id: str) -> str:
-    proj, facts, hints, findings, accounts, intents, sources_by_intent, reports = _load_project_data(conn, project_id)
-
-    facts_by_id = {f["id"]: f["description"] for f in facts}
-
-    events: list[tuple[str, int, str]] = []  # (timestamp, order, text)
+    project, tasks, sources_by_task, facts, findings, hints, accounts = _load_project_data(conn, project_id)
+    facts_by_id = {fact["id"]: fact["description"] for fact in facts}
+    findings_by_id = {finding["id"]: finding["description"] for finding in findings}
+    events: list[tuple[str, int, str]] = []
     order = 0
 
-    origin_desc = facts_by_id.get("origin", "")
-    ts = format_export_timestamp(proj["created_at"]) or ""
-    block = (
-        f"[{ts}] PROJECT CREATED\n"
-        f"  kind: {proj['project_kind']}\n"
-        f"  auth: {proj['auth_mode']}\n"
-        f"  accounts: {len(accounts)}\n"
-        f"  origin: {origin_desc}"
+    ts = format_export_timestamp(project["created_at"]) or ""
+    events.append(
+        (
+            project["created_at"] or "",
+            order,
+            f"[{ts}] PROJECT CREATED\n  kind: {project['project_kind']}\n  auth: {project['auth_mode']}\n  accounts: {len(accounts)}\n  origin: {project['origin']}",
+        )
     )
-    events.append((proj["created_at"] or "", order, block))
     order += 1
 
-    for h in hints:
-        ts = format_export_timestamp(h["created_at"]) or ""
-        block = f"[{ts}] HINT by {h['creator']}\n  {h['content']}"
-        events.append((h["created_at"] or "", order, block))
+    for hint in hints:
+        ts = format_export_timestamp(hint["created_at"]) or ""
+        events.append((hint["created_at"] or "", order, f"[{ts}] HINT by {hint['creator']}\n  {hint['content']}"))
         order += 1
 
-    for i in intents:
-        src = sources_by_intent.get(i["id"], [])
-        from_str = ", ".join(src)
-
-        ts = format_export_timestamp(i["created_at"]) or ""
-        meta = f"  from: {from_str}"
-        meta += f"\n  kind: {i['intent_kind']}"
-        meta += f"\n  task_mode: {i['task_mode']}"
-        if i["auth_scope"]:
-            meta += f"\n  auth_scope: {i['auth_scope']}"
-        if i["worker"] and not i["concluded_at"]:
-            meta += f"\n  worker: {i['worker']} (in progress)"
-        block = f"[{ts}] INTENT DECLARED {i['id']} by {i['creator']}\n{meta}\n  {i['description']}"
-        events.append((i["created_at"] or "", order, block))
-        order += 1
-
-        if not i["concluded_at"] or not i["to_fact_id"]:
-            continue
-
-        ts = format_export_timestamp(i["concluded_at"]) or ""
-        actor = i["worker"] or i["creator"]
-
-        fact_desc = facts_by_id.get(i["to_fact_id"], "")
-        meta = f"  from: {from_str}"
-        if i["auth_scope"]:
-            meta += f"\n  auth_scope: {i['auth_scope']}"
-        block = f"[{ts}] INTENT CONCLUDED {i['id']} by {actor}\n{meta}\n  produced: {i['to_fact_id']}\n  {fact_desc}"
-
-        events.append((i["concluded_at"] or "", order, block))
-        order += 1
-
-    for f in findings:
-        ts = format_export_timestamp(f["created_at"]) or ""
+    for task in tasks:
+        ts = format_export_timestamp(task["creation_time"]) or ""
+        source_text = ", ".join(sources_by_task.get(task["id"], []))
         block = (
-            f"[{ts}] FINDING {f['id']} [{f['severity']}] {f['title']}\n"
-            f"  type: {f['vulnerability_type']}\n"
-            f"  target: {f['target']}\n"
-            f"  location: {f['location']}\n"
-            f"  fact: {f['fact_id']}\n"
-            f"  intent: {f['intent_id']}\n"
-            f"  status: {f['status']}\n"
-            f"  research_value: {f['research_value']}\n"
-            f"  next_action: {f['next_action']}\n"
-            f"  report_status: {f['report_status']}\n"
-            f"  impact: {f['impact']}\n"
-            f"  evidence: {f['evidence']}"
+            f"[{ts}] TASK CREATED {task['id']}\n"
+            f"  type: {task['type']}\n"
+            f"  from: {source_text}\n"
+            f"  {task['description']}"
         )
-        events.append((f["created_at"] or "", order, block))
+        events.append((task["creation_time"] or "", order, block))
         order += 1
+        if task["completion_time"]:
+            produced = safe_json_list(task["to"])
+            produced_text = ", ".join(produced)
+            desc = "\n".join(
+                f"  {node_id}: {facts_by_id.get(node_id) or findings_by_id.get(node_id) or ''}"
+                for node_id in produced
+            )
+            ts = format_export_timestamp(task["completion_time"]) or ""
+            events.append(
+                (
+                    task["completion_time"] or "",
+                    order,
+                    f"[{ts}] TASK CONCLUDED {task['id']}\n  produced: {produced_text}\n{desc}",
+                )
+            )
+            order += 1
 
-    for report in reports:
-        ts = format_export_timestamp(report["created_at"]) or ""
-        block = (
-            f"[{ts}] REPORT {report['id']} for {report['finding_id']}\n"
-            f"  intent: {report['intent_id']}\n"
-            f"  {report['report_markdown']}"
-        )
-        events.append((report["created_at"] or "", order, block))
-        order += 1
+    for finding in findings:
+        if finding["report"]:
+            ts = format_export_timestamp(finding["creation_time"]) or ""
+            events.append(
+                (
+                    finding["creation_time"] or "",
+                    order,
+                    f"[{ts}] REPORT PATH {finding['id']}\n  {finding['report']}",
+                )
+            )
+            order += 1
 
-    events.sort(key=lambda e: (e[0], e[1]))
-
-    return "\n\n".join(e[2] for e in events) + "\n"
+    events.sort(key=lambda event: (event[0], event[1]))
+    return "\n\n".join(event[2] for event in events) + "\n"
 
 
 @router.get("/projects/{project_id}/export")
 def export_project(project_id: str, format: str = "yaml"):
     if format not in ("yaml", "timeline"):
         raise HTTPException(400, "Supported formats: yaml, timeline")
-
     with get_conn() as conn:
-        if format == "timeline":
-            text = _export_timeline(conn, project_id)
-        else:
-            text = _export_yaml(conn, project_id)
-
+        text = _export_timeline(conn, project_id) if format == "timeline" else _export_yaml(conn, project_id)
         return Response(content=text, media_type="text/plain")

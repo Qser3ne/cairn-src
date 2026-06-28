@@ -28,3 +28,14 @@ def test_deploy_script_directly_overwrites_with_local_exclusions() -> None:
     assert "--exclude='datas/'" in content
     assert "--exclude='datas.backup/'" in content
     assert 'log "deployment completed"' in content
+
+
+def test_python_ci_runs_for_deploy_scripts_and_dispatch_configs() -> None:
+    workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "python-ci.yml"
+
+    content = workflow.read_text()
+
+    assert '"cairn/**"' in content
+    assert '"scripts/**"' in content
+    assert '"dispatch*.yaml"' in content
+    assert '".github/workflows/python-ci.yml"' in content

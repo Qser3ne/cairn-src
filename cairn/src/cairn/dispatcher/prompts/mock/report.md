@@ -1,6 +1,6 @@
 {
   "phase": "report",
-  "intent_id": "{intent_id}",
-  "intent_description": "{intent_description}",
-  "draft_from": "validated findings"
+  "finding_id": "{finding_id}",
+  "finding_description": "{finding_description}",
+  "draft_from": "findings"
 }

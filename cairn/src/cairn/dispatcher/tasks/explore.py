@@ -24,7 +24,7 @@ from cairn.dispatcher.tasks.common import (
     write_graph_snapshot_reference,
 )
 from cairn.dispatcher.workers.registry import get_driver
-from cairn.server.models import Intent, ProjectAccount, ProjectDetail
+from cairn.server.models import ProjectAccount, ProjectDetail, Task
 
 LOG = logging.getLogger(__name__)
 
@@ -35,20 +35,11 @@ def run_explore_task(
     container_manager: ContainerManager,
     project: ProjectDetail,
     export_yaml: str,
-    intent: Intent,
+    intent: Task,
     worker: WorkerConfig,
     cancellation: TaskCancellation,
     account: ProjectAccount | None = None,
 ) -> str:
-    if intent.intent_kind == "report" or intent.task_mode == "report":
-        LOG.warning(
-            "report intent cannot run as explore project=%s intent=%s worker=%s",
-            project.project.id,
-            intent.id,
-            worker.name,
-        )
-        best_effort_release(client, project.project.id, intent.id, worker.name)
-        return "failed"
     driver = get_driver(worker.type)
     task_started = time.perf_counter()
     healthcheck_timeout = config.runtime.healthcheck_timeout
@@ -116,6 +107,8 @@ def run_explore_task(
                     export_yaml.strip(),
                     phase="explore_execute",
                 ),
+                "task_id": intent.id,
+                "task_description": intent.description,
                 "intent_id": intent.id,
                 "intent_description": intent.description,
                 "auth_context": format_auth_context(project, intent, account),
@@ -167,7 +160,7 @@ def run_explore_task(
                 model_output = driver.extract_response_text(first.stdout, first.stderr)
                 payload = parse_json_output(model_output)
                 kind, fact_data = validate_explore_payload(
-                    _payload_for_validation(payload, intent.task_mode),
+                    _payload_for_vulnerability(payload, intent.task_mode),
                     task_mode=intent.task_mode,
                 )
             except Exception as exc:
@@ -216,11 +209,8 @@ def run_explore_task(
                 intent.id,
                 worker.name,
                 fact_data["description"],
-                fact_type=fact_data["fact_type"],
-                title=fact_data["title"],
-                summary=fact_data["summary"],
-                details=fact_data["details"],
-                findings=_payload_findings_for_project(payload, intent.task_mode),
+                evidence=fact_data["evidence"],
+                findings=fact_data.get("findings"),
                 source="explore_execute",
                 phase_ms=execute_ms,
                 total_ms=int((time.perf_counter() - task_started) * 1000),
@@ -281,7 +271,7 @@ def _try_conclude_fallback(
     worker: WorkerConfig,
     driver,
     project: ProjectDetail,
-    intent: Intent,
+    intent: Task,
     export_yaml: str,
     session: str | None,
     lease: HeartbeatLease,
@@ -335,6 +325,8 @@ def _try_conclude_fallback(
                 export_yaml.strip(),
                 phase="explore_conclude",
             ),
+            "task_id": intent.id,
+            "task_description": intent.description,
             "intent_id": intent.id,
             "intent_description": intent.description,
             "auth_context": format_auth_context(project, intent, account),
@@ -388,7 +380,7 @@ def _try_conclude_fallback(
         model_output = driver.extract_response_text(result.stdout, result.stderr)
         payload = parse_json_output(model_output)
         kind, fact_data = validate_explore_payload(
-            _payload_for_validation(payload, intent.task_mode),
+            _payload_for_vulnerability(payload, intent.task_mode),
             task_mode=intent.task_mode,
         )
     except Exception as exc:
@@ -422,52 +414,19 @@ def _try_conclude_fallback(
         intent.id,
         worker.name,
         fact_data["description"],
-        fact_type=fact_data["fact_type"],
-        title=fact_data["title"],
-        summary=fact_data["summary"],
-        details=fact_data["details"],
-        findings=_payload_findings_for_project(payload, intent.task_mode),
+        evidence=fact_data["evidence"],
+        findings=fact_data.get("findings"),
         source="explore_conclude",
         phase_ms=conclude_ms,
     )
     return outcome
 
 
-def _payload_findings_for_project(payload: dict, task_mode: str) -> list[dict] | None:
-    findings = _payload_findings(payload)
-    if task_mode == "collection":
-        if findings:
-            LOG.warning("dropping findings from collection explore payload count=%s", len(findings))
-        return None
-    return findings
+def _payload_for_vulnerability(payload: dict, task_mode: str) -> dict:
+    return payload
 
 
-def _payload_for_validation(payload: dict, task_mode: str) -> dict:
-    if task_mode != "collection":
-        return payload
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    if not isinstance(data, dict) or "findings" not in data:
-        return payload
-    cleaned_data = dict(data)
-    cleaned_data.pop("findings", None)
-    if isinstance(payload.get("data"), dict):
-        cleaned_payload = dict(payload)
-        cleaned_payload["data"] = cleaned_data
-        return cleaned_payload
-    return cleaned_data
-
-
-def _payload_findings(payload: dict) -> list[dict] | None:
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    if not isinstance(data, dict):
-        return None
-    findings = data.get("findings")
-    if not isinstance(findings, list) or not findings:
-        return None
-    return [finding for finding in findings if isinstance(finding, dict)]
-
-
-def format_auth_context(project: ProjectDetail, intent: Intent, account: ProjectAccount | None) -> str:
+def format_auth_context(project: ProjectDetail, intent: Task, account: ProjectAccount | None) -> str:
     if intent.auth_scope != "authenticated":
         return (
             "Current intent auth_scope is anonymous. Explore only the unauthenticated surface. "
@@ -499,10 +458,7 @@ def format_auth_context(project: ProjectDetail, intent: Intent, account: Project
 
 
 def _project_origin(project: ProjectDetail) -> str:
-    for fact in project.facts:
-        if fact.id == "origin":
-            return fact.description
-    return ""
+    return project.origin.description
 
 
 def _run_process(

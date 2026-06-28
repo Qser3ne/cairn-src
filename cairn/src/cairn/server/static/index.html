@@ -323,10 +323,10 @@
                   <span x-text="reasonBadgeText(p.reason, true)"></span>
                 </div>
               </template>
-              <template x-if="p.working_intent_count > 0">
+              <template x-if="p.working_task_count > 0">
                 <div class="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 intent-chip-running">
                   <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="8.5"/></svg>
-                  <span x-text="workingIntentBadgeText(p.working_intent_count)"></span>
+                  <span x-text="workingIntentBadgeText(p.working_task_count)"></span>
                 </div>
               </template>
             </div>
@@ -338,18 +338,18 @@
             </span>
             <span class="flex items-center gap-1">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
-              <span x-text="p.intent_count"></span>
+              <span x-text="p.task_count"></span>
             </span>
-            <template x-if="p.working_intent_count > 0">
+            <template x-if="p.working_task_count > 0">
               <span class="flex items-center gap-1 text-amber-500">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/></svg>
-                <span x-text="p.working_intent_count"></span>
+                <span x-text="p.working_task_count"></span>
               </span>
             </template>
-            <template x-if="p.unclaimed_intent_count > 0">
+            <template x-if="p.unclaimed_task_count > 0">
               <span class="flex items-center gap-1 text-slate-400">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
-                <span x-text="p.unclaimed_intent_count"></span>
+                <span x-text="p.unclaimed_task_count"></span>
               </span>
             </template>
             <span class="flex items-center gap-1">
@@ -433,7 +433,7 @@
     <div class="flex-1"></div>
     <div class="flex items-center gap-4 text-xs text-slate-400">
       <span x-text="`${project.facts.length} facts`"></span>
-      <span x-text="`${project.intents.length} intents`"></span>
+      <span x-text="`${project.tasks.length} tasks`"></span>
       <span x-show="project.findings?.length" x-text="`${project.findings.length} findings`"></span>
     </div>
     <div class="flex items-center gap-1.5">
@@ -549,7 +549,7 @@
           <button @click="openCreateIntent()" :disabled="!canActOnSelectedFacts()"
             class="px-3 py-1.5 bg-white/90 backdrop-blur border border-brand-200 text-brand-600 rounded-lg shadow-sm text-xs font-medium hover:bg-brand-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
-            Intent
+            Task
           </button>
         </div>
         <div class="flex gap-1.5" x-show="projectCanWriteHints()">
@@ -609,7 +609,7 @@
             <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
               <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
                 <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">Task Modes</p>
-                <p class="mt-1 text-sm text-slate-500">Collection feeds validation; validated findings can queue reports.</p>
+                <p class="mt-1 text-sm text-slate-500">Collection feeds vulnerability; validated findings can queue reports.</p>
               </div>
               <div class="p-4 grid grid-cols-1 gap-2 text-xs">
                 <div class="rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
@@ -620,8 +620,8 @@
                   <p class="mt-1 text-slate-600" x-text="collectionCoverageSummary()"></p>
                 </div>
                 <div class="rounded-xl border border-rose-100 bg-rose-50/60 px-3 py-2">
-                  <p class="text-[10px] font-semibold uppercase tracking-widest text-rose-500">Validation Work</p>
-                  <p class="mt-1 text-slate-600" x-text="validationWorkSummary()"></p>
+                  <p class="text-[10px] font-semibold uppercase tracking-widest text-rose-500">Vulnerability Work</p>
+                  <p class="mt-1 text-slate-600" x-text="vulnerabilityWorkSummary()"></p>
                 </div>
                 <div class="rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2">
                   <p class="text-[10px] font-semibold uppercase tracking-widest text-violet-500">Report Queue</p>
@@ -631,42 +631,41 @@
             </section>
             <div class="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-5 py-8 text-center shadow-sm">
               <p class="text-sm text-slate-400">Click a node or edge</p>
-              <p class="text-xs text-slate-300 mt-1">Intent details include collection, validation, and report task modes</p>
+              <p class="text-xs text-slate-300 mt-1">Task details include collection and vulnerability task modes</p>
             </div>
           </div>
         </template>
-        <template x-if="selectedNode && selectedNode.type === 'fact' && selectedFacts.length > 1">
+        <template x-if="selectedNode && selectedFacts.length > 1">
           <div class="space-y-3">
-            <template x-for="fact in selectedFactRecords()" :key="fact.id">
+            <template x-for="source in selectedSourceRecords()" :key="source.id">
               <article class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80">
                   <div class="flex items-center justify-between gap-3">
                     <div class="flex items-center gap-2 min-w-0">
-                      <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold shrink-0"
-                        :class="{
-                          'bg-teal-50 text-teal-700': fact.id === 'origin',
-                          'bg-brand-50 text-brand-700': fact.id !== 'origin'
-                        }" x-text="fact.id"></span>
-                      <span class="text-[11px] text-slate-400 uppercase tracking-wider">Fact</span>
+                      <span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold shrink-0" :class="sourceNodeBadgeClass(source)" x-text="source.id"></span>
+                      <span class="text-[11px] text-slate-400 uppercase tracking-wider" x-text="sourceNodeTypeLabel(source)"></span>
                     </div>
-                    <button type="button" @click="removeFactSelection(fact.id)"
+                    <button type="button" @click="removeFactSelection(source.id)"
                       class="text-[11px] text-slate-400 hover:text-slate-600 transition">Remove</button>
                   </div>
                 </div>
                 <div class="p-4 space-y-3">
-                  <template x-if="factTitle(fact)">
-                    <div>
-                      <p class="text-sm font-semibold text-slate-800 break-words" x-text="factTitle(fact)"></p>
-                      <p x-show="factSummary(fact)" class="mt-1 text-xs text-slate-500 leading-relaxed break-words" x-text="factSummary(fact)"></p>
-                    </div>
-                  </template>
-                  <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="fact.description"></p>
+                  <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="source.description"></p>
                   <div class="text-xs text-slate-400 space-y-1.5">
-                    <template x-if="fact.id === 'origin'">
-                      <p>Project starting point</p>
+                    <template x-if="source.type">
+                      <p x-text="source.type"></p>
                     </template>
-                    <template x-if="fact.id !== 'origin' && getProducingIntent(fact.id)">
-                      <p x-text="`Produced by ${getProducingIntent(fact.id).id} from ${getProducingIntent(fact.id).from.join(', ')}`"></p>
+                    <template x-if="source.from?.length">
+                      <p x-text="`From ${source.from.join(', ')}`"></p>
+                    </template>
+                    <template x-if="source.from_task">
+                      <p x-text="`Produced by ${source.from_task}`"></p>
+                    </template>
+                    <template x-if="source.evidence">
+                      <p class="font-mono break-all" x-text="`Evidence ${source.evidence}`"></p>
+                    </template>
+                    <template x-if="source.report">
+                      <p class="font-mono break-all" x-text="`Report ${source.report}`"></p>
                     </template>
                   </div>
                 </div>
@@ -683,37 +682,14 @@
                     'bg-teal-50 text-teal-700': selectedFactId() === 'origin',
                     'bg-brand-50 text-brand-700': selectedFactId() !== 'origin'
                   }" x-text="selectedFactId()"></span>
-                <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Fact</span>
-                <template x-if="selectedFactRecord().fact_type && selectedFactRecord().fact_type !== 'observation'">
-                  <span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-semibold uppercase tracking-[0.12em]" x-text="selectedFactRecord().fact_type"></span>
+                <span class="text-[11px] text-slate-400 font-medium uppercase tracking-wider" x-text="selectedFactId() === 'origin' ? 'Origin' : 'Fact'"></span>
+                <template x-if="selectedFactRecord().type">
+                  <span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-semibold uppercase tracking-[0.12em]" x-text="selectedFactRecord().type"></span>
                 </template>
               </div>
             </div>
             <div class="p-4 space-y-4">
-              <template x-if="factTitle(selectedFactRecord())">
-                <div>
-                  <p class="text-sm font-semibold text-slate-800 break-words" x-text="factTitle(selectedFactRecord())"></p>
-                  <p x-show="factSummary(selectedFactRecord())" class="mt-1 text-xs text-slate-500 leading-relaxed break-words" x-text="factSummary(selectedFactRecord())"></p>
-                </div>
-              </template>
               <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedFactRecord().description"></p>
-              <template x-if="hasFeatureFactDetails(selectedFactRecord())">
-                <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
-                  <p class="text-[10px] font-semibold text-emerald-500 uppercase tracking-widest">Feature Surface</p>
-                  <template x-if="factDetailList(selectedFactRecord(), 'user_actions').length > 0">
-                    <div><span class="text-slate-400">Actions</span><div class="mt-1 flex flex-wrap gap-1"><template x-for="item in factDetailList(selectedFactRecord(), 'user_actions')" :key="item"><span class="rounded bg-slate-100 px-2 py-1 text-[11px] text-slate-600" x-text="item"></span></template></div></div>
-                  </template>
-                  <template x-if="factDetailList(selectedFactRecord(), 'routes').length > 0">
-                    <div><span class="text-slate-400">Routes</span><div class="mt-1 flex flex-wrap gap-1"><template x-for="item in factDetailList(selectedFactRecord(), 'routes')" :key="item"><span class="rounded bg-indigo-50 px-2 py-1 font-mono text-[11px] text-indigo-700" x-text="item"></span></template></div></div>
-                  </template>
-                  <template x-if="factDetailList(selectedFactRecord(), 'apis').length > 0">
-                    <div><span class="text-slate-400">APIs</span><div class="mt-1 flex flex-wrap gap-1"><template x-for="item in factDetailList(selectedFactRecord(), 'apis')" :key="item"><span class="rounded bg-rose-50 px-2 py-1 font-mono text-[11px] text-rose-700" x-text="item"></span></template></div></div>
-                  </template>
-                  <template x-if="factDetailList(selectedFactRecord(), 'evidence_refs').length > 0">
-                    <div><span class="text-slate-400">Evidence</span><div class="mt-1 space-y-1"><template x-for="item in factDetailList(selectedFactRecord(), 'evidence_refs')" :key="item"><p class="font-mono text-[11px] text-slate-600 break-all" x-text="item"></p></template></div></div>
-                  </template>
-                </div>
-              </template>
               <div class="space-y-3 text-xs">
                 <template x-if="selectedFactId() === 'origin'">
                   <div class="pt-4 border-t border-slate-100">
@@ -721,16 +697,39 @@
                     <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Role</span><span class="text-slate-600 text-right break-words">Project starting point</span></div>
                   </div>
                 </template>
-                <template x-if="selectedFactId() !== 'origin' && selectedFactProducingIntent()">
+                <template x-if="selectedFactId() !== 'origin'">
                   <div class="pt-4 border-t border-slate-100 space-y-3">
-                    <p class="text-[10px] font-semibold text-brand-500 uppercase tracking-widest">Produced By</p>
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Intent</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().id"></span></div>
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().from.join(', ')"></span></div>
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().creator"></span></div>
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedFactProducingIntent().worker || '—'"></span></div>
-                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedFactProducingIntent().concluded_at || selectedFactProducingIntent().created_at)"></span></div>
+                    <p class="text-[10px] font-semibold text-brand-500 uppercase tracking-widest">Fact</p>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Type</span><span class="text-slate-600 text-right break-all" x-text="selectedFactRecord().type || '—'"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactRecord().from?.join(', ') || '—'"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Output Task</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactRecord().from_task || '—'"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactRecord().to?.join(', ') || '—'"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Evidence Path</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFactRecord().evidence || '—'"></span></div>
+                    <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Created</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedFactRecord().creation_time) || '—'"></span></div>
                   </div>
                 </template>
+              </div>
+            </div>
+          </section>
+        </template>
+        <template x-if="selectedNode && selectedNode.type === 'finding' && selectedFindingRecord()">
+          <section class="rounded-2xl border border-rose-200/80 bg-white shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b border-rose-100 bg-rose-50/70">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 text-[10px] font-mono font-bold" x-text="selectedFindingId()"></span>
+                <span class="text-[11px] text-rose-500 font-medium uppercase tracking-wider">Finding</span>
+                <span class="px-2 py-0.5 rounded-md bg-white text-rose-700 text-[10px] font-semibold uppercase tracking-[0.12em]" x-text="selectedFindingRecord().type"></span>
+              </div>
+            </div>
+            <div class="p-4 space-y-4">
+              <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedFindingRecord().description"></p>
+              <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Type</span><span class="text-slate-600 text-right break-all" x-text="selectedFindingRecord().type || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFindingRecord().from?.join(', ') || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Output Task</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFindingRecord().from_task || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFindingRecord().to?.join(', ') || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Report Path</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedFindingRecord().report || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Created</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedFindingRecord().creation_time) || '—'"></span></div>
               </div>
             </div>
           </section>
@@ -742,8 +741,8 @@
                 <span class="px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-[10px] font-mono font-bold" x-text="selectedIntentId()"></span>
                 <span class="text-[11px] font-medium" :class="intentStatusClass(selectedIntentRecord())" x-text="intentStatusLabel(selectedIntentRecord())"></span>
                 <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.12em]"
-                  :class="intentTaskModeBadgeClass(selectedIntentRecord().task_mode)"
-                  x-text="intentTaskModeLabel(selectedIntentRecord().task_mode)"></span>
+                  :class="intentTaskModeBadgeClass(taskMode(selectedIntentRecord()))"
+                  x-text="intentTaskModeLabel(taskMode(selectedIntentRecord()))"></span>
                 <template x-if="selectedIntentRecord().auth_scope">
                   <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-[0.12em]"
                     :class="intentAuthScopeBadgeClass(selectedIntentRecord().auth_scope)"
@@ -755,17 +754,17 @@
               <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words" x-text="selectedIntentRecord().description"></p>
               <div class="pt-4 border-t border-slate-100 space-y-3 text-xs">
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().from.join(', ')"></span></div>
-                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="selectedIntentRecord().to || '—'"></span></div>
-                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Task Mode</span><span class="text-slate-600 text-right break-all" x-text="intentTaskModeLabel(selectedIntentRecord().task_mode)"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="taskOutputs(selectedIntentRecord()).join(', ') || '—'"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Task Mode</span><span class="text-slate-600 text-right break-all" x-text="intentTaskModeLabel(taskMode(selectedIntentRecord()))"></span></div>
                 <template x-if="selectedIntentRecord().auth_scope">
                   <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Auth Scope</span><span class="text-slate-600 text-right break-all" x-text="intentAuthScopeLabel(selectedIntentRecord().auth_scope)"></span></div>
                 </template>
-                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Creator</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().creator"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Owner</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().worker || 'dispatcher'"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Worker</span><span class="text-slate-600 text-right break-all" x-text="selectedIntentRecord().worker || '—'"></span></div>
                 <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Heartbeat</span><span class="text-slate-600 text-right break-words" x-text="selectedIntentRecord().last_heartbeat_at ? formatTime(selectedIntentRecord().last_heartbeat_at) : '—'"></span></div>
-                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Created</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedIntentRecord().created_at)"></span></div>
-                <template x-if="selectedIntentRecord().concluded_at">
-                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedIntentRecord().concluded_at)"></span></div>
+                <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Created</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedIntentRecord().creation_time)"></span></div>
+                <template x-if="selectedIntentRecord().completion_time">
+                  <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Concluded</span><span class="text-slate-600 text-right break-words" x-text="formatTime(selectedIntentRecord().completion_time)"></span></div>
                 </template>
               </div>
             </div>
@@ -814,24 +813,21 @@
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="font-mono text-[10px] font-bold text-rose-700" x-text="finding.id"></span>
-                    <span class="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-600" x-text="finding.severity"></span>
+                    <span class="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-600" x-text="finding.type"></span>
                   </div>
-                  <p class="mt-1 text-sm font-semibold text-slate-700 break-words" x-text="finding.title"></p>
+                  <p class="mt-1 text-sm font-semibold text-slate-700 break-words" x-text="finding.description"></p>
                 </div>
-                <span class="shrink-0 rounded-md bg-slate-50 px-2 py-1 text-[10px] text-slate-500" x-text="finding.status"></span>
+                <span class="shrink-0 rounded-md bg-slate-50 px-2 py-1 text-[10px] text-slate-500" x-text="formatTime(finding.creation_time)"></span>
               </div>
             </div>
             <div class="p-4 space-y-2 text-xs">
-              <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Type</span><span class="text-slate-600 text-right break-words" x-text="finding.vulnerability_type"></span></div>
-              <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Target</span><span class="text-slate-600 text-right break-words" x-text="finding.target || '—'"></span></div>
-              <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Location</span><span class="text-slate-600 text-right break-words" x-text="finding.location || '—'"></span></div>
+              <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Type</span><span class="text-slate-600 text-right break-words" x-text="finding.type"></span></div>
+              <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">From</span><span class="font-mono text-slate-600 text-right break-all" x-text="finding.from?.join(', ') || '—'"></span></div>
+              <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">Output Task</span><span class="font-mono text-slate-600 text-right break-all" x-text="finding.from_task || '—'"></span></div>
+              <div class="flex items-start justify-between gap-3"><span class="text-slate-400 shrink-0">To</span><span class="font-mono text-slate-600 text-right break-all" x-text="finding.to?.join(', ') || '—'"></span></div>
               <div class="pt-2 border-t border-slate-100">
-                <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1">Impact</p>
-                <p class="text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="finding.impact || '—'"></p>
-              </div>
-              <div class="pt-2 border-t border-slate-100">
-                <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1">Evidence</p>
-                <p class="text-slate-600 leading-relaxed whitespace-pre-wrap break-words" x-text="finding.evidence || '—'"></p>
+                <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1">Report Path</p>
+                <p class="font-mono text-slate-600 leading-relaxed break-all" x-text="finding.report || '—'"></p>
               </div>
             </div>
           </button>
@@ -971,10 +967,10 @@
   </div>
 </div>
 
-<!-- Create Intent -->
+<!-- Create Task -->
 <div x-show="showIntentModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showIntentModal = false">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200/60" @click.stop>
-    <h3 class="text-base font-semibold text-slate-700 mb-1">New Intent</h3>
+    <h3 class="text-base font-semibold text-slate-700 mb-1">New Task</h3>
     <div class="mb-4">
       <label class="text-[11px] text-slate-400 mb-1 block font-medium">From facts</label>
       <div class="w-full px-3 py-2 border border-slate-200 rounded-xl bg-slate-50 min-h-[42px] flex flex-wrap gap-1.5 items-center">
@@ -994,10 +990,10 @@
             <span class="block text-sm font-medium">Collection</span>
             <span class="block text-[11px] opacity-70">map reachable surface</span>
           </button>
-          <button type="button" @click="intentForm.task_mode = 'validation'"
+          <button type="button" @click="intentForm.task_mode = 'vulnerability'"
             class="rounded-lg border px-3 py-2 text-left transition"
-            :class="intentForm.task_mode === 'validation' ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'">
-            <span class="block text-sm font-medium">Validation</span>
+            :class="intentForm.task_mode === 'vulnerability' ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'">
+            <span class="block text-sm font-medium">Vulnerability</span>
             <span class="block text-[11px] opacity-70">verify vulnerability</span>
           </button>
         </div>
@@ -1034,7 +1030,7 @@
 <!-- Conclude -->
 <div x-show="showConcludeModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center overlay" @click.self="showConcludeModal = false">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200/60" @click.stop>
-    <h3 class="text-base font-semibold text-slate-700 mb-1" x-text="concludeFormIsReport() ? 'Submit Report' : 'Conclude Intent'"></h3>
+    <h3 class="text-base font-semibold text-slate-700 mb-1" x-text="concludeFormIsReport() ? 'Submit Report Path' : 'Conclude Task'"></h3>
     <p class="text-xs text-slate-400 mb-4 font-mono" x-text="concludeForm.intentId"></p>
     <div class="space-y-3">
       <textarea x-model="concludeForm.description" :placeholder="concludeFormIsReport() ? 'Report markdown' : 'What did you find? (new fact)'" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition placeholder:text-slate-300"></textarea>
@@ -1120,8 +1116,8 @@
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 border border-slate-200/60" @click.stop>
     <h3 class="text-base font-semibold text-slate-700 mb-4">Server Settings</h3>
     <div>
-      <label class="text-[11px] text-slate-400 mb-1 block font-medium">Intent timeout (seconds)</label>
-      <input type="number" x-model.number="settingsForm.intent_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
+      <label class="text-[11px] text-slate-400 mb-1 block font-medium">Task timeout (seconds)</label>
+      <input type="number" x-model.number="settingsForm.task_timeout" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition">
     </div>
     <div class="mt-4">
       <label class="text-[11px] text-slate-400 mb-1 block font-medium">Reason timeout (seconds)</label>
@@ -1245,12 +1241,12 @@ function cairnApp() {
       accounts: [{ label: '', cookies: [{ name: '', value: '' }] }],
       hints: [{ content: '' }],
     },
-    intentForm: { description: '', task_mode: 'validation', auth_scope: 'anonymous' },
+    intentForm: { description: '', task_mode: 'vulnerability', auth_scope: 'anonymous' },
     concludeForm: { description: '', intentId: '', findingsJson: '', intentKind: '', taskMode: '' },
     hintForm: { content: '' },
     renameForm: { projectId: '', originalTitle: '', title: '' },
     localPrefs: { actor_name: 'Human', layout_mode: 'dagre_tb' },
-    settingsForm: { intent_timeout: 5, reason_timeout: 5, initial_collection_rounds: 5, collection_worker_limit: 1 },
+    settingsForm: { task_timeout: 5, reason_timeout: 5, initial_collection_rounds: 5, collection_worker_limit: 1 },
     deleteConfirm: { id: '', title: '' },
     isDeletingProject: false,
     yamlPreviewTitle: '',
@@ -1544,7 +1540,7 @@ function cairnApp() {
 
     openIntentNodeLabel(intent) {
       if (intent.intent_kind === 'report') return 'R';
-      return intent.task_mode === 'collection' ? 'C' : 'V';
+      return this.taskMode(intent) === 'collection' ? 'C' : 'V';
     },
 
     isReportIntent(intent) {
@@ -1558,7 +1554,7 @@ function cairnApp() {
     intentTaskModeLabel(mode) {
       if (mode === 'collection') return 'Collection';
       if (mode === 'report') return 'Report';
-      return 'Validation';
+      return 'Vulnerability';
     },
 
     intentTaskModeShortLabel(mode) {
@@ -1593,7 +1589,7 @@ function cairnApp() {
 
     intentGraphLabel(intent) {
       const scope = this.intentAuthScopeShortLabel(intent.auth_scope);
-      const mode = this.intentTaskModeShortLabel(intent.task_mode);
+      const mode = this.intentTaskModeShortLabel(this.taskMode(intent));
       const prefix = [mode, scope].filter(Boolean).join('/');
       return prefix ? `[${prefix}] ${intent.description}` : intent.description;
     },
@@ -1610,8 +1606,21 @@ function cairnApp() {
       return this.projects.filter(project => project.status === status).length;
     },
 
+    taskOutputs(task) {
+      if (!task?.to) return [];
+      return Array.isArray(task.to) ? task.to : [task.to];
+    },
+
+    taskMode(task) {
+      if (!task) return '';
+      if (task.task_mode) return task.task_mode;
+      if (task.type === 'collection_task') return 'collection';
+      if (task.type === 'vulnerability_task') return 'vulnerability';
+      return '';
+    },
+
     intentsByTaskMode(mode) {
-      return (this.project?.intents || []).filter(intent => intent.task_mode === mode);
+      return (this.project?.tasks || []).filter(task => this.taskMode(task) === mode);
     },
 
     collectionRoundSummary() {
@@ -1622,19 +1631,19 @@ function cairnApp() {
     collectionCoverageSummary() {
       const project = this.project?.project || {};
       const count = this.intentsByTaskMode('collection').length;
-      return `${count} collection intents · ${project.collection_explore_rounds || 0} explore rounds · ${project.collection_stable_rounds || 0} stable rounds`;
+      return `${count} collection tasks · ${project.collection_explore_rounds || 0} explore rounds · ${project.collection_stable_rounds || 0} stable rounds`;
     },
 
-    validationWorkSummary() {
-      const count = this.intentsByTaskMode('validation').length;
+    vulnerabilityWorkSummary() {
+      const count = this.intentsByTaskMode('vulnerability').length;
       const findings = (this.project?.findings || []).length;
-      return `${count} validation intents · ${findings} findings`;
+      return `${count} vulnerability tasks · ${findings} findings`;
     },
 
     reportQueueSummary() {
-      const reports = this.intentsByTaskMode('report').length;
-      const queued = (this.project?.findings || []).filter(finding => finding.report_status === 'queued').length;
-      return `${reports} report intents · ${queued} queued findings`;
+      const reported = (this.project?.findings || []).filter(finding => finding.report).length;
+      const pending = (this.project?.findings || []).filter(finding => !finding.report).length;
+      return `${reported} report paths · ${pending} pending findings`;
     },
 
     hasActiveProjects() {
@@ -1903,7 +1912,7 @@ function cairnApp() {
     async loadSettings() {
       try {
         const s = await this.api('GET', '/settings');
-        this.settingsForm.intent_timeout = s.intent_timeout;
+        this.settingsForm.task_timeout = s.task_timeout;
         this.settingsForm.reason_timeout = s.reason_timeout;
         this.settingsForm.initial_collection_rounds = s.initial_collection_rounds;
         this.settingsForm.collection_worker_limit = s.collection_worker_limit;
@@ -2078,21 +2087,22 @@ function cairnApp() {
     },
 
     buildInitialReplayProject(sourceProject) {
-      const origin = sourceProject.facts.find(fact => fact.id === 'origin');
       return {
         project: {
           ...this.cloneData(sourceProject.project),
           status: 'active',
           reason: null,
         },
-        facts: [origin].filter(Boolean).map(fact => this.cloneData(fact)),
-        intents: [],
+        origin: sourceProject.origin ? this.cloneData(sourceProject.origin) : null,
+        facts: [],
+        tasks: [],
+        findings: [],
         hints: [],
       };
     },
 
     buildReplayFrames(sourceProject, baseEvents) {
-      const sourceIntents = new Map(sourceProject.intents.map(intent => [intent.id, intent]));
+      const sourceIntents = new Map(sourceProject.tasks.map(intent => [intent.id, intent]));
       const replayEvents = [];
 
       for (const event of baseEvents) {
@@ -2105,12 +2115,12 @@ function cairnApp() {
         replayEvents.push({
           id: `reason-started-${event.intentId}`,
           type: 'reason_started',
-          timestamp: sourceIntent?.created_at || event.timestamp,
-          actor: sourceIntent?.creator || event.actor || 'reasoner',
+          timestamp: sourceIntent?.creation_time || event.timestamp,
+          actor: sourceIntent?.worker || event.actor || 'reasoner',
           title: sourceIntent?.description || event.title,
           meta: [
             sourceIntent?.id || event.intentId,
-            this.intentTaskModeLabel(sourceIntent?.task_mode),
+            this.intentTaskModeLabel(this.taskMode(sourceIntent)),
             sourceIntent?.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null,
             `from ${(sourceIntent?.from || event.sourceFactIds || []).join(', ')}`,
           ].filter(Boolean),
@@ -2126,10 +2136,10 @@ function cairnApp() {
         replayEvents.push({
           id: `intent-running-${sourceIntent.id}`,
           type: 'intent_running',
-          timestamp: sourceIntent.last_heartbeat_at || sourceIntent.created_at,
+          timestamp: sourceIntent.last_heartbeat_at || sourceIntent.creation_time,
           actor: sourceIntent.worker,
           title: sourceIntent.description,
-          meta: [sourceIntent.id, this.intentTaskModeLabel(sourceIntent.task_mode), sourceIntent.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null, `worker ${sourceIntent.worker}`].filter(Boolean),
+          meta: [sourceIntent.id, this.intentTaskModeLabel(this.taskMode(sourceIntent)), sourceIntent.auth_scope ? this.intentAuthScopeLabel(sourceIntent.auth_scope) : null, `worker ${sourceIntent.worker}`].filter(Boolean),
           targetType: 'intent',
           targetId: sourceIntent.id,
           order: `${event.order}.run`,
@@ -2159,7 +2169,7 @@ function cairnApp() {
     applyReplayEvent(replayProject, sourceProject, event) {
       if (!replayProject || !sourceProject || !event) return;
       const sourceIntent = event.intentId
-        ? sourceProject.intents.find(intent => intent.id === event.intentId) || null
+        ? sourceProject.tasks.find(intent => intent.id === event.intentId) || null
         : null;
 
       if (event.type === 'project_created') {
@@ -2189,18 +2199,17 @@ function cairnApp() {
       if (event.type === 'intent_declared') {
         if (!sourceIntent) return;
         replayProject.project.reason = null;
-        if (!replayProject.intents.some(intent => intent.id === sourceIntent.id)) {
-          replayProject.intents.push({
+        if (!replayProject.tasks.some(intent => intent.id === sourceIntent.id)) {
+          replayProject.tasks.push({
             id: sourceIntent.id,
             from: [...sourceIntent.from],
-            to: null,
+            to: [],
             description: sourceIntent.description,
-            creator: sourceIntent.creator,
             worker: null,
             last_heartbeat_at: null,
-            created_at: sourceIntent.created_at,
-            concluded_at: null,
-            task_mode: sourceIntent.task_mode,
+            creation_time: sourceIntent.creation_time,
+            completion_time: null,
+            type: sourceIntent.type || (this.taskMode(sourceIntent) === 'collection' ? 'collection_task' : 'vulnerability_task'),
             auth_scope: sourceIntent.auth_scope || null,
           });
         }
@@ -2209,27 +2218,33 @@ function cairnApp() {
 
       if (event.type === 'intent_running') {
         if (!sourceIntent) return;
-        const replayIntent = replayProject.intents.find(intent => intent.id === sourceIntent.id);
+        const replayIntent = replayProject.tasks.find(intent => intent.id === sourceIntent.id);
         if (!replayIntent) return;
-        replayIntent.worker = sourceIntent.worker || sourceIntent.creator;
-        replayIntent.last_heartbeat_at = sourceIntent.last_heartbeat_at || sourceIntent.created_at;
+        replayIntent.worker = sourceIntent.worker || 'dispatcher';
+        replayIntent.last_heartbeat_at = sourceIntent.last_heartbeat_at || sourceIntent.creation_time;
         return;
       }
 
       if (event.type !== 'intent_concluded') return;
       if (!sourceIntent) return;
 
-      const replayIntent = replayProject.intents.find(intent => intent.id === sourceIntent.id);
+      const replayIntent = replayProject.tasks.find(intent => intent.id === sourceIntent.id);
       if (replayIntent) {
-        replayIntent.to = sourceIntent.to;
-        replayIntent.worker = sourceIntent.worker || sourceIntent.creator;
+        replayIntent.to = this.taskOutputs(sourceIntent);
+        replayIntent.worker = sourceIntent.worker || 'dispatcher';
         replayIntent.last_heartbeat_at = sourceIntent.last_heartbeat_at;
-        replayIntent.concluded_at = sourceIntent.concluded_at;
+        replayIntent.completion_time = sourceIntent.completion_time;
       }
 
-      const producedFact = sourceProject.facts.find(fact => fact.id === sourceIntent.to);
+      const outputs = this.taskOutputs(sourceIntent);
+      const producedFact = sourceProject.facts.find(fact => outputs.includes(fact.id));
       if (producedFact && !replayProject.facts.some(fact => fact.id === producedFact.id)) {
         replayProject.facts.push(this.cloneData(producedFact));
+      }
+      for (const finding of sourceProject.findings || []) {
+        if (outputs.includes(finding.id) && !replayProject.findings.some(item => item.id === finding.id)) {
+          replayProject.findings.push(this.cloneData(finding));
+        }
       }
     },
 
@@ -2485,8 +2500,20 @@ function cairnApp() {
     buildElements() {
       const nodes = [];
       const edges = [];
+      if (this.project.origin) {
+        const label = 'origin';
+        const size = this.factNodeSize(label, 'origin');
+        nodes.push({ data: {
+          id: 'origin',
+          label,
+          description: this.project.origin.description,
+          nodeType: 'origin',
+          width: size.width,
+          height: size.height,
+        }});
+      }
       for (const f of this.project.facts) {
-        const nodeType = f.id === 'origin' ? 'origin' : 'fact';
+        const nodeType = 'fact';
         const label = this.summarizeFactLabel(f);
         const size = this.factNodeSize(label, nodeType);
         nodes.push({ data: {
@@ -2498,14 +2525,28 @@ function cairnApp() {
           height: size.height,
         }});
       }
-      for (const intent of this.project.intents) {
+      for (const finding of (this.project.findings || [])) {
+        const label = finding.id;
+        const size = this.factNodeSize(label, 'finding');
+        nodes.push({ data: {
+          id: finding.id,
+          label,
+          description: `${finding.description}${finding.report ? `\n\nReport: ${finding.report}` : ''}`,
+          nodeType: 'finding',
+          width: size.width,
+          height: size.height,
+        }});
+      }
+      for (const intent of this.project.tasks) {
         const lbl = this.intentGraphLabel(intent);
-        const targetFact = intent.to ? this.getFactRecord(intent.to) : null;
-        if (targetFact) {
-          for (const src of intent.from) {
-            edges.push({ data: { id: `${intent.id}_${src}`, source: src, target: intent.to, intentId: intent.id, label: lbl, authScope: intent.auth_scope || '', status: 'concluded' }});
+        const outputs = this.taskOutputs(intent);
+        if (outputs.length) {
+          for (const target of outputs) {
+            for (const src of intent.from) {
+              edges.push({ data: { id: `${intent.id}_${src}_${target}`, source: src, target, intentId: intent.id, label: lbl, authScope: intent.auth_scope || '', status: 'concluded' }});
+            }
           }
-        } else if (!intent.to) {
+        } else {
           const phId = `_ph_${intent.id}`;
           const nodeSize = this.openIntentNodeSize(intent);
           const nodeType = this.openIntentNodeType(intent);
@@ -2552,6 +2593,7 @@ function cairnApp() {
       return [
         { selector: 'node[nodeType="origin"]', style: { ...common, shape:'round-rectangle','background-color':'#14b8a6',label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold','text-wrap':'wrap','text-max-width':'92px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="fact"]', style: { ...common, shape:'round-rectangle','background-color':'#6366f1',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
+        { selector: 'node[nodeType="finding"]', style: { ...common, shape:'round-rectangle','background-color':'#e11d48',label:'data(label)',color:'#fff','font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'116px','text-overflow-wrap':'anywhere',width:'data(width)',height:'data(height)','border-width':0 }},
         { selector: 'node[nodeType="in_progress"]', style: { ...common, shape:'ellipse','background-color':'#f59e0b','background-opacity':0.8,label:'data(label)',color:'#fff','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':2,'border-color':'#d97706' }},
         { selector: 'node[nodeType="unclaimed"]', style: { ...common, shape:'ellipse','background-color':'#cbd5e1','background-opacity':0.5,label:'data(label)',color:'#94a3b8','font-size':'11px','font-weight':'bold',width:'data(width)',height:'data(height)','border-width':1.5,'border-color':'#94a3b8','border-style':'dashed' }},
         { selector: 'edge[status="concluded"]', style: { width:2,'line-color':'#6ee7b7','target-arrow-color':'#6ee7b7','target-arrow-shape':'triangle','curve-style':'bezier',label:'data(label)','font-size':'7px',color:'#94a3b8','text-rotation':'autorotate','text-margin-y':-9,'text-max-width':'80px','text-wrap':'ellipsis','text-background-color':'#f8fafc','text-background-opacity':0.85,'text-background-padding':'2px','text-events':'yes','arrow-scale':0.9 }},
@@ -2660,11 +2702,11 @@ function cairnApp() {
       if (nodeData.intentId) {
         const previousPlaceholder = previousPositions.get(nodeData.id);
         if (previousPlaceholder) return previousPlaceholder;
-        const intent = this.project.intents.find(item => item.id === nodeData.intentId);
+        const intent = this.project.tasks.find(item => item.id === nodeData.intentId);
         return intent ? this.anchorPositionFromIds(intent.from, previousPositions, 32) : null;
       }
 
-      const producingIntent = this.project.intents.find(item => item.to === nodeData.id);
+      const producingIntent = this.project.tasks.find(item => this.taskOutputs(item).includes(nodeData.id));
       if (!producingIntent) return null;
       const placeholderPosition = previousPositions.get(`_ph_${producingIntent.id}`);
       if (placeholderPosition) return placeholderPosition;
@@ -2790,10 +2832,18 @@ function cairnApp() {
       this._centerAnimation.play();
     },
 
-    centerGraphOnFact(factId) {
-      if (!this.cy || !factId) return;
-      const node = this.cy.getElementById(factId);
+    centerGraphOnNode(nodeId) {
+      if (!this.cy || !nodeId) return;
+      const node = this.cy.getElementById(nodeId);
       if (node.length > 0) this.centerGraphOnElements(node);
+    },
+
+    centerGraphOnFact(factId) {
+      this.centerGraphOnNode(factId);
+    },
+
+    centerGraphOnFinding(findingId) {
+      this.centerGraphOnNode(findingId);
     },
 
     centerGraphOnIntent(intentId) {
@@ -2939,6 +2989,10 @@ function cairnApp() {
       this.clearGraphSelection(false);
     },
 
+    selectedSourceNodeType(sourceId) {
+      return this.getFindingRecord(sourceId) ? 'finding' : 'fact';
+    },
+
     toggleFactSelection(fid) {
       this.selectedTimelineEntryId = null;
       const idx = this.selectedFacts.indexOf(fid);
@@ -2948,12 +3002,13 @@ function cairnApp() {
           this.clearSelection();
           return;
         }
-        if (this.selectedNode?.type === 'fact' && this.selectedNode.id === fid) {
-          this.selectedNode = { type:'fact', id: this.selectedFacts[this.selectedFacts.length - 1] };
+        if (['fact', 'finding'].includes(this.selectedNode?.type) && this.selectedNode.id === fid) {
+          const nextId = this.selectedFacts[this.selectedFacts.length - 1];
+          this.selectedNode = { type: this.selectedSourceNodeType(nextId), id: nextId };
         }
       } else {
         this.selectedFacts.push(fid);
-        this.selectedNode = { type:'fact', id: fid };
+        this.selectedNode = { type: this.selectedSourceNodeType(fid), id: fid };
       }
       this.refreshGraphDecorations();
     },
@@ -2967,8 +3022,9 @@ function cairnApp() {
         this.clearSelection();
         return;
       }
-      if (this.selectedNode?.type === 'fact' && this.selectedNode.id === fid) {
-        this.selectedNode = { type:'fact', id: this.selectedFacts[this.selectedFacts.length - 1] };
+      if (['fact', 'finding'].includes(this.selectedNode?.type) && this.selectedNode.id === fid) {
+        const nextId = this.selectedFacts[this.selectedFacts.length - 1];
+        this.selectedNode = { type: this.selectedSourceNodeType(nextId), id: nextId };
       }
       this.refreshGraphDecorations();
     },
@@ -2990,6 +3046,10 @@ function cairnApp() {
         if (keepLogFocus) this.scrollTimelineToSelection();
         else this.sideTab = 'detail';
         return;
+      }
+      if (nt === 'finding') {
+        this.selectedFacts = [id];
+        this.selectFinding(id);
       } else {
         this.selectedFacts = [id];
         this.selectFact(id);
@@ -3016,6 +3076,10 @@ function cairnApp() {
     selectFact(fact) {
       const factId = typeof fact === 'string' ? fact : fact?.id;
       if (!factId) return;
+      if (this.getFindingRecord(factId)) {
+        this.selectFinding(factId);
+        return;
+      }
       if (!this.selectedFacts.includes(factId)) this.selectedFacts = [factId];
       this.selectedTimelineEntryId = null;
       this.selectedNode = { type:'fact', id: factId };
@@ -3026,6 +3090,19 @@ function cairnApp() {
       this.applyLineageHighlightForFact(factId);
     },
 
+    selectFinding(finding) {
+      const findingId = typeof finding === 'string' ? finding : finding?.id;
+      if (!findingId) return;
+      if (!this.selectedFacts.includes(findingId)) this.selectedFacts = [findingId];
+      this.selectedTimelineEntryId = null;
+      this.selectedNode = { type:'finding', id: findingId };
+      if (this.selectedFacts.length > 1) {
+        this.applyMultiFactSelectionHighlight();
+        return;
+      }
+      this.applyLineageHighlightForFact(findingId);
+    },
+
     refreshGraphDecorations() {
       if (!this.selectedNode) {
         this.syncFactSelections();
@@ -3033,6 +3110,13 @@ function cairnApp() {
       }
       if (this.selectedNode.type === 'intent') this.applyLineageHighlightForIntent(this.selectedNode.id);
       if (this.selectedNode.type === 'fact') {
+        if (this.selectedFacts.length > 1 && this.selectedFacts.includes(this.selectedNode.id)) {
+          this.applyMultiFactSelectionHighlight();
+          return;
+        }
+        this.applyLineageHighlightForFact(this.selectedNode.id);
+      }
+      if (this.selectedNode.type === 'finding') {
         if (this.selectedFacts.length > 1 && this.selectedFacts.includes(this.selectedNode.id)) {
           this.applyMultiFactSelectionHighlight();
           return;
@@ -3057,15 +3141,15 @@ function cairnApp() {
       const walkFactUpstream = (factId) => {
         if (upstreamFacts.has(factId) || !this.project) return;
         upstreamFacts.add(factId);
-        for (const intent of this.project.intents) {
-          if (intent.to === factId) walkIntentUpstream(intent.id);
+        for (const intent of this.project.tasks) {
+          if (this.taskOutputs(intent).includes(factId)) walkIntentUpstream(intent.id);
         }
       };
 
       const walkIntentUpstream = (iid) => {
         if (upstreamIntents.has(iid) || !this.project) return;
         upstreamIntents.add(iid);
-        const intent = this.project.intents.find(i => i.id === iid);
+        const intent = this.project.tasks.find(i => i.id === iid);
         if (!intent) return;
         for (const sourceId of intent.from) walkFactUpstream(sourceId);
       };
@@ -3075,18 +3159,25 @@ function cairnApp() {
     },
 
     collectIntentElements(intent, nodeIds, edgeIds) {
-      const targetFact = intent.to ? this.getFactRecord(intent.to) : null;
-      if (targetFact) nodeIds.add(intent.to);
-      else if (!intent.to) nodeIds.add(`_ph_${intent.id}`);
+      const outputs = this.taskOutputs(intent);
+      if (outputs.length) {
+        for (const output of outputs) nodeIds.add(output);
+      } else {
+        nodeIds.add(`_ph_${intent.id}`);
+      }
       for (const sourceId of intent.from) {
         nodeIds.add(sourceId);
-        edgeIds.add(`${intent.id}_${sourceId}`);
+        if (outputs.length) {
+          for (const output of outputs) edgeIds.add(`${intent.id}_${sourceId}_${output}`);
+        } else {
+          edgeIds.add(`${intent.id}_${sourceId}`);
+        }
       }
     },
 
     applyLineageHighlightForIntent(intentId) {
       if (!this.cy || !this.project) return;
-      const intent = this.project.intents.find(i => i.id === intentId);
+      const intent = this.project.tasks.find(i => i.id === intentId);
       if (!intent) return;
       this.cy.elements().removeClass('highlight focus faded');
 
@@ -3111,7 +3202,7 @@ function cairnApp() {
       const edgeIds = new Set();
 
       for (const iid of upstreamIntents) {
-        const intent = this.project.intents.find(i => i.id === iid);
+        const intent = this.project.tasks.find(i => i.id === iid);
         if (intent) this.collectIntentElements(intent, nodeIds, edgeIds);
       }
 
@@ -3136,7 +3227,7 @@ function cairnApp() {
     },
 
     getProducingIntent(fid) {
-      return this.project ? this.project.intents.find(i => i.to === fid) || null : null;
+      return this.project ? this.project.tasks.find(i => this.taskOutputs(i).includes(fid)) || null : null;
     },
 
     selectedFactId() {
@@ -3146,7 +3237,7 @@ function cairnApp() {
     selectedFactRecord() {
       const factId = this.selectedFactId();
       if (!this.project || !factId) return null;
-      return this.project.facts.find(f => f.id === factId) || null;
+      return this.getFactRecord(factId);
     },
 
     selectedFactProducingIntent() {
@@ -3156,8 +3247,37 @@ function cairnApp() {
 
     selectedFactRecords() {
       if (!this.project || this.selectedFacts.length === 0) return [];
-      const factsById = new Map(this.project.facts.map(f => [f.id, f]));
-      return this.selectedFacts.map(fid => factsById.get(fid)).filter(Boolean);
+      return this.selectedFacts.map(fid => this.getFactRecord(fid)).filter(Boolean);
+    },
+
+    selectedFindingId() {
+      return this.selectedNode?.type === 'finding' ? this.selectedNode.id : null;
+    },
+
+    selectedFindingRecord() {
+      const findingId = this.selectedFindingId();
+      return findingId ? this.getFindingRecord(findingId) : null;
+    },
+
+    selectedSourceRecords() {
+      if (!this.project || this.selectedFacts.length === 0) return [];
+      return this.selectedFacts.map(id => this.getSourceRecord(id)).filter(Boolean);
+    },
+
+    getSourceRecord(sourceId) {
+      return this.getFactRecord(sourceId) || this.getFindingRecord(sourceId);
+    },
+
+    sourceNodeTypeLabel(source) {
+      if (source?.id === 'origin') return 'Origin';
+      if (source?.type === 'findings') return 'Finding';
+      return 'Fact';
+    },
+
+    sourceNodeBadgeClass(source) {
+      if (source?.id === 'origin') return 'bg-teal-50 text-teal-700';
+      if (source?.type === 'findings') return 'bg-rose-50 text-rose-700';
+      return 'bg-brand-50 text-brand-700';
     },
 
     selectedIntentId() {
@@ -3167,12 +3287,12 @@ function cairnApp() {
     selectedIntentRecord() {
       const intentId = this.selectedIntentId();
       if (!this.project || !intentId) return null;
-      return this.project.intents.find(i => i.id === intentId) || null;
+      return this.project.tasks.find(i => i.id === intentId) || null;
     },
 
     selectedOpenIntentRecord() {
       const intent = this.selectedIntentRecord();
-      if (!intent || intent.to || !this.projectIsActive()) return null;
+      if (!intent || this.taskOutputs(intent).length || !this.projectIsActive()) return null;
       return intent;
     },
 
@@ -3197,7 +3317,9 @@ function cairnApp() {
     },
 
     getFactRecord(fid) {
-      return this.project ? this.project.facts.find(f => f.id === fid) || null : null;
+      if (!this.project || !fid) return null;
+      if (fid === 'origin') return this.project.origin;
+      return this.project.facts.find(f => f.id === fid) || null;
     },
 
     getFindingRecord(findingId) {
@@ -3255,7 +3377,7 @@ function cairnApp() {
 
       const events = [];
       let order = 0;
-      const origin = this.getFactRecord('origin');
+      const origin = this.project.origin;
 
       events.push({
         id: `project-created-${this.project.project.id}`,
@@ -3289,14 +3411,14 @@ function cairnApp() {
         });
       }
 
-      for (const intent of this.project.intents) {
+      for (const intent of this.project.tasks) {
         events.push({
           id: `intent-declared-${intent.id}`,
           type: 'intent_declared',
-          timestamp: intent.created_at,
-          actor: intent.creator,
+          timestamp: intent.creation_time,
+          actor: intent.worker || 'dispatcher',
           title: intent.description,
-          meta: [intent.id, this.intentTaskModeLabel(intent.task_mode), intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `from ${intent.from.join(', ')}`].filter(Boolean),
+          meta: [intent.id, this.intentTaskModeLabel(this.taskMode(intent)), intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `from ${intent.from.join(', ')}`].filter(Boolean),
           targetType: 'intent',
           targetId: intent.id,
           order: order++,
@@ -3305,72 +3427,57 @@ function cairnApp() {
           sourceFactIds: [...intent.from],
         });
 
-        if (!intent.concluded_at || !intent.to) continue;
+        const outputs = this.taskOutputs(intent);
+        if (!intent.completion_time || outputs.length === 0) continue;
 
-        const reportFinding = this.isReportIntent(intent) ? this.getFindingRecord(intent.to) : null;
-        if (this.isReportIntent(intent)) {
+        for (const output of outputs) {
+          const fact = this.getFactRecord(output);
+          const finding = this.getFindingRecord(output);
+          if (!fact && !finding) continue;
           events.push({
-            id: `intent-concluded-${intent.id}`,
-            type: 'intent_concluded',
-            timestamp: intent.concluded_at,
-            actor: intent.worker || intent.creator,
-            title: reportFinding ? `Report drafted for ${reportFinding.title}` : intent.description,
-            meta: [intent.id, this.intentTaskModeLabel(intent.task_mode), reportFinding ? `finding ${reportFinding.id}` : null, `reported ${intent.to}`, `from ${intent.from.join(', ')}`].filter(Boolean),
-            targetType: 'intent',
-            targetId: intent.id,
-            order: order++,
-            intentId: intent.id,
-            producedFactId: null,
-            reportedFindingId: intent.to,
-            sourceFactIds: [...intent.from],
-          });
-          continue;
-        }
-
-        const fact = this.getFactRecord(intent.to);
-        if (!fact) continue;
-        events.push({
-          id: `intent-concluded-${intent.id}`,
+          id: `intent-concluded-${intent.id}-${output}`,
           type: 'intent_concluded',
-          timestamp: intent.concluded_at,
-          actor: intent.worker || intent.creator,
-          title: fact ? fact.description : intent.description,
-          meta: [intent.id, this.intentTaskModeLabel(intent.task_mode), intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `produced ${intent.to}`, `from ${intent.from.join(', ')}`].filter(Boolean),
-          targetType: 'fact',
-          targetId: intent.to,
+          timestamp: intent.completion_time,
+          actor: intent.worker || 'dispatcher',
+          title: fact ? fact.description : finding.description,
+          meta: [intent.id, this.intentTaskModeLabel(this.taskMode(intent)), intent.auth_scope ? this.intentAuthScopeLabel(intent.auth_scope) : null, `produced ${output}`, `from ${intent.from.join(', ')}`].filter(Boolean),
+          targetType: fact ? 'fact' : 'finding',
+          targetId: output,
           order: order++,
           intentId: intent.id,
-          producedFactId: intent.to,
+          producedFactId: fact ? output : null,
+          reportedFindingId: finding ? output : null,
           sourceFactIds: [...intent.from],
-        });
+          });
+        }
       }
 
       for (const finding of this.project.findings || []) {
         events.push({
           id: `finding-${finding.id}`,
           type: 'finding_created',
-          timestamp: finding.created_at,
-          actor: 'finding',
-          title: finding.title,
-          meta: [finding.severity, finding.vulnerability_type, finding.location].filter(Boolean),
-          targetType: 'fact',
-          targetId: finding.fact_id,
+          timestamp: finding.creation_time,
+          actor: finding.from_task || 'finding',
+          title: finding.description,
+          meta: [finding.type, finding.from_task, finding.from?.length ? `from ${finding.from.join(', ')}` : null, finding.report ? `report ${finding.report}` : null].filter(Boolean),
+          targetType: 'finding',
+          targetId: finding.id,
           order: order++,
-          intentId: finding.intent_id,
-          producedFactId: finding.fact_id,
-          sourceFactIds: [],
+          intentId: finding.from_task,
+          producedFactId: null,
+          sourceFactIds: [...(finding.from || [])],
         });
       }
 
       const chronological = [...events].sort((a, b) =>
-        a.timestamp.localeCompare(b.timestamp) || a.order - b.order
+        (a.timestamp || '').localeCompare(b.timestamp || '') || a.order - b.order
       );
 
       const resolved = [];
       for (let i = 0; i < chronological.length;) {
         const bucket = [chronological[i]];
         let j = i + 1;
-        while (j < chronological.length && chronological[j].timestamp === chronological[i].timestamp) {
+        while (j < chronological.length && (chronological[j].timestamp || '') === (chronological[i].timestamp || '')) {
           bucket.push(chronological[j]);
           j += 1;
         }
@@ -3448,7 +3555,7 @@ function cairnApp() {
         project_created: 'Project',
         hint_added: 'Hint',
         reason_started: 'Reason',
-        intent_declared: 'Intent',
+        intent_declared: 'Task',
         intent_running: 'Execute',
         intent_concluded: 'Conclude',
         finding_created: 'Finding',
@@ -3471,11 +3578,11 @@ function cairnApp() {
     },
 
     timelineEventIsInteractive(entry) {
-      return entry?.targetType === 'fact' || entry?.targetType === 'intent' || entry?.targetType === 'hints' || entry?.targetType === 'reason';
+      return entry?.targetType === 'fact' || entry?.targetType === 'finding' || entry?.targetType === 'intent' || entry?.targetType === 'hints' || entry?.targetType === 'reason';
     },
 
     timelineEventTriggersGraphFocus(entry) {
-      return entry?.targetType === 'fact' || entry?.targetType === 'intent';
+      return entry?.targetType === 'fact' || entry?.targetType === 'finding' || entry?.targetType === 'intent';
     },
 
     timelineEventDotClass(entry) {
@@ -3520,6 +3627,12 @@ function cairnApp() {
         if (!allowMultiFact && this.selectedFacts.length > 1) return null;
         const selectedFactId = this.selectedNode.id;
         return events.find(entry => entry.targetType === 'fact' && entry.targetId === selectedFactId)?.id || null;
+      }
+
+      if (this.selectedNode?.type === 'finding') {
+        if (!allowMultiFact && this.selectedFacts.length > 1) return null;
+        const selectedFindingId = this.selectedNode.id;
+        return events.find(entry => entry.targetType === 'finding' && entry.targetId === selectedFindingId)?.id || null;
       }
 
       return null;
@@ -3611,10 +3724,10 @@ function cairnApp() {
     },
 
     openFinding(finding) {
-      if (!finding?.fact_id) return;
-      this.selectedFacts = [finding.fact_id];
-      this.selectFact(finding.fact_id);
-      this.centerGraphOnFact(finding.fact_id);
+      if (!finding?.id) return;
+      this.selectedFacts = [finding.id];
+      this.selectFinding(finding.id);
+      this.centerGraphOnFinding(finding.id);
     },
 
     openTimelineEntry(entry, options = {}) {
@@ -3636,6 +3749,12 @@ function cairnApp() {
         this.selectFact(entry.targetId);
         this.selectedTimelineEntryId = entry.id;
         if (centerGraph) this.centerGraphOnFact(entry.targetId);
+      }
+      if (entry.targetType === 'finding' && entry.targetId) {
+        this.selectedFacts = [entry.targetId];
+        this.selectFinding(entry.targetId);
+        this.selectedTimelineEntryId = entry.id;
+        if (centerGraph) this.centerGraphOnFinding(entry.targetId);
       }
     },
 
@@ -3677,7 +3796,7 @@ function cairnApp() {
 
     openCreateIntent() {
       if (!this.canActOnSelectedFacts()) return;
-      this.intentForm = { description:'', task_mode:'validation', auth_scope:this.defaultIntentAuthScope() };
+      this.intentForm = { description:'', task_mode:'vulnerability', auth_scope:this.defaultIntentAuthScope() };
       this.showIntentModal = true;
     },
 
@@ -3689,23 +3808,23 @@ function cairnApp() {
     async createIntent(claim = false) {
       try {
         const actor = this.actorName();
+        const mode = this.intentForm.task_mode === 'collection' ? 'collection' : 'vulnerability';
         const body = {
           from: this.selectedFacts,
           description: this.intentForm.description,
-          creator: actor,
+          type: mode === 'collection' ? 'collection_task' : 'vulnerability_task',
           worker: claim ? actor : null,
         };
-        body.task_mode = this.intentForm.task_mode === 'collection' ? 'collection' : 'validation';
-        if (body.task_mode === 'collection') {
+        if (mode === 'collection') {
           body.auth_scope = this.intentForm.auth_scope === 'authenticated' ? 'authenticated' : 'anonymous';
         } else {
           body.auth_scope = this.defaultIntentAuthScope();
         }
-        await this.api('POST', `/projects/${this.selectedProjectId}/intents`, body);
+        await this.api('POST', `/projects/${this.selectedProjectId}/tasks`, body);
         this.showIntentModal = false;
         await this.loadProject(this.selectedProjectId);
         this.updateGraph();
-        this.showToast(claim ? 'Intent declared and claimed' : 'Intent declared');
+        this.showToast(claim ? 'Task declared and claimed' : 'Task declared');
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
@@ -3715,10 +3834,10 @@ function cairnApp() {
       try {
         const actor = this.actorName();
         const claiming = !intent.worker;
-        await this.api('POST', `/projects/${this.selectedProjectId}/intents/${intent.id}/heartbeat`, { worker: actor });
+        await this.api('POST', `/projects/${this.selectedProjectId}/tasks/${intent.id}/heartbeat`, { worker: actor });
         await this.loadProject(this.selectedProjectId);
         this.updateGraph();
-        this.showToast(claiming ? 'Intent claimed' : 'Heartbeat sent');
+        this.showToast(claiming ? 'Task claimed' : 'Heartbeat sent');
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
@@ -3727,10 +3846,10 @@ function cairnApp() {
       if (!intent) return;
       try {
         const actor = this.actorName();
-        await this.api('POST', `/projects/${this.selectedProjectId}/intents/${intent.id}/release`, { worker: actor });
+        await this.api('POST', `/projects/${this.selectedProjectId}/tasks/${intent.id}/release`, { worker: actor });
         await this.loadProject(this.selectedProjectId);
         this.updateGraph();
-        this.showToast('Intent released');
+        this.showToast('Task released');
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 
@@ -3740,7 +3859,7 @@ function cairnApp() {
         intentId: intent.id,
         findingsJson: '',
         intentKind: intent.intent_kind || '',
-        taskMode: intent.task_mode || '',
+        taskMode: this.taskMode(intent) || '',
       };
       this.showConcludeModal = true;
     },
@@ -3749,13 +3868,8 @@ function cairnApp() {
       try {
         const actor = this.actorName();
         if (this.concludeFormIsReport()) {
-          const body = { worker: actor, report_markdown: this.concludeForm.description };
-          if (this.concludeForm.findingsJson.trim()) {
-            const reportJson = JSON.parse(this.concludeForm.findingsJson);
-            if (!reportJson || Array.isArray(reportJson) || typeof reportJson !== 'object') throw new Error('Report JSON must be an object');
-            body.report_json = reportJson;
-          }
-          await this.api('POST', `/projects/${this.selectedProjectId}/intents/${this.concludeForm.intentId}/report`, body);
+          const body = { worker: actor, report: this.concludeForm.description };
+          await this.api('POST', `/projects/${this.selectedProjectId}/findings/${this.concludeForm.intentId}/report`, body);
           this.showConcludeModal = false;
           this.selectedNode = null;
           await this.loadProject(this.selectedProjectId);
@@ -3764,18 +3878,18 @@ function cairnApp() {
           return;
         }
 
-        const body = { worker: actor, description: this.concludeForm.description };
+        const body = { worker: actor, description: this.concludeForm.description, evidence: `manual:${this.concludeForm.intentId}` };
         if (this.concludeForm.findingsJson.trim()) {
           const findings = JSON.parse(this.concludeForm.findingsJson);
           if (!Array.isArray(findings)) throw new Error('Findings JSON must be an array');
           body.findings = findings;
         }
-        await this.api('POST', `/projects/${this.selectedProjectId}/intents/${this.concludeForm.intentId}/conclude`, body);
+        await this.api('POST', `/projects/${this.selectedProjectId}/tasks/${this.concludeForm.intentId}/conclude`, body);
         this.showConcludeModal = false;
         this.selectedNode = null;
         await this.loadProject(this.selectedProjectId);
         this.updateGraph();
-        this.showToast('Intent concluded');
+        this.showToast('Task concluded');
       } catch(e) { this.showToast(e.message, 'error'); }
     },
 

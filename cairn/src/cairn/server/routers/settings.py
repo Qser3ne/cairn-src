@@ -11,7 +11,7 @@ def get_settings():
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT intent_timeout,
+            SELECT task_timeout,
                    reason_timeout,
                    initial_collection_rounds,
                    collection_worker_limit
@@ -20,7 +20,7 @@ def get_settings():
             """
         ).fetchone()
         return Settings(
-            intent_timeout=row["intent_timeout"],
+            task_timeout=row["task_timeout"],
             reason_timeout=row["reason_timeout"],
             initial_collection_rounds=row["initial_collection_rounds"],
             collection_worker_limit=row["collection_worker_limit"],
@@ -33,14 +33,14 @@ def update_settings(body: Settings):
         conn.execute(
             """
             UPDATE settings
-            SET intent_timeout = ?,
+            SET task_timeout = ?,
                 reason_timeout = ?,
                 initial_collection_rounds = ?,
                 collection_worker_limit = ?
             WHERE rowid = 1
             """,
             (
-                body.intent_timeout,
+                body.task_timeout,
                 body.reason_timeout,
                 body.initial_collection_rounds,
                 body.collection_worker_limit,

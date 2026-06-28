@@ -9,7 +9,7 @@ from pydantic import TypeAdapter, ValidationError
 import requests
 from requests.adapters import HTTPAdapter
 
-from cairn.server.models import EphemeralJob, Intent, ProjectDetail, ProjectSummary, Settings
+from cairn.server.models import EphemeralJob, ProjectDetail, ProjectSummary, Settings
 
 LOG = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -68,10 +68,10 @@ class CairnClient:
         response.raise_for_status()
         return response.text
 
-    def heartbeat(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
+    def heartbeat(self, project_id: str, task_id: str, worker: str) -> ApiResult:
         return self._request_json(
             "POST",
-            f"/projects/{project_id}/intents/{intent_id}/heartbeat",
+            f"/projects/{project_id}/tasks/{task_id}/heartbeat",
             json={"worker": worker},
         )
 
@@ -96,21 +96,22 @@ class CairnClient:
             json={"worker": worker, "task_mode": task_mode},
         )
 
-    def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
+    def release(self, project_id: str, task_id: str, worker: str) -> ApiResult:
         return self._request_json(
             "POST",
-            f"/projects/{project_id}/intents/{intent_id}/release",
+            f"/projects/{project_id}/tasks/{task_id}/release",
             json={"worker": worker},
         )
 
     def conclude(
         self,
         project_id: str,
-        intent_id: str,
+        task_id: str,
         worker: str,
         description: str,
         *,
-        fact_type: str = "observation",
+        evidence: str | None = None,
+        fact_type: str | None = None,
         title: str | None = None,
         summary: str | None = None,
         details: dict[str, Any] | None = None,
@@ -119,19 +120,13 @@ class CairnClient:
         body: dict[str, Any] = {
             "worker": worker,
             "description": description,
-            "fact_type": fact_type,
+            "evidence": evidence or f"legacy:worker-output:{task_id}",
         }
-        if title is not None:
-            body["title"] = title
-        if summary is not None:
-            body["summary"] = summary
-        if details:
-            body["details"] = details
         if findings:
             body["findings"] = findings
         return self._request_json(
             "POST",
-            f"/projects/{project_id}/intents/{intent_id}/conclude",
+            f"/projects/{project_id}/tasks/{task_id}/conclude",
             json=body,
         )
 
@@ -149,6 +144,26 @@ class CairnClient:
             json={},
         )
 
+    def create_task(
+        self,
+        project_id: str,
+        from_ids: list[str],
+        description: str,
+        *,
+        task_type: str,
+        worker: str | None = None,
+        auth_scope: str | None = None,
+    ) -> ApiResult:
+        body: dict[str, Any] = {
+            "from": from_ids,
+            "description": description,
+            "type": task_type,
+            "worker": worker,
+        }
+        if auth_scope is not None:
+            body["auth_scope"] = auth_scope
+        return self._request_json("POST", f"/projects/{project_id}/tasks", json=body)
+
     def create_intent(
         self,
         project_id: str,
@@ -161,35 +176,28 @@ class CairnClient:
         finding_id: str | None = None,
         auth_scope: str | None = None,
     ) -> ApiResult:
-        body: dict[str, Any] = {
-            "from": from_ids,
-            "description": description,
-            "creator": creator,
-            "worker": None,
-            "intent_kind": intent_kind,
-            "finding_id": finding_id,
-        }
-        if auth_scope is not None:
-            body["auth_scope"] = auth_scope
-        if task_mode is not None:
-            body["task_mode"] = task_mode
-        return self._request_json("POST", f"/projects/{project_id}/intents", json=body)
+        task_type = "collection_task" if task_mode == "collection" else "vulnerability_task"
+        return self.create_task(
+            project_id,
+            from_ids,
+            description,
+            task_type=task_type,
+            auth_scope=auth_scope,
+        )
 
     def conclude_report(
         self,
         project_id: str,
-        intent_id: str,
+        finding_id: str,
         worker: str,
-        report_markdown: str,
-        report_json: dict[str, Any],
+        report: str,
     ) -> ApiResult:
         return self._request_json(
             "POST",
-            f"/projects/{project_id}/intents/{intent_id}/report",
+            f"/projects/{project_id}/findings/{finding_id}/report",
             json={
                 "worker": worker,
-                "report_markdown": report_markdown,
-                "report_json": report_json,
+                "report": report,
             },
         )
 

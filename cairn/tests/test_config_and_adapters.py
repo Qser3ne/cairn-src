@@ -98,7 +98,7 @@ def test_pi_worker_rejects_invalid_context_window() -> None:
             {
                 "name": "pi",
                 "type": "pi",
-                "task_types": ["validation_explore"],
+                "task_types": ["vulnerability_explore"],
                 "max_running": 1,
                 "priority": 0,
                 "env": {
@@ -118,7 +118,7 @@ def test_mock_worker_rejects_unknown_phase_configuration() -> None:
             {
                 "name": "mock",
                 "type": "mock",
-                "task_types": ["validation_explore"],
+                "task_types": ["vulnerability_explore"],
                 "max_running": 1,
                 "priority": 0,
                 "env": {"MOCK_UNKNOWN": "{}"},
@@ -132,12 +132,12 @@ def test_worker_accepts_mode_specific_task_types() -> None:
             "name": "mock",
             "type": "mock",
             "task_types": [
-                "collection_reason",
-                "collection_explore",
-                "validation_reason",
-                "validation_explore",
-                "report",
-            ],
+                    "collection_reason",
+                    "collection_explore",
+                    "vulnerability_reason",
+                    "vulnerability_explore",
+                    "report",
+                ],
             "max_running": 1,
             "priority": 0,
         }
@@ -146,8 +146,8 @@ def test_worker_accepts_mode_specific_task_types() -> None:
     assert worker.task_types == [
         "collection_reason",
         "collection_explore",
-        "validation_reason",
-        "validation_explore",
+        "vulnerability_reason",
+        "vulnerability_explore",
         "report",
     ]
 
@@ -174,23 +174,23 @@ def test_dispatch_example_yaml_matches_current_schema() -> None:
     assert config.workers
 
 
-def test_mock_worker_accepts_collection_and_validation_phase_configuration() -> None:
+def test_mock_worker_accepts_collection_and_vulnerability_phase_configuration() -> None:
     worker = WorkerConfig.model_validate(
         {
             "name": "mock",
             "type": "mock",
-            "task_types": ["collection_reason", "validation_reason"],
+            "task_types": ["collection_reason", "vulnerability_reason"],
             "max_running": 1,
             "priority": 0,
             "env": {
-                "MOCK_COLLECTION_REASON": json.dumps({"delay": [0, 0], "outcomes": {"intent": "1.0"}}),
-                "MOCK_VALIDATION_REASON": json.dumps({"delay": [0, 0], "outcomes": {"intent": "0.0", "stable": "1.0"}}),
+                "MOCK_COLLECTION_REASON": json.dumps({"delay": [0, 0], "outcomes": {"task": "1.0"}}),
+                "MOCK_VULNERABILITY_REASON": json.dumps({"delay": [0, 0], "outcomes": {"task": "0.0", "stable": "1.0"}}),
             },
         }
     )
 
     assert worker.env["MOCK_COLLECTION_REASON"]
-    assert worker.env["MOCK_VALIDATION_REASON"]
+    assert worker.env["MOCK_VULNERABILITY_REASON"]
 
 
 def _run_mock_worker(worker: WorkerConfig, prompt: dict) -> subprocess.CompletedProcess[str]:
@@ -207,8 +207,8 @@ def test_mock_driver_uses_collection_reason_config_at_runtime() -> None:
             "max_running": 1,
             "priority": 0,
             "env": {
-                "MOCK_REASON": json.dumps({"delay": [0, 0], "outcomes": {"intent": "0.0", "noop": "1.0"}}),
-                "MOCK_COLLECTION_REASON": json.dumps({"delay": [0, 0], "outcomes": {"intent": "1.0"}}),
+                "MOCK_REASON": json.dumps({"delay": [0, 0], "outcomes": {"task": "0.0", "noop": "1.0"}}),
+                "MOCK_COLLECTION_REASON": json.dumps({"delay": [0, 0], "outcomes": {"task": "1.0"}}),
             },
         }
     )
@@ -219,54 +219,54 @@ def test_mock_driver_uses_collection_reason_config_at_runtime() -> None:
             "phase": "reason",
             "task_mode": "collection",
             "fact_ids": ["origin"],
-            "open_intents": [{"id": "i001"}],
-            "max_intents": 1,
+            "open_tasks": [{"id": "t001"}],
+            "max_tasks": 1,
         },
     )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["data"]["intents"]
+    assert payload["data"]["tasks"]
 
 
-def test_mock_driver_uses_validation_reason_config_at_runtime() -> None:
+def test_mock_driver_uses_vulnerability_reason_config_at_runtime() -> None:
     worker = WorkerConfig.model_validate(
         {
-            "name": "mock",
-            "type": "mock",
-            "task_types": ["validation_reason"],
-            "max_running": 1,
-            "priority": 0,
-            "env": {
-                "MOCK_REASON": json.dumps({"delay": [0, 0], "outcomes": {"intent": "0.0", "noop": "1.0"}}),
-                "MOCK_VALIDATION_REASON": json.dumps({"delay": [0, 0], "outcomes": {"intent": "0.0", "stable": "1.0"}}),
-            },
-        }
-    )
+                "name": "mock",
+                "type": "mock",
+                "task_types": ["vulnerability_reason"],
+                "max_running": 1,
+                "priority": 0,
+                "env": {
+                    "MOCK_REASON": json.dumps({"delay": [0, 0], "outcomes": {"task": "0.0", "noop": "1.0"}}),
+                    "MOCK_VULNERABILITY_REASON": json.dumps({"delay": [0, 0], "outcomes": {"task": "0.0", "stable": "1.0"}}),
+                },
+            }
+        )
 
     result = _run_mock_worker(
         worker,
         {
             "phase": "reason",
-            "task_mode": "validation",
+            "task_mode": "vulnerability",
             "fact_ids": ["f001"],
-            "open_intents": [{"id": "i001"}],
-            "max_intents": 1,
+            "open_tasks": [{"id": "t001"}],
+            "max_tasks": 1,
         },
     )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["data"] == {"decision": "no_new_high_value", "intents": []}
+    assert payload["data"] == {"decision": "no_new_high_value", "tasks": []}
 
 
 @pytest.mark.parametrize(
     ("task_mode", "phase", "intent_id", "expected_description"),
     [
         ("collection", "explore_execute", "i001", "Collection fact from i001: mapped feature surface, API route, and auth boundary."),
-        ("validation", "explore_execute", "i002", "Validation fact from i002: confirmed reportable authorization weakness."),
+        ("vulnerability", "explore_execute", "t002", "Vulnerability fact from t002: confirmed reportable authorization weakness."),
         ("collection", "explore_conclude", "i003", "Collection fact from i003: mapped feature surface, API route, and auth boundary."),
-        ("validation", "explore_conclude", "i004", "Validation fact from i004: confirmed reportable authorization weakness."),
+        ("vulnerability", "explore_conclude", "t004", "Vulnerability fact from t004: confirmed reportable authorization weakness."),
     ],
 )
 def test_mock_driver_uses_task_mode_explore_configs_at_runtime(
@@ -279,16 +279,16 @@ def test_mock_driver_uses_task_mode_explore_configs_at_runtime(
         {
             "name": "mock",
             "type": "mock",
-            "task_types": ["collection_explore", "validation_explore"],
+            "task_types": ["collection_explore", "vulnerability_explore"],
             "max_running": 1,
             "priority": 0,
             "env": {
                 "MOCK_EXPLORE_EXECUTE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "0.0", "command_fail": "1.0"}}),
                 "MOCK_COLLECTION_EXPLORE_EXECUTE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "1.0"}}),
-                "MOCK_VALIDATION_EXPLORE_EXECUTE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "1.0"}}),
+                "MOCK_VULNERABILITY_EXPLORE_EXECUTE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "1.0"}}),
                 "MOCK_EXPLORE_CONCLUDE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "0.0", "command_fail": "1.0"}}),
                 "MOCK_COLLECTION_EXPLORE_CONCLUDE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "1.0"}}),
-                "MOCK_VALIDATION_EXPLORE_CONCLUDE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "1.0"}}),
+                "MOCK_VULNERABILITY_EXPLORE_CONCLUDE": json.dumps({"delay": [0, 0], "outcomes": {"fact": "1.0"}}),
             },
         }
     )
@@ -307,9 +307,9 @@ def test_bundled_prompt_groups_have_required_placeholders() -> None:
 def test_pi_driver_models_json_and_execute_argv_include_context_window_and_tools() -> None:
     worker = WorkerConfig.model_validate(
         {
-            "name": "pi-worker",
-            "type": "pi",
-            "task_types": ["validation_explore"],
+                "name": "pi-worker",
+                "type": "pi",
+                "task_types": ["vulnerability_explore"],
             "max_running": 1,
             "priority": 0,
             "env": {
@@ -333,9 +333,9 @@ def test_pi_driver_models_json_and_execute_argv_include_context_window_and_tools
 def test_codex_driver_execute_argv_passes_model_endpoint_and_prompt() -> None:
     worker = WorkerConfig.model_validate(
         {
-            "name": "codex",
-            "type": "codex",
-            "task_types": ["validation_reason"],
+                "name": "codex",
+                "type": "codex",
+                "task_types": ["vulnerability_reason"],
             "max_running": 1,
             "priority": 0,
             "env": {

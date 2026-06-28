@@ -12,7 +12,7 @@ runtime:
 tasks:
   reason:
     timeout: 5
-    max_intents: 3
+    max_tasks: 3
   explore:
     timeout: 9
     conclude_timeout: 5
@@ -34,22 +34,22 @@ common_env:
 workers:
   - name: "mock-observer-1"
     type: "mock"
-    task_types: [collection_reason, collection_explore, validation_reason, validation_explore, report]
+    task_types: [collection_reason, collection_explore, vulnerability_reason, vulnerability_explore, report]
     max_running: 1
     priority: 0
     env:
       MOCK_HEALTHCHECK: '{"delay":[0,2],"outcomes":{"ok":0.9,"fail":0.1}}'
-      MOCK_REASON: '{"delay":[2,6],"outcomes":{"intent":0.4,"noop":0.1,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'
+      MOCK_REASON: '{"delay":[2,6],"outcomes":{"task":0.4,"noop":0.1,"stable":0.1,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'
       MOCK_EXPLORE_EXECUTE: '{"delay":[5,10],"outcomes":{"fact":0.6,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'
       MOCK_EXPLORE_CONCLUDE: '{"delay":[2,6],"outcomes":{"fact":0.6,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'
 
   - name: "mock-observer-2"
     type: "mock"
-    task_types: [collection_reason, collection_explore, validation_reason, validation_explore, report]
+    task_types: [collection_reason, collection_explore, vulnerability_reason, vulnerability_explore, report]
     max_running: 1
     priority: 0
     env:
       MOCK_HEALTHCHECK: '{"delay":[0,2],"outcomes":{"ok":0.9,"fail":0.1}}'
-      MOCK_REASON: '{"delay":[2,6],"outcomes":{"intent":0.4,"noop":0.1,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'
+      MOCK_REASON: '{"delay":[2,6],"outcomes":{"task":0.4,"noop":0.1,"stable":0.1,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'
       MOCK_EXPLORE_EXECUTE: '{"delay":[5,10],"outcomes":{"fact":0.6,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'
       MOCK_EXPLORE_CONCLUDE: '{"delay":[2,6],"outcomes":{"fact":0.6,"rejected":0.1,"invalid_json":0.1,"invalid_payload":0.1,"command_fail":0.1}}'

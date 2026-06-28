@@ -31,15 +31,15 @@ def _looks_like_reason_data(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict):
         return False
     keys = set(payload)
-    if keys == {"intents"} or keys == {"decision", "intents"} or keys == {"decision", "coverage", "intents"}:
-        return isinstance(payload["intents"], list)
-    if keys == {"intent"}:
-        intent = payload["intent"]
-        return isinstance(intent, dict) and "from" in intent and "description" in intent
+    if keys == {"tasks"} or keys == {"decision", "tasks"} or keys == {"decision", "coverage", "tasks"}:
+        return isinstance(payload["tasks"], list)
+    if keys == {"task"}:
+        task = payload["task"]
+        return isinstance(task, dict) and "from" in task and "description" in task
     return False
 
 
-REASON_TASK_MODES = {"collection", "validation"}
+REASON_TASK_MODES = {"collection", "vulnerability"}
 VALIDATION_FOCUS_TERMS = (
     "validate",
     "validation",
@@ -68,40 +68,41 @@ def _has_validation_focus(description: Any) -> bool:
     return any(term in text for term in VALIDATION_FOCUS_TERMS)
 
 
-def _validate_reason_intent(
-    intent: Any,
+def _validate_reason_task(
+    task: Any,
     index: int,
     *,
     task_mode: str,
     require_auth_scope: bool = False,
 ) -> dict[str, Any]:
-    if not isinstance(intent, dict) or "from" not in intent or "description" not in intent:
-        raise ValueError(f"invalid intent at index {index}")
-    intent_task_mode = intent["task_mode"] if "task_mode" in intent else task_mode
-    if intent_task_mode not in REASON_TASK_MODES:
-        raise ValueError(f"unknown task_mode at index {index}")
-    if task_mode == "validation" and intent_task_mode != "validation":
-        raise ValueError(f"validation reason intent must use task_mode validation at index {index}")
-    if task_mode == "collection" and intent_task_mode == "validation" and "task_mode" not in intent:
-        raise ValueError(f"validation seed intent must explicitly set task_mode at index {index}")
-    if task_mode == "collection" and intent_task_mode == "validation" and not _has_validation_focus(intent.get("description")):
-        raise ValueError(f"validation seed intent must be validation-focused at index {index}")
-    auth_scope = intent.get("auth_scope")
-    if require_auth_scope and intent_task_mode == "collection" and auth_scope not in ("anonymous", "authenticated"):
+    if not isinstance(task, dict) or "from" not in task or "description" not in task:
+        raise ValueError(f"invalid task at index {index}")
+    if "type" in task:
+        task_type = task["type"]
+        if task_type not in ("collection_task", "vulnerability_task"):
+            raise ValueError(f"unknown task type at index {index}")
+        inferred_mode = "collection" if task_type == "collection_task" else "vulnerability"
+    else:
+        inferred_mode = task_mode
+    if task_mode == "vulnerability" and inferred_mode != "vulnerability":
+        raise ValueError(f"vulnerability reason task must use vulnerability_task at index {index}")
+    if task_mode == "collection" and inferred_mode == "vulnerability" and "type" not in task:
+        raise ValueError(f"vulnerability seed task must explicitly set type at index {index}")
+    if task_mode == "collection" and inferred_mode == "vulnerability" and not _has_validation_focus(task.get("description")):
+        raise ValueError(f"vulnerability seed task must be vulnerability-focused at index {index}")
+    auth_scope = task.get("auth_scope")
+    if require_auth_scope and inferred_mode == "collection" and auth_scope not in ("anonymous", "authenticated"):
         raise ValueError(f"auth_scope is required at index {index}")
     if auth_scope is not None and auth_scope not in ("anonymous", "authenticated"):
         raise ValueError(f"invalid auth_scope at index {index}")
-    normalized = dict(intent)
-    normalized["task_mode"] = intent_task_mode
+    normalized = dict(task)
+    normalized["type"] = "collection_task" if inferred_mode == "collection" else "vulnerability_task"
     return normalized
 
 
 EXPLORE_ALLOWED_KEYS = {
     "description",
-    "fact_type",
-    "title",
-    "summary",
-    "details",
+    "evidence",
     "findings",
 }
 
@@ -123,16 +124,7 @@ JUDGE_CHECKLIST_KEYS = (
 )
 
 FINDING_REQUIRED_TEXT_FIELDS = (
-    "title",
-    "vulnerability_type",
-    "severity",
-    "target",
-    "location",
-    "impact",
-    "evidence",
-    "reproduction",
-    "remediation",
-    "status",
+    "description",
 )
 FINDING_RESEARCH_VALUES = {"unknown", "high", "medium", "low", "none"}
 FINDING_NEXT_ACTIONS = {"triage", "follow_up", "report", "close"}
@@ -144,8 +136,8 @@ def _looks_like_explore_data(payload: dict[str, Any]) -> bool:
 
 def validate_reason_payload(
     payload: dict[str, Any],
-    open_intents_empty: bool,
-    max_intents: int,
+    open_tasks_empty: bool,
+    max_tasks: int,
     *,
     task_mode: str,
     require_auth_scope: bool = False,
@@ -164,35 +156,36 @@ def validate_reason_payload(
     if data.get("complete") is not None:
         raise ValueError("complete payload is not supported in SRC-only mode")
     decision = data.get("decision")
-    intents = data.get("intents")
-    # backward compat: accept singular "intent" key from LLMs
-    if intents is None:
-        singular = data.get("intent")
+    if "intents" in data or "intent" in data:
+        raise ValueError("intents output is no longer supported; use tasks")
+    tasks = data.get("tasks")
+    if tasks is None:
+        singular = data.get("task")
         if isinstance(singular, dict):
-            intents = [singular]
-    if intents is not None:
-        if not isinstance(intents, list):
-            raise ValueError("intents must be an array")
-        normalized_intents = []
-        for i, intent in enumerate(intents):
-            normalized_intents.append(
-                _validate_reason_intent(
-                    intent,
+            tasks = [singular]
+    if tasks is not None:
+        if not isinstance(tasks, list):
+            raise ValueError("tasks must be an array")
+        normalized_tasks = []
+        for i, task in enumerate(tasks):
+            normalized_tasks.append(
+                _validate_reason_task(
+                    task,
                     i,
                     task_mode=task_mode,
                     require_auth_scope=require_auth_scope,
                 )
             )
-        if not intents and open_intents_empty and decision not in ("noop", "no_new_high_value"):
-            raise ValueError("intents must not be empty when open_intents is empty")
-        intents = normalized_intents[:max_intents]
-        if not intents:
+        if not tasks and open_tasks_empty and decision not in ("noop", "no_new_high_value"):
+            raise ValueError("tasks must not be empty when open_tasks is empty")
+        tasks = normalized_tasks[:max_tasks]
+        if not tasks:
             if decision == "no_new_high_value":
                 return "stable", None
             return "noop", None
-        return "intents", intents
-    if open_intents_empty:
-        raise ValueError("intents is required when open_intents is empty")
+        return "tasks", tasks
+    if open_tasks_empty:
+        raise ValueError("tasks is required when open_tasks is empty")
     return "noop", None
 
 
@@ -328,17 +321,14 @@ def validate_report_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any
         raise ValueError("accepted must be true or false")
     if not isinstance(data, dict):
         raise ValueError("data must be an object")
-    report_markdown = data.get("report_markdown")
-    if not isinstance(report_markdown, str) or not report_markdown.strip():
-        raise ValueError("report_markdown is required")
-    report_json = data.get("report_json", {})
-    if not isinstance(report_json, dict):
-        raise ValueError("report_json must be an object")
-    return "report", {"report_markdown": report_markdown.strip(), "report_json": report_json}
+    report = data.get("report")
+    if not isinstance(report, str) or not report.strip():
+        raise ValueError("report is required")
+    return "report", {"report": report.strip()}
 
 
 def validate_explore_payload(payload: dict[str, Any], *, task_mode: str) -> tuple[str, dict[str, Any] | None]:
-    if task_mode not in ("collection", "validation"):
+    if task_mode not in ("collection", "vulnerability"):
         raise ValueError("unknown task_mode")
     accepted, data = _unwrap_wrapped_payload(payload)
     if accepted is False:
@@ -352,17 +342,12 @@ def validate_explore_payload(payload: dict[str, Any], *, task_mode: str) -> tupl
     description = data.get("description")
     if not isinstance(description, str) or not description.strip():
         raise ValueError("description is required")
-    fact_type = data.get("fact_type", "observation")
-    if fact_type not in ("observation", "feature_surface"):
-        raise ValueError("fact_type must be observation or feature_surface")
-    title = _optional_text(data.get("title"), "title")
-    summary = _optional_text(data.get("summary"), "summary")
-    details = data.get("details", {})
-    if not isinstance(details, dict):
-        raise ValueError("details must be an object")
+    evidence = data.get("evidence")
+    if not isinstance(evidence, str) or not evidence.strip():
+        raise ValueError("evidence is required")
     findings = data.get("findings")
     if task_mode == "collection" and findings:
-        raise ValueError("collection explore payload cannot include findings")
+        raise ValueError("collection task payload cannot include findings")
     if findings is not None:
         if not isinstance(findings, list):
             raise ValueError("findings must be an array")
@@ -372,24 +357,14 @@ def validate_explore_payload(payload: dict[str, Any], *, task_mode: str) -> tupl
             _validate_finding_payload(finding, index)
     return "fact", {
         "description": description.strip(),
-        "fact_type": fact_type,
-        "title": title,
-        "summary": summary,
-        "details": details,
+        "evidence": evidence.strip(),
+        "findings": findings or None,
     }
 
 
 def _validate_finding_payload(finding: dict[str, Any], index: int) -> None:
     for field in FINDING_REQUIRED_TEXT_FIELDS:
         _required_text(finding, f"finding {field} at index {index}", key=field)
-    research_value = finding.get("research_value")
-    if research_value not in FINDING_RESEARCH_VALUES:
-        raise ValueError(f"finding research_value is required at index {index}")
-    next_action = finding.get("next_action")
-    if next_action not in FINDING_NEXT_ACTIONS:
-        raise ValueError(f"finding next_action is required at index {index}")
-    if next_action == "follow_up":
-        _required_text(finding, f"finding followup_intent_description at index {index}", key="followup_intent_description")
 
 
 def _optional_text(value: Any, label: str) -> str | None:

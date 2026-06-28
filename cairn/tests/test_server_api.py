@@ -8,7 +8,6 @@ import yaml
 
 from cairn.server import db
 from cairn.server.app import app
-from cairn.server.routers import intents as intents_router
 
 
 @pytest.fixture
@@ -21,14 +20,8 @@ def client(tmp_path, monkeypatch) -> TestClient:
 
 def _create_project(client: TestClient, **overrides) -> dict:
     body = {
-        "title": "collection",
+        "title": "blackboard",
         "origin": "https://target.test",
-        "accounts": [
-            {
-                "label": "alice",
-                "cookies": [{"name": "sessionid", "value": "secret-1"}],
-            }
-        ],
         "hints": [{"content": "initial clue", "creator": "human"}],
     }
     body.update(overrides)
@@ -37,41 +30,30 @@ def _create_project(client: TestClient, **overrides) -> dict:
     return response.json()
 
 
-def _insert_legacy_snapshot(client: TestClient, project_id: str, selected_fact_ids: list[str] | None = None) -> dict:
-    summary_yaml = client.get(f"/projects/{project_id}/export?format=yaml").text
+def _insert_legacy_snapshot(project_id: str, summary_yaml: str = "project: {}\n") -> dict:
     with db.get_conn() as conn:
         snapshot_id = "snap_001"
         conn.execute(
             """
             INSERT INTO project_snapshots (
                 id, project_id, snapshot_type, summary_yaml, selected_fact_ids_json, stats_json, created_at
-            ) VALUES (?, ?, 'legacy_recon_fork', ?, ?, ?, '2026-01-01T00:00:00Z')
+            ) VALUES (?, ?, 'legacy_recon_fork', ?, '[]', '{}', '2026-01-01T00:00:00Z')
             """,
-            (
-                snapshot_id,
-                project_id,
-                summary_yaml,
-                json.dumps(selected_fact_ids or []),
-                json.dumps({"selected_fact_count": len(selected_fact_ids or [])}),
-            ),
+            (snapshot_id, project_id, summary_yaml),
         )
     return {"id": snapshot_id, "project_id": project_id}
 
 
-def _insert_legacy_child_project(client: TestClient, parent_project_id: str, parent_snapshot_id: str) -> str:
+def _insert_legacy_child_project(parent_project_id: str, parent_snapshot_id: str) -> str:
     child_id = "proj_legacy_child"
     with db.get_conn() as conn:
         conn.execute(
             """
             INSERT INTO projects (
-                id, title, status, project_kind, auth_mode, parent_project_id, parent_snapshot_id, created_at
-            ) VALUES (?, 'legacy child', 'active', 'vuln', 'anonymous', ?, ?, '2026-01-01T00:00:00Z')
+                id, title, origin, status, project_kind, auth_mode, parent_project_id, parent_snapshot_id, created_at
+            ) VALUES (?, 'legacy child', 'https://target.test/child', 'active', 'vuln', 'anonymous', ?, ?, '2026-01-01T00:00:00Z')
             """,
             (child_id, parent_project_id, parent_snapshot_id),
-        )
-        conn.execute(
-            "INSERT INTO facts (id, project_id, description) VALUES ('origin', ?, 'https://target.test/child')",
-            (child_id,),
         )
     return child_id
 
@@ -88,28 +70,40 @@ def _insert_ephemeral_job(project_id: str, job_id: str, job_type: str) -> None:
         )
 
 
-def _create_authenticated_vuln(client: TestClient) -> dict:
-    response = client.post(
-        "/projects",
-        json={
-            "title": "vuln",
-            "origin": "https://target.test",
-            "auth_mode": "authenticated",
-            "accounts": [{"cookies": [{"name": "sid", "value": "child"}]}],
-        },
-    )
+def _create_task(client: TestClient, project_id: str, **overrides) -> dict:
+    body = {
+        "type": "collection_task",
+        "from": ["origin"],
+        "description": "Collect attack surface",
+    }
+    body.update(overrides)
+    response = client.post(f"/projects/{project_id}/tasks", json=body)
     assert response.status_code == 201, response.text
     return response.json()
 
 
-def test_create_project_defaults_to_vuln_and_forbids_old_fields(client: TestClient) -> None:
+def _conclude_task(client: TestClient, project_id: str, task_id: str, **overrides) -> dict:
+    body = {
+        "worker": "worker",
+        "description": "Observed API surface.",
+        "evidence": f"/tmp/cairn/evidence/{task_id}.json",
+    }
+    body.update(overrides)
+    response = client.post(f"/projects/{project_id}/tasks/{task_id}/conclude", json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_create_project_defaults_to_vuln_blackboard_and_forbids_old_fields(client: TestClient) -> None:
     payload = _create_project(client)
 
     assert payload["project"]["project_kind"] == "vuln"
-    assert payload["project"]["auth_mode"] == "dual"
+    assert payload["project"]["auth_mode"] == "anonymous"
+    assert payload["origin"] == {"id": "origin", "description": "https://target.test"}
+    assert payload["tasks"] == []
+    assert payload["facts"] == []
+    assert "intents" not in payload
     assert "collection_max_reason_rounds" not in payload["project"]
-    assert "mode" not in payload["project"]
-    assert "bootstrap_enabled" not in payload["project"]
 
     for field, value in (
         ("mode", "src"),
@@ -117,39 +111,13 @@ def test_create_project_defaults_to_vuln_and_forbids_old_fields(client: TestClie
         ("goal", "finish"),
         ("recon_max_reason_rounds", 8),
         ("collection_max_reason_rounds", 8),
+        ("project_kind", "recon"),
     ):
         response = client.post(
             "/projects",
-            json={
-                "title": "legacy",
-                "origin": "start",
-                field: value,
-            },
+            json={"title": "legacy", "origin": "start", field: value},
         )
         assert response.status_code == 422
-
-
-def test_create_project_defaults_to_vuln_project_kind_and_rejects_recon(client: TestClient) -> None:
-    response = client.post(
-        "/projects",
-        json={"title": "collection", "origin": "https://target.test"},
-    )
-
-    assert response.status_code == 201, response.text
-    assert response.json()["project"]["project_kind"] == "vuln"
-    assert response.json()["project"]["auth_mode"] == "anonymous"
-
-    legacy_recon = client.post(
-        "/projects",
-        json={
-            "title": "legacy recon",
-            "origin": "https://target.test",
-            "project_kind": "recon",
-            "accounts": [{"cookies": [{"name": "sessionid", "value": "secret-1"}]}],
-        },
-    )
-
-    assert legacy_recon.status_code == 422
 
 
 def test_write_requests_reject_unknown_fields(client: TestClient) -> None:
@@ -159,17 +127,17 @@ def test_write_requests_reject_unknown_fields(client: TestClient) -> None:
         json={
             "title": "nested cookie extra",
             "origin": "start",
+            "auth_mode": "authenticated",
             "accounts": [{"cookies": [{"name": "sessionid", "value": "secret", "surprise": True}]}],
         },
     )
-
     hint = client.post(
         f"/projects/{project_id}/hints",
         json={"content": "new clue", "creator": "human", "surprise": True},
     )
-    intent = client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "work", "creator": "tester", "surprise": True},
+    task = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"from": ["origin"], "type": "collection_task", "description": "work", "surprise": True},
     )
     status = client.put(
         f"/projects/{project_id}/status",
@@ -178,7 +146,7 @@ def test_write_requests_reject_unknown_fields(client: TestClient) -> None:
     settings = client.put(
         "/settings",
         json={
-            "intent_timeout": 10,
+            "task_timeout": 10,
             "reason_timeout": 10,
             "initial_collection_rounds": 5,
             "collection_worker_limit": 1,
@@ -188,7 +156,7 @@ def test_write_requests_reject_unknown_fields(client: TestClient) -> None:
 
     assert nested_cookie.status_code == 422
     assert hint.status_code == 422
-    assert intent.status_code == 422
+    assert task.status_code == 422
     assert status.status_code == 422
     assert settings.status_code == 422
 
@@ -198,7 +166,7 @@ def test_settings_api_exposes_collection_scheduling_defaults_and_updates(client:
 
     assert defaults.status_code == 200
     assert defaults.json() == {
-        "intent_timeout": 15,
+        "task_timeout": 15,
         "reason_timeout": 15,
         "initial_collection_rounds": 5,
         "collection_worker_limit": 1,
@@ -207,7 +175,7 @@ def test_settings_api_exposes_collection_scheduling_defaults_and_updates(client:
     updated = client.put(
         "/settings",
         json={
-            "intent_timeout": 20,
+            "task_timeout": 20,
             "reason_timeout": 21,
             "initial_collection_rounds": 3,
             "collection_worker_limit": 2,
@@ -215,12 +183,6 @@ def test_settings_api_exposes_collection_scheduling_defaults_and_updates(client:
     )
 
     assert updated.status_code == 200, updated.text
-    assert updated.json() == {
-        "intent_timeout": 20,
-        "reason_timeout": 21,
-        "initial_collection_rounds": 3,
-        "collection_worker_limit": 2,
-    }
     assert client.get("/settings").json() == updated.json()
 
 
@@ -228,7 +190,7 @@ def test_settings_api_validates_collection_scheduling_bounds(client: TestClient)
     invalid_rounds = client.put(
         "/settings",
         json={
-            "intent_timeout": 10,
+            "task_timeout": 10,
             "reason_timeout": 10,
             "initial_collection_rounds": -1,
             "collection_worker_limit": 1,
@@ -237,7 +199,7 @@ def test_settings_api_validates_collection_scheduling_bounds(client: TestClient)
     invalid_limit = client.put(
         "/settings",
         json={
-            "intent_timeout": 10,
+            "task_timeout": 10,
             "reason_timeout": 10,
             "initial_collection_rounds": 0,
             "collection_worker_limit": 0,
@@ -248,419 +210,221 @@ def test_settings_api_validates_collection_scheduling_bounds(client: TestClient)
     assert invalid_limit.status_code == 422
 
 
-def test_static_ui_exposes_collection_scheduling_settings(client: TestClient) -> None:
-    response = client.get("/")
-
-    assert response.status_code == 200
-    ui = response.text
-    assert "Initial collection rounds" in ui
-    assert "Collection worker limit" in ui
-    assert "settingsForm: { intent_timeout: 5, reason_timeout: 5, initial_collection_rounds: 5, collection_worker_limit: 1 }" in ui
-    assert "this.settingsForm.initial_collection_rounds = s.initial_collection_rounds;" in ui
-    assert "this.settingsForm.collection_worker_limit = s.collection_worker_limit;" in ui
-
-
-def test_create_intent_rejects_duplicate_source_fact_ids(client: TestClient) -> None:
-    project_id = _create_project(client)["project"]["id"]
-
-    response = client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin", "origin"], "description": "duplicate source", "creator": "tester"},
-    )
-
-    assert response.status_code == 422
-
-
-def test_create_intent_duplicate_check_runs_inside_write_transaction(client: TestClient, monkeypatch) -> None:
-    project_id = _create_project(client)["project"]["id"]
-    original = intents_router.check_duplicate_intent
-    observed_transactions: list[bool] = []
-
-    def check_duplicate_with_transaction_assertion(conn, *args, **kwargs):
-        observed_transactions.append(conn.in_transaction)
-        return original(conn, *args, **kwargs)
-
-    monkeypatch.setattr(intents_router, "check_duplicate_intent", check_duplicate_with_transaction_assertion)
-
-    response = client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "first work", "creator": "tester"},
-    )
-
-    assert response.status_code == 201, response.text
-    assert observed_transactions == [True]
-
-
-def test_static_ui_polling_avoids_fixed_interval_overlap(client: TestClient) -> None:
-    response = client.get("/")
-
-    assert response.status_code == 200
-    assert "setInterval(async" not in response.text
-    assert "resumePolling()" in response.text
-    assert "this.resumePolling();" in response.text
-    assert "pollGeneration: 0" in response.text
-    assert "pausePolling()" in response.text
-    assert "this.pollGeneration += 1;" in response.text
-    assert "this.pausePolling();" in response.text
-    assert "shouldApply: () => this.polling && this.selectedProjectId === projectId && this.view === 'graph'" in response.text
-    assert "generation === this.pollGeneration" in response.text
-    assert "if (updated) this.updateGraph();" in response.text
-    assert "async pollOnce(generation = this.pollGeneration)" in response.text
-    assert "setTimeout(() => this.pollOnce(generation), 5000)" in response.text
-    assert "if (!projectId) {\n        this.resumePolling();\n        return;\n      }" in response.text
-
-    open_project = response.text[
-        response.text.index("async openProject(id)") : response.text.index("backToList(fromRoute)")
-    ]
-    assert open_project.index("this.selectedProjectId = id;") < open_project.index("this.resumePolling();")
-
-    back_to_list = response.text[
-        response.text.index("backToList(fromRoute)") : response.text.index("    startPolling()")
-    ]
-    assert back_to_list.index("this.selectedProjectId = '';") < back_to_list.index("this.resumePolling();")
-
-
-def test_static_ui_uses_vuln_task_modes_without_recon_controls(client: TestClient) -> None:
-    response = client.get("/")
-
-    assert response.status_code == 200
-    ui = response.text
-    for legacy_text in (
-        "Evaluate Recon",
-        "evaluateRecon()",
-        "createReconSnapshot()",
-        "prepareForkVulnFromSelectedProject()",
-        "setNewProjectKind(",
-        "Parent recon project",
-        "Parent snapshot",
-        "Fork Vuln",
-        "/recon/judgements",
-        "/fork-vuln/seed-jobs",
-    ):
-        assert legacy_text not in ui
-
-    assert "Collection Coverage" in ui
-    assert "Validation Work" in ui
-    assert "Report Queue" in ui
-    assert "Task Mode" in ui
-    assert "intentTaskModeLabel(selectedIntentRecord().task_mode)" in ui
-    assert "body.task_mode = this.intentForm.task_mode === 'collection' ? 'collection' : 'validation';" in ui
-
-
-def test_static_ui_routes_report_intents_to_report_endpoint(client: TestClient) -> None:
-    response = client.get("/")
-
-    assert response.status_code == 200
-    ui = response.text
-    assert "isReportIntent(intent)" in ui
-    assert "concludeForm: { description: '', intentId: '', findingsJson: '', intentKind: '', taskMode: '' }" in ui
-    assert "report_markdown: this.concludeForm.description" in ui
-    assert "`/projects/${this.selectedProjectId}/intents/${this.concludeForm.intentId}/report`" in ui
-    assert "`/projects/${this.selectedProjectId}/intents/${this.concludeForm.intentId}/conclude`" in ui
-
-
-def test_static_ui_handles_completed_report_intents_without_fact_targets(client: TestClient) -> None:
-    response = client.get("/")
-
-    assert response.status_code == 200
-    ui = response.text
-    assert "getFindingRecord(findingId)" in ui
-    assert "const targetFact = intent.to ? this.getFactRecord(intent.to) : null;" in ui
-    assert "if (targetFact) {" in ui
-    assert "const reportFinding = this.isReportIntent(intent) ? this.getFindingRecord(intent.to) : null;" in ui
-    assert "reportedFindingId: intent.to" in ui
-    assert "targetType: 'intent'" in ui
-    assert "`reported ${intent.to}`" in ui
-    assert "if (entry.type === 'intent_concluded' && entry.reportedFindingId) return 'Report';" in ui
-    assert "if (entry.type === 'intent_concluded' && entry.reportedFindingId) return 'bg-violet-50 text-violet-700';" in ui
-
-
-def test_static_ui_uses_task_mode_placeholder_labels(client: TestClient) -> None:
-    response = client.get("/")
-
-    assert response.status_code == 200
-    graph_styles = response.text[
-        response.text.index("graphStyles()") : response.text.index("    layoutOpts(")
-    ]
-    assert "node[nodeType=\"in_progress\"]" in graph_styles
-    assert "node[nodeType=\"unclaimed\"]" in graph_styles
-    assert "label:'?'" not in graph_styles
-    assert graph_styles.count("label:'data(label)'") >= 2
-
-
 def test_project_ids_follow_current_existing_max_after_deletes(client: TestClient) -> None:
-    first = _create_project(client, title="first")["project"]["id"]
-    second = _create_project(client, title="second")["project"]["id"]
-    third = _create_project(client, title="third")["project"]["id"]
-    assert [first, second, third] == ["proj_001", "proj_002", "proj_003"]
+    first = _create_project(client, title="one")
+    second = _create_project(client, title="two")
 
-    assert client.delete(f"/projects/{second}").status_code == 204
-    fourth = _create_project(client, title="fourth")["project"]["id"]
-    assert fourth == "proj_004"
+    assert first["project"]["id"] == "proj_001"
+    assert second["project"]["id"] == "proj_002"
 
-    assert client.delete(f"/projects/{fourth}").status_code == 204
-    reused_max = _create_project(client, title="reused max")["project"]["id"]
-    assert reused_max == "proj_004"
+    assert client.delete("/projects/proj_002").status_code == 204
+    third = _create_project(client, title="three")
 
-
-def test_project_id_restarts_when_no_projects_remain(client: TestClient) -> None:
-    project_id = _create_project(client)["project"]["id"]
-    assert project_id == "proj_001"
-
-    assert client.delete(f"/projects/{project_id}").status_code == 204
-    replacement_id = _create_project(client, title="replacement")["project"]["id"]
-    assert replacement_id == "proj_001"
+    assert third["project"]["id"] == "proj_002"
 
 
 def test_authenticated_projects_require_accounts_and_persist_account_pool(client: TestClient) -> None:
-    response = client.post(
-        "/projects",
-        json={
-            "title": "collection without accounts",
-            "origin": "start",
-        },
-    )
-    assert response.status_code == 201
-    assert response.json()["project"]["auth_mode"] == "anonymous"
-
-    anonymous_with_accounts = client.post(
-        "/projects",
-        json={
-            "title": "anonymous with accounts",
-            "origin": "start",
-            "auth_mode": "anonymous",
-            "accounts": [{"cookies": [{"name": "sessionid", "value": "secret-1"}]}],
-        },
-    )
-    assert anonymous_with_accounts.status_code == 422
-
-    authenticated_with_accounts = client.post(
-        "/projects",
-        json={
-            "title": "authenticated with accounts",
-            "origin": "start",
-            "auth_mode": "authenticated",
-            "accounts": [{"cookies": [{"name": "sessionid", "value": "secret-1"}]}],
-        },
-    )
-    assert authenticated_with_accounts.status_code == 201
-
-    duplicate_cookie = client.post(
-        "/projects",
-        json={
-            "title": "duplicate cookies",
-            "origin": "start",
-            "accounts": [
-                {
-                    "cookies": [
-                        {"name": "sessionid", "value": "one"},
-                        {"name": "sessionid", "value": "two"},
-                    ]
-                }
-            ],
-        },
-    )
-    assert duplicate_cookie.status_code == 422
-
-    payload = _create_project(
-        client,
-        accounts=[
-            {
-                "label": "alice",
-                "cookies": [
-                    {"name": "sessionid", "value": "secret-1"},
-                    {"name": "csrf", "value": "csrf-1"},
-                ],
-            },
-            {"cookies": [{"name": "sessionid", "value": "secret-2"}]},
-        ],
-    )
-    project_id = payload["project"]["id"]
-    assert payload["accounts"] == [
-        {
-            "id": "a001",
-            "label": "alice",
-            "cookies": [
-                {"name": "sessionid", "value": "secret-1"},
-                {"name": "csrf", "value": "csrf-1"},
-            ],
-        },
-        {"id": "a002", "label": "account-2", "cookies": [{"name": "sessionid", "value": "secret-2"}]},
-    ]
-    detail = client.get(f"/projects/{project_id}").json()
-    assert detail["accounts"][1]["label"] == "account-2"
-    exported = client.get(f"/projects/{project_id}/export?format=yaml").text
-    assert "auth_mode: dual" in exported
-    assert "name: sessionid" in exported
-    assert "value: secret-1" in exported
-    assert "username:" not in exported
-    assert "password:" not in exported
-
-
-def test_vuln_authenticated_projects_require_accounts(client: TestClient) -> None:
-    anonymous = client.post(
-        "/projects",
-        json={
-            "title": "vuln anon",
-            "origin": "start",
-            "project_kind": "vuln",
-            "auth_mode": "anonymous",
-        },
-    )
-    assert anonymous.status_code == 201
-    assert anonymous.json()["accounts"] == []
-
     missing = client.post(
         "/projects",
-        json={
-            "title": "vuln auth",
-            "origin": "start",
-            "project_kind": "vuln",
-            "auth_mode": "authenticated",
-        },
+        json={"title": "auth", "origin": "https://target.test", "auth_mode": "authenticated"},
     )
     assert missing.status_code == 422
 
-    authenticated = client.post(
-        "/projects",
-        json={
-            "title": "vuln auth",
-            "origin": "start",
-            "project_kind": "vuln",
-            "auth_mode": "authenticated",
-            "accounts": [{"cookies": [{"name": "sessionid", "value": "secret-1"}]}],
-        },
+    payload = _create_project(
+        client,
+        title="auth",
+        auth_mode="authenticated",
+        accounts=[
+            {
+                "label": "alice",
+                "cookies": [{"name": "sessionid", "value": "secret-1"}],
+            }
+        ],
+        hints=None,
     )
-    assert authenticated.status_code == 201
-    assert authenticated.json()["project"]["auth_mode"] == "authenticated"
-    assert authenticated.json()["accounts"][0]["id"] == "a001"
+    project_id = payload["project"]["id"]
+
+    assert payload["project"]["auth_mode"] == "authenticated"
+    assert payload["accounts"][0]["id"] == "a1"
+    assert client.get(f"/projects/{project_id}").json()["accounts"] == payload["accounts"]
 
 
-def test_new_vuln_project_is_parentless_and_rejects_snapshot_fork_fields(client: TestClient) -> None:
-    response = client.post(
-        "/projects",
-        json={
-            "title": "vuln",
-            "origin": "start",
-            "project_kind": "vuln",
-        },
-    )
-    assert response.status_code == 201
-    assert response.json()["project"]["parent_project_id"] is None
-    assert response.json()["project"]["parent_snapshot_id"] is None
-
-    parent = _create_project(client)["project"]["id"]
-    snapshot = _insert_legacy_snapshot(client, parent)
-    response = client.post(
-        "/projects",
-        json={
-            "title": "vuln",
-            "origin": "start",
-            "project_kind": "vuln",
-            "parent_project_id": parent,
-            "parent_snapshot_id": snapshot["id"],
-        },
-    )
-    assert response.status_code == 400
-    assert "snapshot-based project forking has been removed" in response.text
-
-
-def test_complete_and_reopen_routes_are_gone(client: TestClient) -> None:
+def test_task_sources_validate_and_ids_are_scoped(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
 
-    assert client.post(f"/projects/{project_id}/complete").status_code == 410
-    assert client.post(f"/projects/{project_id}/reopen").status_code == 410
+    missing = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"type": "collection_task", "from": ["f404"], "description": "bad source"},
+    )
+    assert missing.status_code == 404
+
+    first = _create_task(client, project_id)
+    second = _create_task(client, project_id, description="Collect more")
+    assert first["id"] == "t1"
+    assert second["id"] == "t2"
+
+
+def test_task_claim_release_conclude_and_graph_edges(client: TestClient) -> None:
+    project_id = _create_project(client)["project"]["id"]
+    task = _create_task(client, project_id)
+
+    heartbeat = client.post(f"/projects/{project_id}/tasks/{task['id']}/heartbeat", json={"worker": "worker-a"})
+    assert heartbeat.status_code == 200
+    assert heartbeat.json()["worker"] == "worker-a"
+
+    conflict = client.post(f"/projects/{project_id}/tasks/{task['id']}/heartbeat", json={"worker": "worker-b"})
+    assert conflict.status_code == 409
+
+    released = client.post(f"/projects/{project_id}/tasks/{task['id']}/release", json={"worker": "worker-a"})
+    assert released.status_code == 200
+    assert released.json()["worker"] is None
+
+    response = _conclude_task(client, project_id, task["id"], worker="worker-b")
+    assert response["fact"]["id"] == "f1"
+    assert response["fact"]["type"] == "collection_fact"
+    assert response["task"]["to"] == ["f1"]
+
+    vulnerability_task = _create_task(
+        client,
+        project_id,
+        type="vulnerability_task",
+        **{"from": ["f1"]},
+        description="Validate IDOR",
+    )
+    vuln_response = _conclude_task(
+        client,
+        project_id,
+        vulnerability_task["id"],
+        worker="worker-c",
+        findings=[{"description": "IDOR confirmed"}],
+    )
+    assert vuln_response["fact"]["id"] == "f2"
+    assert vuln_response["fact"]["type"] == "vulnerability_fact"
+    assert vuln_response["findings"][0]["id"] == "F1"
+
+    detail = client.get(f"/projects/{project_id}").json()
+    assert detail["facts"][0]["to"] == ["t2"]
+    assert detail["tasks"][1]["to"] == ["f2", "F1"]
+
+
+def test_collection_conclude_rejects_findings_without_closing_task(client: TestClient) -> None:
+    project_id = _create_project(client)["project"]["id"]
+    task = _create_task(client, project_id)
+
+    response = client.post(
+        f"/projects/{project_id}/tasks/{task['id']}/conclude",
+        json={
+            "worker": "worker",
+            "description": "collection fact",
+            "evidence": "/tmp/evidence.json",
+            "findings": [{"description": "collection cannot write this"}],
+        },
+    )
+
+    assert response.status_code == 400
+    detail = client.get(f"/projects/{project_id}").json()
+    assert detail["facts"] == []
+    assert detail["findings"] == []
+    assert detail["tasks"][0]["completion_time"] is None
+
+
+def test_finding_report_path_updates_finding_without_report_node(client: TestClient) -> None:
+    project_id = _create_project(client)["project"]["id"]
+    collection = _create_task(client, project_id)
+    _conclude_task(client, project_id, collection["id"])
+    vulnerability = _create_task(
+        client,
+        project_id,
+        type="vulnerability_task",
+        **{"from": ["f1"]},
+        description="Validate IDOR",
+    )
+    _conclude_task(
+        client,
+        project_id,
+        vulnerability["id"],
+        findings=[{"description": "IDOR confirmed"}],
+    )
+
+    response = client.post(
+        f"/projects/{project_id}/findings/F1/report",
+        json={"worker": "reporter", "report": "/home/kali/reports/F1.md"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["report"] == "/home/kali/reports/F1.md"
+
+    exported = yaml.safe_load(client.get(f"/projects/{project_id}/export?format=yaml").text)
+    assert exported["findings"][0]["report"] == "/home/kali/reports/F1.md"
+    assert "reports" not in exported
 
 
 def test_status_completed_is_terminal_and_clears_claims(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
-    client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "work", "creator": "worker-a", "worker": "worker-a"},
-    )
-    client.post(
+    task = _create_task(client, project_id, worker="worker-a")
+    claim = client.post(
         f"/projects/{project_id}/reason/claim",
-        json={"worker": "worker-b", "trigger": "facts:2->3"},
+        json={"worker": "reasoner", "trigger": "facts:0->1", "task_mode": "collection"},
     )
+    assert claim.status_code == 200
 
-    response = client.put(f"/projects/{project_id}/status", json={"status": "completed"})
-    assert response.status_code == 200
-    assert response.json()["reason"] is None
-    assert client.put(f"/projects/{project_id}/status", json={"status": "active"}).status_code == 409
+    completed = client.put(f"/projects/{project_id}/status", json={"status": "completed"})
+    assert completed.status_code == 200
     detail = client.get(f"/projects/{project_id}").json()
-    assert detail["intents"][0]["worker"] is None
+    assert detail["project"]["status"] == "completed"
+    assert detail["tasks"][0]["id"] == task["id"]
+    assert detail["tasks"][0]["worker"] is None
+    assert detail["project"]["reason"] is None
+
+    reopen = client.put(f"/projects/{project_id}/status", json={"status": "active"})
+    assert reopen.status_code == 409
 
 
 def test_reason_pending_is_coalesced_while_reason_is_running(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
-    client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "work", "creator": "explorer", "worker": "explorer"},
-    )
+    task = _create_task(client, project_id)
     claim = client.post(
         f"/projects/{project_id}/reason/claim",
-        json={"worker": "reasoner", "trigger": "facts:1->2", "task_mode": "collection"},
+        json={"worker": "reasoner", "trigger": "initial", "task_mode": "collection"},
     )
     assert claim.status_code == 200
-    assert claim.json()["reason_pending"] is False
 
-    concluded = client.post(
-        f"/projects/{project_id}/intents/i001/conclude",
-        json={"worker": "explorer", "description": "new fact"},
-    )
-    assert concluded.status_code == 200
-    assert client.get(f"/projects/{project_id}").json()["project"]["reason_pending"] is True
+    _conclude_task(client, project_id, task["id"])
 
-    hinted = client.post(
-        f"/projects/{project_id}/hints",
-        json={"content": "new clue", "creator": "human"},
-    )
-    assert hinted.status_code == 201
-    assert client.get(f"/projects/{project_id}").json()["project"]["reason_pending"] is True
+    detail = client.get(f"/projects/{project_id}").json()
+    assert detail["project"]["reason_pending"] is True
 
-    released = client.post(
+    release = client.post(
         f"/projects/{project_id}/reason/release",
         json={"worker": "reasoner", "task_mode": "collection"},
     )
-    assert released.status_code == 200
-    assert released.json()["reason"] is None
-    assert released.json()["reason_pending"] is True
-
-    next_claim = client.post(
-        f"/projects/{project_id}/reason/claim",
-        json={"worker": "reasoner", "trigger": "pending", "task_mode": "collection"},
-    )
-    assert next_claim.status_code == 200
-    assert next_claim.json()["reason_pending"] is False
+    assert release.status_code == 200
 
 
-def test_project_detail_orders_intents_by_created_at_then_id(client: TestClient) -> None:
+def test_project_detail_orders_tasks_by_creation_time_then_id(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
     with db.get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO intents (id, project_id, description, creator, created_at, intent_kind, auth_scope)
-            VALUES ('i010', ?, 'late id inserted first', 'tester', '2026-01-01T00:00:02Z', 'explore', 'anonymous')
+            INSERT INTO tasks (id, project_id, type, description, creation_time)
+            VALUES ('t10', ?, 'collection_task', 'later id', '2026-01-01T00:00:02Z')
             """,
             (project_id,),
         )
         conn.execute(
             """
-            INSERT INTO intents (id, project_id, description, creator, created_at, intent_kind, auth_scope)
-            VALUES ('i002', ?, 'early id inserted second', 'tester', '2026-01-01T00:00:02Z', 'explore', 'anonymous')
+            INSERT INTO tasks (id, project_id, type, description, creation_time)
+            VALUES ('t2', ?, 'collection_task', 'earlier id', '2026-01-01T00:00:01Z')
             """,
             (project_id,),
         )
 
     detail = client.get(f"/projects/{project_id}")
-
-    assert detail.status_code == 200
-    assert [intent["id"] for intent in detail.json()["intents"]] == ["i002", "i010"]
+    assert [task["id"] for task in detail.json()["tasks"]] == ["t2", "t10"]
 
 
 def test_legacy_snapshot_read_bad_json_fields_fall_back_to_empty_defaults(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
-    snapshot = _insert_legacy_snapshot(client, project_id)
+    snapshot = _insert_legacy_snapshot(project_id)
     with db.get_conn() as conn:
         conn.execute(
             "UPDATE project_snapshots SET selected_fact_ids_json = 'not-json', stats_json = 'not-json' WHERE id = ? AND project_id = ?",
@@ -674,102 +438,42 @@ def test_legacy_snapshot_read_bad_json_fields_fall_back_to_empty_defaults(client
     assert snapshots.json()[0]["stats"] == {}
 
 
-def test_project_detail_bad_fact_and_account_json_fields_fall_back_to_empty_defaults(client: TestClient) -> None:
-    project_id = _create_project(client)["project"]["id"]
+def test_project_detail_bad_account_json_fields_fall_back_to_empty_defaults(client: TestClient) -> None:
+    project_id = _create_project(
+        client,
+        auth_mode="authenticated",
+        accounts=[{"cookies": [{"name": "sid", "value": "secret"}]}],
+        hints=None,
+    )["project"]["id"]
     with db.get_conn() as conn:
         conn.execute(
-            "UPDATE facts SET details_json = 'not-json' WHERE id = 'origin' AND project_id = ?",
-            (project_id,),
-        )
-        conn.execute(
-            "UPDATE project_accounts SET cookies_json = 'not-json' WHERE id = 'a001' AND project_id = ?",
+            "UPDATE project_accounts SET cookies_json = 'not-json' WHERE project_id = ?",
             (project_id,),
         )
 
     detail = client.get(f"/projects/{project_id}")
 
     assert detail.status_code == 200
-    assert detail.json()["facts"][0]["details"] == {}
     assert detail.json()["accounts"] == []
 
 
-def test_export_bad_report_json_falls_back_to_empty_object(client: TestClient) -> None:
+def test_export_yaml_contains_blackboard_graph_and_timeline(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
-    with db.get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO intents (id, project_id, to_fact_id, description, creator, created_at, concluded_at, intent_kind)
-            VALUES ('i900', ?, 'origin', 'report finding', 'tester', '2026-01-01T00:00:02Z', '2026-01-01T00:00:03Z', 'report')
-            """,
-            (project_id,),
-        )
-        conn.execute(
-            """
-            INSERT INTO findings (
-                id, project_id, fact_id, intent_id, title, vulnerability_type, severity,
-                target, location, impact, evidence, reproduction, remediation, status,
-                research_value, next_action, created_at
-            ) VALUES (
-                'v900', ?, 'origin', 'i900', 'Finding', 'idor', 'medium',
-                'https://target.test', 'GET /api', 'impact', 'evidence', 'steps', 'fix', 'candidate',
-                'medium', 'triage', '2026-01-01T00:00:03Z'
-            )
-            """,
-            (project_id,),
-        )
-        conn.execute(
-            """
-            INSERT INTO finding_reports (id, project_id, finding_id, intent_id, report_markdown, report_json, created_at)
-            VALUES ('r900', ?, 'v900', 'i900', '# Report', 'not-json', '2026-01-01T00:00:04Z')
-            """,
-            (project_id,),
-        )
+    task = _create_task(client, project_id)
+    _conclude_task(client, project_id, task["id"])
 
-    response = client.get(f"/projects/{project_id}/export?format=yaml")
+    yaml_response = client.get(f"/projects/{project_id}/export?format=yaml")
+    timeline_response = client.get(f"/projects/{project_id}/export?format=timeline")
 
-    assert response.status_code == 200
-    exported = yaml.safe_load(response.text)
-    assert exported["reports"][0]["report_json"] == {}
-
-
-def test_conclude_persists_structured_feature_fact_and_export(client: TestClient) -> None:
-    project_id = _create_project(client)["project"]["id"]
-    client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "map upload page", "creator": "reasoner", "auth_scope": "anonymous"},
-    )
-
-    response = client.post(
-        f"/projects/{project_id}/intents/i001/conclude",
-        json={
-            "worker": "explorer",
-            "description": "intent_summary: mapped upload page",
-            "fact_type": "feature_surface",
-            "title": "Upload page",
-            "summary": "用户可以选择图片并提交上传",
-            "details": {
-                "user_actions": ["选择图片", "提交上传"],
-                "routes": ["/upload"],
-                "apis": ["POST /api/upload"],
-            },
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    fact = response.json()["fact"]
-    assert fact["fact_type"] == "feature_surface"
-    assert fact["title"] == "Upload page"
-    assert fact["details"]["apis"] == ["POST /api/upload"]
-
-    detail = client.get(f"/projects/{project_id}").json()
-    persisted = next(fact for fact in detail["facts"] if fact["id"] == "f001")
-    assert persisted["summary"] == "用户可以选择图片并提交上传"
-    exported = yaml.safe_load(client.get(f"/projects/{project_id}/export?format=yaml").text)
-    exported_fact = next(fact for fact in exported["facts"] if fact["id"] == "f001")
-    assert exported_fact["fact_type"] == "feature_surface"
-    assert exported_fact["details"]["routes"] == ["/upload"]
-    assert exported["intents"][0]["task_mode"] == "validation"
-    assert "recon" not in exported
+    assert yaml_response.status_code == 200
+    exported = yaml.safe_load(yaml_response.text)
+    assert exported["origin"]["id"] == "origin"
+    assert exported["tasks"][0]["id"] == "t1"
+    assert exported["facts"][0]["id"] == "f1"
+    assert "intents" not in exported
+    assert "finding_reports" not in exported
+    assert "TASK CREATED t1" in timeline_response.text
+    assert "TASK CONCLUDED t1" in timeline_response.text
 
 
 def test_hint_without_running_reason_does_not_mark_reason_pending(client: TestClient) -> None:
@@ -786,46 +490,44 @@ def test_hint_without_running_reason_does_not_mark_reason_pending(client: TestCl
 
 def test_collection_rounds_do_not_stop_project_at_reason_limit(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
+
     assert client.post(f"/projects/{project_id}/recon/reason-round", json={"stable": True}).json()["status"] == "active"
     response = client.post(f"/projects/{project_id}/recon/reason-round", json={"stable": False})
+
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["collection_reason_rounds"] == 2
-    assert payload["collection_stable_rounds"] == 0
-    assert payload["status"] == "active"
-    exported = yaml.safe_load(client.get(f"/projects/{project_id}/export?format=yaml").text)
-    assert "max_reason_rounds" not in exported["collection"]
-    assert exported["collection"]["reason_rounds"] == 2
-    assert exported["collection"]["stable_rounds"] == 0
+    assert response.json()["status"] == "active"
+    assert response.json()["collection_reason_rounds"] == 2
+    assert response.json()["collection_stable_rounds"] == 0
 
 
 def test_legacy_child_projects_still_protect_parent_deletion(client: TestClient) -> None:
-    parent = _create_project(client)
-    parent_id = parent["project"]["id"]
-    snapshot = _insert_legacy_snapshot(client, parent_id)
-    child_id = _insert_legacy_child_project(client, parent_id, snapshot["id"])
-
-    assert client.get(f"/projects/{parent_id}/children").json()[0]["id"] == child_id
-    assert client.delete(f"/projects/{parent_id}").status_code == 409
-
-
-def test_recon_specific_write_apis_are_gone(client: TestClient) -> None:
     parent_id = _create_project(client)["project"]["id"]
-    snapshot = _insert_legacy_snapshot(client, parent_id)
+    snapshot = _insert_legacy_snapshot(parent_id)
+    child_id = _insert_legacy_child_project(parent_id, snapshot["id"])
 
-    assert client.post(f"/projects/{parent_id}/snapshots", json={"selected_fact_ids": []}).status_code == 410
+    response = client.delete(f"/projects/{parent_id}")
+
+    assert response.status_code == 409
+    assert client.get(f"/projects/{child_id}").status_code == 200
+
+
+def test_retired_write_apis_are_gone(client: TestClient) -> None:
+    project_id = _create_project(client)["project"]["id"]
+    snapshot = _insert_legacy_snapshot(project_id)
+
+    assert client.post(f"/projects/{project_id}/snapshots", json={"selected_fact_ids": []}).status_code == 410
     assert client.post(
-        f"/projects/{parent_id}/fork-vuln",
+        f"/projects/{project_id}/fork-vuln",
         json={"title": "legacy fork", "snapshot_id": snapshot["id"]},
     ).status_code == 410
     assert client.post(
-        f"/projects/{parent_id}/fork-vuln/seed-jobs",
+        f"/projects/{project_id}/fork-vuln/seed-jobs",
         json={"title": "legacy seed", "snapshot_id": snapshot["id"]},
     ).status_code == 410
-    assert client.get(f"/projects/{parent_id}/fork-vuln/seed-jobs").status_code == 410
-    assert client.post(f"/projects/{parent_id}/recon/judgements").status_code == 410
-    assert client.get(f"/projects/{parent_id}/recon/judgements").status_code == 410
-    assert client.get(f"/projects/{parent_id}/recon/judgements/judge_001").status_code == 410
+    assert client.get(f"/projects/{project_id}/fork-vuln/seed-jobs").status_code == 410
+    assert client.post(f"/projects/{project_id}/recon/judgements").status_code == 410
+    assert client.get(f"/projects/{project_id}/recon/judgements").status_code == 410
+    assert client.get(f"/projects/{project_id}/recon/judgements/judge_001").status_code == 410
 
 
 def test_legacy_ephemeral_jobs_are_hidden_from_dispatch_queue_and_cannot_be_claimed(client: TestClient) -> None:
@@ -843,217 +545,12 @@ def test_legacy_ephemeral_jobs_are_hidden_from_dispatch_queue_and_cannot_be_clai
     assert [(row["id"], row["status"]) for row in rows] == [("fork_001", "queued"), ("judge_001", "queued")]
 
 
-def test_retired_ephemeral_job_fail_route_is_gone(client: TestClient) -> None:
-    project_id = _create_project(client)["project"]["id"]
-    _insert_ephemeral_job(project_id, "judge_001", "judge")
-
-    response = client.post(
-        "/ephemeral-jobs/judge_001/fail",
-        json={"worker": "dispatcher", "error": "retired"},
-    )
-
-    assert response.status_code == 410
-
-
-def test_collection_conclude_rejects_findings(client: TestClient) -> None:
-    project_id = _create_project(client)["project"]["id"]
-    client.post(
-        f"/projects/{project_id}/intents",
-        json={
-            "from": ["origin"],
-            "description": "verify idor",
-            "creator": "reasoner",
-            "task_mode": "collection",
-            "auth_scope": "anonymous",
-        },
-    )
-
-    response = client.post(
-        f"/projects/{project_id}/intents/i001/conclude",
-        json={
-            "worker": "explorer",
-            "description": "collection fact",
-            "findings": [
-                {
-                    "title": "collection should not write findings",
-                    "vulnerability_type": "idor",
-                    "severity": "medium",
-                    "target": "https://target.test",
-                    "location": "GET /api/orders/1",
-                    "impact": "other users may read orders",
-                    "evidence": "changed order id returned another record",
-                    "reproduction": "request adjacent order id",
-                    "remediation": "enforce object ownership checks",
-                    "status": "candidate",
-                    "research_value": "medium",
-                    "next_action": "follow_up",
-                    "followup_intent_description": "Validate adjacent order export IDOR",
-                }
-            ],
-        },
-    )
-
-    assert response.status_code == 400
-    detail = client.get(f"/projects/{project_id}").json()
-    assert detail["findings"] == []
-    assert detail["intents"][0]["to"] is None
-
-
-def test_collection_task_mode_rejects_report_intents(client: TestClient) -> None:
+def test_legacy_intent_api_is_not_registered(client: TestClient) -> None:
     project_id = _create_project(client)["project"]["id"]
 
     response = client.post(
         f"/projects/{project_id}/intents",
-        json={
-            "from": ["origin"],
-            "description": "report mode must use report intent kind",
-            "creator": "reasoner",
-            "task_mode": "report",
-        },
+        json={"from": ["origin"], "description": "old", "creator": "tester"},
     )
 
-    assert response.status_code == 400
-
-
-def test_collection_requires_auth_scope_and_supports_anonymous_and_authenticated_lines(client: TestClient) -> None:
-    project_id = _create_authenticated_vuln(client)["project"]["id"]
-
-    missing_scope = client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "map public catalog", "creator": "reasoner", "task_mode": "collection"},
-    )
-    assert missing_scope.status_code == 400
-
-    anonymous = client.post(
-        f"/projects/{project_id}/intents",
-        json={
-            "from": ["origin"],
-            "description": "map catalog anonymous",
-            "creator": "reasoner",
-            "task_mode": "collection",
-            "auth_scope": "anonymous",
-        },
-    )
-    authenticated = client.post(
-        f"/projects/{project_id}/intents",
-        json={
-            "from": ["origin"],
-            "description": "map catalog authenticated",
-            "creator": "reasoner",
-            "task_mode": "collection",
-            "auth_scope": "authenticated",
-        },
-    )
-    validation_anonymous = client.post(
-        f"/projects/{project_id}/intents",
-        json={
-            "from": ["origin"],
-            "description": "validate anonymous idor",
-            "creator": "reasoner",
-            "task_mode": "validation",
-            "auth_scope": "anonymous",
-        },
-    )
-
-    assert anonymous.status_code == 201, anonymous.text
-    assert anonymous.json()["auth_scope"] == "anonymous"
-    assert authenticated.status_code == 201, authenticated.text
-    assert authenticated.json()["auth_scope"] == "authenticated"
-    assert validation_anonymous.status_code == 400
-
-
-def test_collection_rejects_authenticated_scope_without_accounts(client: TestClient) -> None:
-    project_id = _create_project(client, accounts=None, hints=[])["project"]["id"]
-
-    response = client.post(
-        f"/projects/{project_id}/intents",
-        json={
-            "from": ["origin"],
-            "description": "map logged-in catalog",
-            "creator": "reasoner",
-            "task_mode": "collection",
-            "auth_scope": "authenticated",
-        },
-    )
-
-    assert response.status_code == 400
-    assert "require project accounts" in response.text
-
-
-def test_conclude_finding_lifecycle_creates_followup_and_report_intents(client: TestClient) -> None:
-    project_id = _create_authenticated_vuln(client)["project"]["id"]
-    client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "verify idor", "creator": "reasoner", "worker": None, "auth_scope": "authenticated"},
-    )
-    response = client.post(
-        f"/projects/{project_id}/intents/i001/conclude",
-        json={
-            "worker": "explorer",
-            "description": "confirmed idor",
-            "findings": [
-                {
-                    "title": "Follow-up IDOR",
-                    "next_action": "follow_up",
-                    "followup_intent_description": "Check adjacent order APIs",
-                },
-                {
-                    "title": "Reportable IDOR",
-                    "next_action": "report",
-                    "research_value": "high",
-                },
-            ],
-        },
-    )
-    assert response.status_code == 200
-    findings = response.json()["findings"]
-    assert findings[0]["followup_intent_id"] == "i002"
-    assert findings[1]["report_intent_id"] == "i003"
-    assert findings[1]["report_status"] == "queued"
-    detail = client.get(f"/projects/{project_id}").json()
-    intent_kinds = {intent["id"]: intent["intent_kind"] for intent in detail["intents"]}
-    assert intent_kinds["i002"] == "explore"
-    assert intent_kinds["i003"] == "report"
-    task_modes = {intent["id"]: intent["task_mode"] for intent in detail["intents"]}
-    assert task_modes["i001"] == "validation"
-    assert task_modes["i002"] == "validation"
-    assert task_modes["i003"] == "report"
-    intent_scopes = {intent["id"]: intent["auth_scope"] for intent in detail["intents"]}
-    assert intent_scopes["i001"] == "authenticated"
-    assert intent_scopes["i002"] == "authenticated"
-    assert intent_scopes["i003"] is None
-
-    report = client.post(
-        f"/projects/{project_id}/intents/i003/report",
-        json={"worker": "reporter", "report_markdown": "# IDOR report", "report_json": {"severity": "high"}},
-    )
-    assert report.status_code == 200
-    detail = client.get(f"/projects/{project_id}").json()
-    report_finding = next(item for item in detail["findings"] if item["title"] == "Reportable IDOR")
-    assert report_finding["report_status"] == "drafted"
-
-
-def test_report_intent_cannot_use_fact_conclude_endpoint(client: TestClient) -> None:
-    project_id = _create_authenticated_vuln(client)["project"]["id"]
-    client.post(
-        f"/projects/{project_id}/intents",
-        json={"from": ["origin"], "description": "verify idor", "creator": "reasoner", "auth_scope": "authenticated"},
-    )
-    client.post(
-        f"/projects/{project_id}/intents/i001/conclude",
-        json={
-            "worker": "explorer",
-            "description": "confirmed idor",
-            "findings": [{"title": "Reportable IDOR", "next_action": "report"}],
-        },
-    )
-
-    response = client.post(
-        f"/projects/{project_id}/intents/i002/conclude",
-        json={"worker": "reporter", "description": "report intent should not write facts"},
-    )
-
-    assert response.status_code == 400
-    detail = client.get(f"/projects/{project_id}").json()
-    report_intent = next(intent for intent in detail["intents"] if intent["id"] == "i002")
-    assert report_intent["to"] is None
+    assert response.status_code == 404

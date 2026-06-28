@@ -7,7 +7,7 @@ from cairn.dispatcher.config import DispatchConfig, WorkerConfig
 from cairn.dispatcher.contracts import parse_json_output, validate_reason_payload
 from cairn.dispatcher.prompting import (
     format_fact_ids,
-    format_open_intents,
+    format_open_tasks,
     load_prompt,
     render_prompt,
 )
@@ -91,39 +91,38 @@ def run_reason_task(
                     preview(healthcheck.result.stderr),
                 )
                 return "unhealthy"
-        open_intents = [
+        open_tasks = [
             {
-                "id": intent.id,
-                "from": intent.from_,
-                "description": intent.description,
-                "worker": intent.worker,
-                "auth_scope": intent.auth_scope,
-                "task_mode": intent.task_mode,
+                "id": task.id,
+                "from": task.from_,
+                "description": task.description,
+                "worker": task.worker,
+                "auth_scope": task.auth_scope,
+                "task_mode": task.task_mode,
             }
-            for intent in project.intents
-            if intent.to is None and intent.task_mode == task_mode
+            for task in project.tasks
+            if task.completion_time is None and task.task_mode == task_mode
         ]
-        allowed_fact_ids = [fact.id for fact in project.facts]
+        allowed_fact_ids = ["origin", *[fact.id for fact in project.facts]]
         is_initial_collection = (
             task_mode == "collection"
-            and len(project.facts) == 1
-            and project.facts[0].id == "origin"
-            and not open_intents
+            and not project.facts
+            and not open_tasks
         )
         initial_collection_scopes = {"anonymous", "authenticated"} if project.accounts else {"anonymous"}
-        max_intents = (
-            max(config.tasks.reason.max_intents, len(initial_collection_scopes))
+        max_tasks = (
+            max(config.tasks.reason.max_tasks, len(initial_collection_scopes))
             if is_initial_collection
-            else config.tasks.reason.max_intents
+            else config.tasks.reason.max_tasks
         )
         LOG.debug(
-            "reason context prepared project=%s worker=%s facts=%s allowed_fact_ids=%s hints=%s open_intents=%s",
+            "reason context prepared project=%s worker=%s facts=%s allowed_fact_ids=%s hints=%s open_tasks=%s",
             project.project.id,
             worker.name,
             len(project.facts),
             len(allowed_fact_ids),
             len(project.hints),
-            len(open_intents),
+            len(open_tasks),
         )
         prompt = render_prompt(
             load_prompt(config.runtime.prompt_group, "reason.md", task_mode),
@@ -135,8 +134,8 @@ def run_reason_task(
                     phase="reason_execute",
                 ),
                 "fact_ids": format_fact_ids(allowed_fact_ids),
-                "open_intents": format_open_intents(open_intents),
-                "max_intents": str(max_intents),
+                "open_tasks": format_open_tasks(open_tasks),
+                "max_tasks": str(max_tasks),
                 "project_kind": project.project.project_kind,
                 "task_mode": task_mode,
                 "has_accounts": "true" if project.accounts else "false",
@@ -206,20 +205,20 @@ def run_reason_task(
             payload = parse_json_output(model_output)
             kind, data = validate_reason_payload(
                 payload,
-                open_intents_empty=not open_intents,
-                max_intents=max_intents,
+                open_tasks_empty=not open_tasks,
+                max_tasks=max_tasks,
                 task_mode=task_mode,
                 require_auth_scope=task_mode == "collection",
             )
             if is_initial_collection:
                 scopes = {
-                    intent.get("auth_scope")
-                    for intent in data
-                    if isinstance(intent, dict) and intent.get("task_mode") == "collection"
-                } if kind == "intents" and isinstance(data, list) else set()
+                    task.get("auth_scope")
+                    for task in data
+                    if isinstance(task, dict) and task.get("type") == "collection_task"
+                } if kind == "tasks" and isinstance(data, list) else set()
                 if scopes != initial_collection_scopes:
                     expected = " and ".join(sorted(initial_collection_scopes))
-                    raise ValueError(f"initial collection requires {expected} baseline intents")
+                    raise ValueError(f"initial collection requires {expected} baseline tasks")
         except Exception as exc:
             LOG.warning(
                 "reason parse failed project=%s worker=%s error=%s execute_ms=%s total_ms=%s stdout_preview=%s stderr_preview=%s",
@@ -242,29 +241,28 @@ def run_reason_task(
                 preview(result.stdout),
             )
             return "rejected"
-        if kind == "intents":
+        if kind == "tasks":
             created = 0
-            for intent_data in data:
+            for task_data in data:
                 if lease.failure is not None:
                     LOG.warning(
-                        "reason heartbeat failed before intent write project=%s worker=%s status=%s body=%s",
+                        "reason heartbeat failed before task write project=%s worker=%s status=%s body=%s",
                         project.project.id,
                         worker.name,
                         lease.failure.status_code,
                         lease.failure.text,
                     )
                     return "failed"
-                response = client.create_intent(
+                response = client.create_task(
                     project.project.id,
-                    intent_data["from"],
-                    intent_data["description"],
-                    worker.name,
-                    auth_scope=intent_data.get("auth_scope"),
-                    task_mode=intent_data.get("task_mode", task_mode),
+                    task_data["from"],
+                    task_data["description"],
+                    task_type=task_data.get("type") or ("collection_task" if task_mode == "collection" else "vulnerability_task"),
+                    auth_scope=task_data.get("auth_scope"),
                 )
                 if lease.failure is not None:
                     LOG.warning(
-                        "reason heartbeat failed after intent write project=%s worker=%s status=%s body=%s",
+                        "reason heartbeat failed after task write project=%s worker=%s status=%s body=%s",
                         project.project.id,
                         worker.name,
                         lease.failure.status_code,
@@ -272,21 +270,21 @@ def run_reason_task(
                     )
                     return "failed"
                 if response.status_code == 403:
-                    LOG.info("project became inactive during reason intent create project=%s worker=%s created=%s", project.project.id, worker.name, created)
+                    LOG.info("project became inactive during reason task create project=%s worker=%s created=%s", project.project.id, worker.name, created)
                     return "success"
                 if response.status_code == 409:
                     LOG.info(
-                        "duplicate intent skipped project=%s worker=%s from=%s auth_scope=%s description=%s",
+                        "duplicate task skipped project=%s worker=%s from=%s auth_scope=%s description=%s",
                         project.project.id,
                         worker.name,
-                        intent_data["from"],
-                        intent_data.get("auth_scope"),
-                        intent_data["description"],
+                        task_data["from"],
+                        task_data.get("auth_scope"),
+                        task_data["description"],
                     )
                     continue
                 if not response.ok:
                     LOG.warning(
-                        "reason intent write failed project=%s worker=%s status=%s body=%s",
+                        "reason task write failed project=%s worker=%s status=%s body=%s",
                         project.project.id,
                         worker.name,
                         response.status_code,
@@ -295,15 +293,15 @@ def run_reason_task(
                     return "failed"
                 created += 1
                 LOG.info(
-                    "reason created intent project=%s worker=%s from=%s auth_scope=%s description=%s",
+                    "reason created task project=%s worker=%s from=%s auth_scope=%s description=%s",
                     project.project.id,
                     worker.name,
-                    intent_data["from"],
-                    intent_data.get("auth_scope"),
-                    intent_data["description"],
+                    task_data["from"],
+                    task_data.get("auth_scope"),
+                    task_data["description"],
                 )
             LOG.info(
-                "reason finished project=%s worker=%s created_intents=%s/%s execute_ms=%s total_ms=%s",
+                "reason finished project=%s worker=%s created_tasks=%s/%s execute_ms=%s total_ms=%s",
                 project.project.id,
                 worker.name,
                 created,

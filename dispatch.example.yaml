@@ -25,12 +25,12 @@ runtime:
 
 tasks:
   reason:
-    # Reason decides whether useful mode-specific work remains and whether new intents should be proposed.
+    # Reason decides whether useful mode-specific work remains and whether new tasks should be proposed.
     timeout: 300
-    # Hard cap on how many new intents one reason step may create.
-    max_intents: 2
+    # Hard cap on how many new tasks one reason step may create.
+    max_tasks: 2
   explore:
-    # Main execution timeout for exploring a claimed intent.
+    # Main execution timeout for exploring a claimed task.
     timeout: 300
     # Time budget for conclude fallback used to summarize confirmed findings from the same session.
     conclude_timeout: 90
@@ -77,9 +77,9 @@ workers:
       ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
       ANTHROPIC_AUTH_TOKEN: "sk-xxx"
 
-  - name: "codex_validation_reason_qwen3.6-plus"
+  - name: "codex_vulnerability_reason_qwen3.6-plus"
     type: "codex"
-    task_types: [validation_reason]
+    task_types: [vulnerability_reason]
     max_running: 1
     priority: 0
     env:
@@ -87,9 +87,9 @@ workers:
       CODEX_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
       OPENAI_API_KEY: "sk-xxx"
 
-  - name: "codex_validation_explore_qwen3.6-plus"
+  - name: "codex_vulnerability_explore_qwen3.6-plus"
     type: "codex"
-    task_types: [validation_explore]
+    task_types: [vulnerability_explore]
     max_running: 1
     priority: 0
     env:

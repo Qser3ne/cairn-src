@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-TaskType = Literal["collection_reason", "collection_explore", "validation_reason", "validation_explore", "report"]
+TaskType = Literal["collection_reason", "collection_explore", "vulnerability_reason", "vulnerability_explore", "report"]
 WorkerType = Literal["claudecode", "codex", "pi", "mock"]
 CompletedAction = Literal["remove", "stop"]
 WorkerHealthcheckMode = Literal["startup_and_task", "startup_only", "disabled"]
@@ -36,49 +36,49 @@ WORKER_ENV_KEYS: dict[WorkerType, tuple[str, ...]] = {
 }
 
 DEFAULT_PROMPT_REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
-    "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
-    "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
-    "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
+    "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_tasks}", "{max_tasks}"),
+    "explore.md": ("{graph_yaml}", "{task_id}", "{task_description}"),
+    "explore_conclude.md": ("{graph_yaml}", "{task_id}", "{task_description}"),
 }
 
 PROMPT_REQUIRED_TOKENS_BY_GROUP: dict[str, dict[str, tuple[str, ...]]] = {
     "mock": {
-        "reason.md": ("{task_mode}", "{has_accounts}", "{fact_ids}", "{open_intents}", "{max_intents}"),
-        "explore.md": ("{task_mode}", "{intent_id}"),
-        "explore_conclude.md": ("{task_mode}", "{intent_id}"),
-        "report.md": ("{intent_id}", "{intent_description}"),
+        "reason.md": ("{task_mode}", "{has_accounts}", "{fact_ids}", "{open_tasks}", "{max_tasks}"),
+        "explore.md": ("{task_mode}", "{task_id}"),
+        "explore_conclude.md": ("{task_mode}", "{task_id}"),
+        "report.md": ("{finding_id}", "{finding_description}"),
     }
 }
 
 PROMPT_REQUIRED_TOKENS_BY_TASK_MODE: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
     "default": {
         "collection": {
-            "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
-            "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
-            "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
+            "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_tasks}", "{max_tasks}"),
+            "explore.md": ("{graph_yaml}", "{task_id}", "{task_description}", "{auth_context}"),
+            "explore_conclude.md": ("{graph_yaml}", "{task_id}", "{task_description}", "{auth_context}"),
         },
-        "validation": {
-            "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_intents}", "{max_intents}"),
-            "explore.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
-            "explore_conclude.md": ("{graph_yaml}", "{intent_id}", "{intent_description}", "{auth_context}"),
+        "vulnerability": {
+            "reason.md": ("{graph_yaml}", "{fact_ids}", "{open_tasks}", "{max_tasks}"),
+            "explore.md": ("{graph_yaml}", "{task_id}", "{task_description}", "{auth_context}"),
+            "explore_conclude.md": ("{graph_yaml}", "{task_id}", "{task_description}", "{auth_context}"),
         },
         "report": {
-            "report.md": ("{graph_yaml}", "{intent_id}", "{intent_description}"),
+            "report.md": ("{graph_yaml}", "{finding_id}", "{finding_description}"),
         }
     }
 }
 
 MOCK_ALLOWED_OUTCOMES: dict[str, frozenset[str]] = {
     "healthcheck": frozenset({"ok", "fail"}),
-    "reason": frozenset({"intent", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "collection_reason": frozenset({"intent", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "validation_reason": frozenset({"intent", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "reason": frozenset({"task", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "collection_reason": frozenset({"task", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "vulnerability_reason": frozenset({"task", "noop", "stable", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "collection_explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "validation_explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "vulnerability_explore_execute": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "collection_explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
-    "validation_explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
+    "vulnerability_explore_conclude": frozenset({"fact", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
     "report": frozenset({"draft", "rejected", "invalid_json", "invalid_payload", "command_fail"}),
 }
 
@@ -90,7 +90,7 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
     "reason": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "intent": "1.0",
+            "task": "1.0",
             "noop": "0.0",
             "stable": "0.0",
             "rejected": "0.0",
@@ -102,7 +102,7 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
     "collection_reason": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "intent": "1.0",
+            "task": "1.0",
             "noop": "0.0",
             "stable": "0.0",
             "rejected": "0.0",
@@ -111,10 +111,10 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
             "command_fail": "0.0",
         },
     },
-    "validation_reason": {
+    "vulnerability_reason": {
         "delay": [0.05, 0.3],
         "outcomes": {
-            "intent": "1.0",
+            "task": "1.0",
             "noop": "0.0",
             "stable": "0.0",
             "rejected": "0.0",
@@ -143,7 +143,7 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
             "command_fail": "0.0",
         },
     },
-    "validation_explore_execute": {
+    "vulnerability_explore_execute": {
         "delay": [0.05, 0.3],
         "outcomes": {
             "fact": "1.0",
@@ -173,7 +173,7 @@ MOCK_DEFAULT_BEHAVIOR: dict[str, dict[str, Any]] = {
             "command_fail": "0.0",
         },
     },
-    "validation_explore_conclude": {
+    "vulnerability_explore_conclude": {
         "delay": [0.05, 0.3],
         "outcomes": {
             "fact": "1.0",
@@ -204,7 +204,7 @@ class ReasonTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timeout: int = Field(gt=0)
-    max_intents: int = Field(gt=0, default=3)
+    max_tasks: int = Field(gt=0, default=3)
 
 
 class ExploreTaskConfig(BaseModel):
@@ -466,11 +466,11 @@ def resolve_mock_behavior(worker_name: str, env: dict[str, str]) -> dict[str, di
                     if not isinstance(value, int) or value < 0:
                         raise ValueError(f"worker {worker_name} {prefix}.rules[{index}].fact_ids_lte must be a non-negative integer")
                     entry["fact_ids_lte"] = value
-                if "open_intents_empty" in rule:
-                    value = rule["open_intents_empty"]
+                if "open_tasks_empty" in rule:
+                    value = rule["open_tasks_empty"]
                     if not isinstance(value, bool):
-                        raise ValueError(f"worker {worker_name} {prefix}.rules[{index}].open_intents_empty must be boolean")
-                    entry["open_intents_empty"] = value
+                        raise ValueError(f"worker {worker_name} {prefix}.rules[{index}].open_tasks_empty must be boolean")
+                    entry["open_tasks_empty"] = value
                 normalized_rules.append(entry)
             behavior[phase]["rules"] = normalized_rules
     return behavior

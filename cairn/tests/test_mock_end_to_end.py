@@ -49,8 +49,8 @@ class InProcessClient:
         response.raise_for_status()
         return response.text
 
-    def heartbeat(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
-        return self._post(f"/projects/{project_id}/intents/{intent_id}/heartbeat", {"worker": worker})
+    def heartbeat(self, project_id: str, task_id: str, worker: str) -> ApiResult:
+        return self._post(f"/projects/{project_id}/tasks/{task_id}/heartbeat", {"worker": worker})
 
     def claim_reason(self, project_id: str, worker: str, trigger: str, task_mode: str) -> ApiResult:
         return self._post(
@@ -64,17 +64,18 @@ class InProcessClient:
     def release_reason(self, project_id: str, worker: str, task_mode: str) -> ApiResult:
         return self._post(f"/projects/{project_id}/reason/release", {"worker": worker, "task_mode": task_mode})
 
-    def release(self, project_id: str, intent_id: str, worker: str) -> ApiResult:
-        return self._post(f"/projects/{project_id}/intents/{intent_id}/release", {"worker": worker})
+    def release(self, project_id: str, task_id: str, worker: str) -> ApiResult:
+        return self._post(f"/projects/{project_id}/tasks/{task_id}/release", {"worker": worker})
 
     def conclude(
         self,
         project_id: str,
-        intent_id: str,
+        task_id: str,
         worker: str,
         description: str,
         *,
-        fact_type: str = "observation",
+        evidence: str | None = None,
+        fact_type: str | None = None,
         title: str | None = None,
         summary: str | None = None,
         details: dict | None = None,
@@ -83,14 +84,31 @@ class InProcessClient:
         body = {
             "worker": worker,
             "description": description,
-            "fact_type": fact_type,
-            "title": title,
-            "summary": summary,
-            "details": details or {},
+            "evidence": evidence or f"/tmp/cairn/evidence/{task_id}.json",
         }
         if findings:
             body["findings"] = findings
-        return self._post(f"/projects/{project_id}/intents/{intent_id}/conclude", body)
+        return self._post(f"/projects/{project_id}/tasks/{task_id}/conclude", body)
+
+    def create_task(
+        self,
+        project_id: str,
+        from_ids: list[str],
+        description: str,
+        *,
+        task_type: str,
+        worker: str | None = None,
+        auth_scope: str | None = None,
+    ) -> ApiResult:
+        body = {
+            "from": from_ids,
+            "description": description,
+            "type": task_type,
+            "worker": worker,
+        }
+        if auth_scope is not None:
+            body["auth_scope"] = auth_scope
+        return self._post(f"/projects/{project_id}/tasks", body)
 
     def create_intent(
         self,
@@ -104,19 +122,8 @@ class InProcessClient:
         auth_scope: str | None = None,
         task_mode: str | None = None,
     ) -> ApiResult:
-        body = {
-            "from": from_ids,
-            "description": description,
-            "creator": creator,
-            "worker": None,
-            "intent_kind": intent_kind,
-            "finding_id": finding_id,
-        }
-        if auth_scope is not None:
-            body["auth_scope"] = auth_scope
-        if task_mode is not None:
-            body["task_mode"] = task_mode
-        return self._post(f"/projects/{project_id}/intents", body)
+        task_type = "collection_task" if task_mode == "collection" else "vulnerability_task"
+        return self.create_task(project_id, from_ids, description, task_type=task_type, auth_scope=auth_scope)
 
     def record_collection_reason_round(self, project_id: str, stable: bool) -> ApiResult:
         return self._post(f"/projects/{project_id}/recon/reason-round", {"stable": stable})
@@ -141,14 +148,13 @@ class InProcessClient:
     def conclude_report(
         self,
         project_id: str,
-        intent_id: str,
+        finding_id: str,
         worker: str,
-        report_markdown: str,
-        report_json: dict[str, Any],
+        report: str,
     ) -> ApiResult:
         return self._post(
-            f"/projects/{project_id}/intents/{intent_id}/report",
-            {"worker": worker, "report_markdown": report_markdown, "report_json": report_json},
+            f"/projects/{project_id}/findings/{finding_id}/report",
+            {"worker": worker, "report": report},
         )
 
     def _post(self, path: str, payload: dict[str, Any]) -> ApiResult:
@@ -270,9 +276,9 @@ def _config(
     reason: str,
     explore: str | None = None,
     collection_reason: str | None = None,
-    validation_reason: str | None = None,
+    vulnerability_reason: str | None = None,
     collection_explore: str | None = None,
-    validation_explore: str | None = None,
+    vulnerability_explore: str | None = None,
     report: str | None = None,
     task_types: list[str] | None = None,
 ) -> DispatchConfig:
@@ -281,10 +287,10 @@ def _config(
         "MOCK_HEALTHCHECK": _phase("ok"),
         "MOCK_REASON": reason,
         "MOCK_COLLECTION_REASON": collection_reason or reason,
-        "MOCK_VALIDATION_REASON": validation_reason or reason,
+        "MOCK_VULNERABILITY_REASON": vulnerability_reason or reason,
         "MOCK_EXPLORE_EXECUTE": explore_phase,
         "MOCK_COLLECTION_EXPLORE_EXECUTE": collection_explore or explore_phase,
-        "MOCK_VALIDATION_EXPLORE_EXECUTE": validation_explore or explore_phase,
+        "MOCK_VULNERABILITY_EXPLORE_EXECUTE": vulnerability_explore or explore_phase,
         "MOCK_REPORT": report or _phase("draft"),
     }
     return DispatchConfig.model_validate(
@@ -298,8 +304,8 @@ def _config(
                 "healthcheck_timeout": 2,
                 "prompt_group": "mock",
             },
-            "tasks": {
-                "reason": {"timeout": 2, "max_intents": 2},
+                "tasks": {
+                    "reason": {"timeout": 2, "max_tasks": 2},
                 "explore": {"timeout": 2, "conclude_timeout": 2},
                 "judge": {"timeout": 2},
                 "report": {"timeout": 2},
@@ -310,11 +316,11 @@ def _config(
                 "completed_action": "stop",
             },
             "workers": [
-                {
-                    "name": "mock-worker",
-                    "type": "mock",
-                    "task_types": task_types
-                    or ["collection_reason", "collection_explore", "validation_reason", "validation_explore", "report"],
+                    {
+                        "name": "mock-worker",
+                        "type": "mock",
+                        "task_types": task_types
+                        or ["collection_reason", "collection_explore", "vulnerability_reason", "vulnerability_explore", "report"],
                     "max_running": 1,
                     "priority": 0,
                     "env": env,
@@ -380,15 +386,15 @@ def _create_project(http: TestClient, **overrides) -> str:
 def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
     containers = LocalContainerManager()
-    loop = _loop(_config(reason=_phase("intent"), explore=_phase("fact")), client, containers)
+    loop = _loop(_config(reason=_phase("task"), explore=_phase("fact")), client, containers)
     project_id = _create_project(http_client)
 
     try:
         _dispatch_and_wait(loop)
         assert loop.reason_checkpoints[(project_id, "collection")] == ReasonCheckpoint(
-            fact_count=1,
+            fact_count=0,
             hint_count=0,
-            open_intent_count=2,
+            open_task_count=2,
         )
         _dispatch_and_wait(loop)
         _dispatch_and_wait(loop)
@@ -399,10 +405,10 @@ def test_mock_scheduler_runs_reason_explore_chain_without_completion(http_client
     assert project.project.status == "active"
     assert project.project.collection_reason_rounds == 1
     assert project.project.collection_explore_rounds == 2
-    assert [fact.id for fact in project.facts] == ["origin", "f001", "f002"]
-    assert {intent.auth_scope for intent in project.intents} == {"anonymous", "authenticated"}
-    assert {intent.task_mode for intent in project.intents} == {"collection"}
-    assert {intent.to for intent in project.intents} == {"f001", "f002"}
+    assert [fact.id for fact in project.facts] == ["f1", "f2"]
+    assert {task.auth_scope for task in project.tasks} == {"anonymous", "authenticated"}
+    assert {task.task_mode for task in project.tasks} == {"collection"}
+    assert {task.to[0] for task in project.tasks if task.to} == {"f1", "f2"}
     assert any("/reason_execute-" in path for _, path, _ in containers.writes)
     assert any("/explore_execute-" in path for _, path, _ in containers.writes)
 
@@ -414,9 +420,9 @@ def test_project_reason_leases_are_independent_by_task_mode(http_client: TestCli
         f"/projects/{project_id}/reason/claim",
         json={"worker": "collection-worker", "trigger": "initial", "task_mode": "collection"},
     )
-    validation = http_client.post(
+    vulnerability = http_client.post(
         f"/projects/{project_id}/reason/claim",
-        json={"worker": "validation-worker", "trigger": "stable", "task_mode": "validation"},
+        json={"worker": "vulnerability-worker", "trigger": "stable", "task_mode": "vulnerability"},
     )
     blocked = http_client.post(
         f"/projects/{project_id}/reason/claim",
@@ -429,12 +435,12 @@ def test_project_reason_leases_are_independent_by_task_mode(http_client: TestCli
     project = ProjectDetail.model_validate(http_client.get(f"/projects/{project_id}").json())
 
     assert collection.status_code == 200, collection.text
-    assert validation.status_code == 200, validation.text
+    assert vulnerability.status_code == 200, vulnerability.text
     assert blocked.status_code == 409, blocked.text
     assert release_collection.status_code == 200, release_collection.text
     assert project.project.reasons["collection"] is None
-    assert project.project.reasons["validation"] is not None
-    assert project.project.reasons["validation"].worker == "validation-worker"
+    assert project.project.reasons["vulnerability"] is not None
+    assert project.project.reasons["vulnerability"].worker == "vulnerability-worker"
 
 
 def test_mock_scheduler_collection_stable_does_not_stop_project(http_client: TestClient) -> None:
@@ -443,9 +449,9 @@ def test_mock_scheduler_collection_stable_does_not_stop_project(http_client: Tes
     loop = _loop(
         _config(
             reason=_phase(
-                "intent",
+                "task",
                 rules=[
-                    {"fact_ids_gte": 3, "open_intents_empty": True, "force": "stable"},
+                    {"fact_ids_gte": 3, "open_tasks_empty": True, "force": "stable"},
                 ],
             )
         ),
@@ -467,26 +473,30 @@ def test_mock_scheduler_collection_stable_does_not_stop_project(http_client: Tes
     assert project.project.collection_reason_rounds == 2
 
 
-def test_mock_scheduler_validation_reason_creates_validation_intents(http_client: TestClient) -> None:
+def test_mock_scheduler_vulnerability_reason_creates_vulnerability_tasks(http_client: TestClient) -> None:
     project_id = _create_project(http_client)
     seed = http_client.post(
-        f"/projects/{project_id}/intents",
+        f"/projects/{project_id}/tasks",
         json={
             "from": ["origin"],
             "description": "validate candidate issue",
-            "creator": "seed",
             "worker": "seed",
-            "task_mode": "validation",
+            "type": "vulnerability_task",
             "auth_scope": "anonymous",
         },
     )
     assert seed.status_code == 201, seed.text
     conclusion = http_client.post(
-        f"/projects/{project_id}/intents/{seed.json()['id']}/conclude",
+        f"/projects/{project_id}/tasks/{seed.json()['id']}/conclude",
         json={
             "worker": "seed",
             "description": "candidate finding fact",
-            "findings": [{"title": "candidate finding"}],
+            "evidence": "/tmp/cairn/evidence/seed.json",
+            "findings": [
+                {
+                    "description": "candidate finding: changed order id returned another record",
+                }
+            ],
         },
     )
     assert conclusion.status_code == 200, conclusion.text
@@ -494,8 +504,8 @@ def test_mock_scheduler_validation_reason_creates_validation_intents(http_client
     containers = LocalContainerManager()
     loop = _loop(
         _config(
-            reason=_phase("intent"),
-            task_types=["validation_reason"],
+            reason=_phase("task"),
+            task_types=["vulnerability_reason"],
         ),
         client,
         containers,
@@ -508,23 +518,22 @@ def test_mock_scheduler_validation_reason_creates_validation_intents(http_client
     finally:
         loop.close()
 
-    created_validation = [intent for intent in project.intents if intent.creator == "mock-worker"]
-    assert created_validation
-    assert {intent.task_mode for intent in created_validation} == {"validation"}
+    created_vulnerability = [task for task in project.tasks if task.worker is None and task.type == "vulnerability_task" and task.completion_time is None]
+    assert created_vulnerability
     assert any("/reason_execute-" in path for _, path, _ in containers.writes)
 
 
-def test_mock_scheduler_exercises_collection_validation_report_flow(http_client: TestClient) -> None:
+def test_mock_scheduler_exercises_collection_vulnerability_report_flow(http_client: TestClient) -> None:
     client = InProcessClient(http_client)
     containers = LocalContainerManager()
     loop = _loop(
         _config(
-            reason=_phase("intent"),
+            reason=_phase("task"),
             collection_reason=_phase(
-                "intent",
-                rules=[{"fact_ids_gte": 3, "open_intents_empty": True, "force": "stable"}],
+                "task",
+                rules=[{"fact_ids_gte": 3, "open_tasks_empty": True, "force": "stable"}],
             ),
-            validation_reason=_phase("intent"),
+            vulnerability_reason=_phase("task"),
         ),
         client,
         containers,
@@ -534,7 +543,7 @@ def test_mock_scheduler_exercises_collection_validation_report_flow(http_client:
     try:
         _dispatch_and_wait(loop)
         project = client.get_project(project_id)
-        baseline_intents = [intent for intent in project.intents if intent.creator == "mock-worker"]
+        baseline_intents = [task for task in project.tasks if task.type == "collection_task"]
         assert {intent.task_mode for intent in baseline_intents} == {"collection"}
         assert {intent.auth_scope for intent in baseline_intents} == {"anonymous", "authenticated"}
         assert {intent.from_[0] for intent in baseline_intents} == {"origin"}
@@ -544,23 +553,20 @@ def test_mock_scheduler_exercises_collection_validation_report_flow(http_client:
         project = client.get_project(project_id)
         collection_facts = [fact for fact in project.facts if fact.id != "origin"]
         assert len(collection_facts) == 2
-        assert {fact.fact_type for fact in collection_facts} == {"feature_surface"}
-        assert all(fact.details.get("features") for fact in collection_facts)
-        assert all(fact.details.get("apis") for fact in collection_facts)
-        assert all(fact.details.get("auth") for fact in collection_facts)
+        assert {fact.type for fact in collection_facts} == {"collection_fact"}
+        assert all(fact.evidence for fact in collection_facts)
         assert project.findings == []
 
         _dispatch_and_wait(loop)
 
         collection_fact_id = collection_facts[0].id
         seed = http_client.post(
-            f"/projects/{project_id}/intents",
+            f"/projects/{project_id}/tasks",
             json={
                 "from": [collection_fact_id],
                 "description": "validate mock collection surface",
-                "creator": "seed",
                 "worker": None,
-                "task_mode": "validation",
+                "type": "vulnerability_task",
                 "auth_scope": "anonymous",
             },
         )
@@ -570,14 +576,12 @@ def test_mock_scheduler_exercises_collection_validation_report_flow(http_client:
         project = client.get_project(project_id)
         assert len(project.findings) == 1
         finding = project.findings[0]
-        assert finding.next_action == "report"
-        assert finding.report_status == "queued"
-        assert finding.report_intent_id is not None
+        assert finding.report is None
 
         _dispatch_and_wait(loop)
         project = client.get_project(project_id)
         finding = project.findings[0]
-        assert finding.report_status == "drafted"
+        assert finding.report == f"/home/kali/reports/{finding.id}.md"
 
         _dispatch_and_wait(loop)
         project = client.get_project(project_id)
@@ -585,9 +589,9 @@ def test_mock_scheduler_exercises_collection_validation_report_flow(http_client:
         loop.close()
 
     validation_intents = [
-        intent
-        for intent in project.intents
-        if intent.creator == "mock-worker" and intent.task_mode == "validation" and intent.to is None
+        task
+        for task in project.tasks
+        if task.type == "vulnerability_task" and task.completion_time is None
     ]
     assert validation_intents
     assert any(collection_fact_id in intent.from_ for intent in validation_intents)

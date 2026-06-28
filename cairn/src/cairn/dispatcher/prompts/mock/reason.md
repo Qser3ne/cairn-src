@@ -3,9 +3,9 @@
   "task_mode": "{task_mode}",
   "has_accounts": {has_accounts},
   "fact_ids": {fact_ids},
-  "open_intents": {open_intents},
-  "max_intents": {max_intents},
-  "required_intent_fields": ["from", "description", "task_mode"],
+  "open_tasks": {open_tasks},
+  "max_tasks": {max_tasks},
+  "required_task_fields": ["from", "description"],
   "collection_baseline_scopes": ["anonymous", "authenticated"],
-  "validation_sources": "prefer non-origin collection facts"
+  "vulnerability_sources": "prefer non-origin collection facts"
 }
