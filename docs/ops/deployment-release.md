@@ -33,13 +33,13 @@ uv run --project cairn cairn dispatch --config dispatch.yaml
 
 ## 本机生产部署
 
-部署脚本：
+本机部署入口是项目级 Codex skill：
 
 ```text
-scripts/deploy.sh
+$deploy
 ```
 
-默认生产目录由 `scripts/deploy.sh` 内的 `PROD_DIR` 指定。公开文档使用占位路径表示：
+默认生产目录由 `.agents/skills/deploy/scripts/deploy.sh` 内的 `PROD_DIR` 指定。`.agents/` 是本机私有目录，不进入 Git。公开文档使用占位路径表示：
 
 ```text
 /path/to/carin-production
@@ -47,32 +47,38 @@ scripts/deploy.sh
 
 执行：
 
-```bash
-./scripts/deploy.sh
+```text
+在 Codex 中显式调用 $deploy
 ```
 
-脚本执行顺序：
+skill 执行顺序：
 
 1. 校验开发目录和生产目录存在。
 2. 校验本机可用 `rsync`。
 3. 使用 `rsync -a --delete` 将开发目录直接覆盖到生产目录。
+4. 同步后只读校验生产 `dispatch.yaml` 和 `datas/cairn/cairn.db` 是否符合当前版本结构。
 
 同步排除项：
 
+- `scripts/`
 - `.git/`
 - `.github/`
 - `.agents/`
 - `.superpowers/`
 - `.worktrees/`
 - `.pytest_cache/`
+- `.gitignore`
+- `dispatch.yaml`
+- `datas/`
 - `datas.backup/`
 
-脚本会覆盖生产 `datas/`，不会运行测试，不使用 Git 同步，不调用 `./start.sh` 重建/重启服务，也不执行 HTTP 健康检查。
+skill 不会运行测试，不使用 Git 同步，不调用 `./start.sh` 重建/重启服务，也不执行 HTTP 健康检查。
 
 保护项：
 
-- 脚本不会自动 `git add`、`git commit`、`git push`、`git pull` 或 `git reset --hard`。
-- 脚本不会覆盖生产本地 `.git/`、`.github/`、`.agents/`、`.superpowers/`、`.worktrees/`、`.pytest_cache/` 和 `datas.backup/`。
+- skill 不会自动 `git add`、`git commit`、`git push`、`git pull` 或 `git reset --hard`。
+- skill 不会覆盖生产本地 `scripts/`、`.git/`、`.github/`、`.agents/`、`.superpowers/`、`.worktrees/`、`.pytest_cache/`、`dispatch.yaml`、`datas/` 和 `datas.backup/`。
+- 同步后校验只检查 `dispatch.yaml` 与 SQLite schema，不打印真实配置值、API key、Cookie 或项目数据。
 
 ## Worker 镜像发布
 

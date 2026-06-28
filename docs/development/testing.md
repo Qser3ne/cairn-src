@@ -46,7 +46,6 @@ GitHub Actions：
 | `test_runtime_logic.py` | runtime、container、heartbeat、cancellation。 |
 | `test_container_archives.py` | 容器归档/清理相关逻辑。 |
 | `test_container_assets.py` | Worker Dockerfile 构建资产和 `container/AGENTS.md` 占位符安全。 |
-| `test_deploy_script.py` | 本机部署脚本的直接覆盖和排除项职责边界。 |
 | `test_protocol_and_startup.py` | Server protocol client 与 startup healthcheck。 |
 | `test_prompt_contracts.py` | 默认 prompt 占位符、中文软约束、任务契约。 |
 | `test_collection_prompt_fixtures.py` | Collection prompt fixture 的 YAML 形态和脱敏规则。 |
